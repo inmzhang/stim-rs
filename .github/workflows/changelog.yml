@@ -1,0 +1,42 @@
+name: Changelog
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --verbose --output CHANGELOG.md
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.md
+      - name: Commit changelog on workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add CHANGELOG.md
+          git diff --cached --quiet && exit 0
+          git commit -m "Update CHANGELOG.md"
+          git push

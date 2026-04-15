@@ -1,0 +1,37 @@
+[package]
+name = "stim-cxx"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = true
+description = "Low-level C++ bridge crate for the safe stim Rust bindings"
+readme = "README.md"
+documentation = "https://docs.rs/stim-cxx"
+links = "stimrs-cxx"
+keywords = ["quantum", "stim", "ffi", "bindings", "cxx"]
+categories = ["external-ffi-bindings", "simulation", "science"]
+include = [
+    "Cargo.toml",
+    "README.md",
+    "build.rs",
+    "include/**",
+    "src/**",
+    "vendor/stim/LICENSE",
+    "vendor/stim/file_lists/**",
+    "vendor/stim/src/**",
+]
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+cxx = "1.0"
+
+[build-dependencies]
+cxx-build = "1.0"
+
+[dev-dependencies]

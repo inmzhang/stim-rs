@@ -1,0 +1,22 @@
+[package]
+name = "stim"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = true
+description = "Safe Rust bindings for Stim, a high-performance stabilizer circuit simulator and analyzer"
+readme = "README.md"
+documentation = "https://docs.rs/stim"
+keywords = ["quantum", "stim", "stabilizer", "qec", "bindings"]
+categories = ["api-bindings", "simulation", "science"]
+include = ["src/**", "Cargo.toml", "README.md"]
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
+
+[dependencies]
+cxx = "1.0"
+ndarray = "0.17.2"
+stim-cxx = { path = "../stim-cxx", version = "0.1.0" }

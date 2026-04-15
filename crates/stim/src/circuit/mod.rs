@@ -1,0 +1,20 @@
+mod circuit_error_location;
+mod circuit_error_location_stack_frame;
+mod circuit_insert_operation;
+mod circuit_instruction;
+mod circuit_item;
+mod circuit_repeat_block;
+mod circuit_targets_inside_instruction;
+mod core;
+mod detecting_region_filter;
+pub(crate) mod support;
+
+pub use circuit_error_location::CircuitErrorLocation;
+pub use circuit_error_location_stack_frame::CircuitErrorLocationStackFrame;
+pub use circuit_insert_operation::CircuitInsertOperation;
+pub use circuit_instruction::CircuitInstruction;
+pub use circuit_item::CircuitItem;
+pub use circuit_repeat_block::CircuitRepeatBlock;
+pub use circuit_targets_inside_instruction::CircuitTargetsInsideInstruction;
+pub use core::Circuit;
+pub use detecting_region_filter::DetectingRegionFilter;

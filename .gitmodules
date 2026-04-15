@@ -1,0 +1,3 @@
+[submodule "crates/stim-cxx/vendor/stim"]
+	path = crates/stim-cxx/vendor/stim
+	url = git@github.com:quantumlib/Stim.git

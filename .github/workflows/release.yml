@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Workspace tests
+        run: cargo test --workspace
+      - name: Doc tests
+        run: cargo test --doc -p stim
+      - name: Python verification
+        run: python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
+      - name: Verify stim-cxx package layout
+        run: cargo package -p stim-cxx --allow-dirty --locked
+      - name: Verify stim package layout
+        run: cargo package -p stim --allow-dirty --locked --no-verify --list > /tmp/stim-package-list.txt
+
+  publish:
+    if: github.event_name == 'push'
+    needs: release-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check published crate versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import tomllib
+          import urllib.request
+          from pathlib import Path
+
+          def crate_version(path: str) -> str:
+              return tomllib.loads(Path(path).read_text())["package"]["version"]
+
+          def exists(crate: str, version: str) -> bool:
+              url = f"https://crates.io/api/v1/crates/{crate}"
+              with urllib.request.urlopen(url, timeout=20) as response:
+                  payload = response.read().decode("utf-8")
+              return f'"max_version":"{version}"' in payload or f'"num":"{version}"' in payload
+
+          stim_cxx_version = crate_version("crates/stim-cxx/Cargo.toml")
+          stim_version = crate_version("crates/stim/Cargo.toml")
+          with open(Path.cwd() / "versions.env", "w", encoding="utf-8") as f:
+              f.write(f"STIM_CXX_VERSION={stim_cxx_version}\n")
+              f.write(f"STIM_VERSION={stim_version}\n")
+              f.write(f"STIM_CXX_EXISTS={'true' if exists('stim-cxx', stim_cxx_version) else 'false'}\n")
+              f.write(f"STIM_EXISTS={'true' if exists('stim-rs', stim_version) else 'false'}\n")
+          PY
+          cat versions.env >> "$GITHUB_ENV"
+      - name: Publish stim-cxx
+        if: env.STIM_CXX_EXISTS != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p stim-cxx --allow-dirty --locked
+      - name: Wait for stim-cxx to appear in crates.io index
+        if: env.STIM_CXX_EXISTS != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'INNER'
+          import time
+          import urllib.request
+
+          version = "${STIM_CXX_VERSION}"
+          url = 'https://crates.io/api/v1/crates/stim-cxx'
+          for _ in range(20):
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as response:
+                      payload = response.read().decode('utf-8')
+                  if f'"max_version":"{version}"' in payload or f'"num":"{version}"' in payload:
+                      raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(15)
+          raise SystemExit('stim-cxx did not appear in the crates.io API in time')
+          INNER
+      - name: Publish stim
+        if: env.STIM_EXISTS != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p stim --allow-dirty --locked
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          generate_release_notes: true

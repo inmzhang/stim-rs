@@ -1,0 +1,632 @@
+use std::fmt::{self, Display, Formatter};
+use std::str::FromStr;
+
+use crate::{Result, StimError};
+
+const MAX_OBS: u64 = 0xFFFF_FFFF;
+const MAX_DET: u64 = (1u64 << 62) - 1;
+const OBSERVABLE_BIT: u64 = 1u64 << 63;
+const SEPARATOR_SYGIL: u64 = u64::MAX;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DemTarget {
+    data: u64,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DemTargetWithCoords {
+    dem_target: DemTarget,
+    coords: Vec<f64>,
+}
+
+impl DemTarget {
+    #[must_use]
+    pub fn new(value: impl Into<Self>) -> Self {
+        value.into()
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        if text == "^" {
+            return Ok(Self::separator());
+        }
+        if let Some(rest) = text.strip_prefix('D') {
+            let id = parse_u64(rest, "relative detector id")?;
+            return Self::relative_detector_id(id);
+        }
+        if let Some(rest) = text.strip_prefix('L') {
+            let id = parse_u64(rest, "logical observable id")?;
+            return Self::logical_observable_id(id);
+        }
+        Err(StimError::new(format!(
+            "failed to parse as a stim.DemTarget: '{text}'"
+        )))
+    }
+
+    pub fn logical_observable_id(id: u64) -> Result<Self> {
+        if id > MAX_OBS {
+            return Err(StimError::new("id > 0xFFFFFFFF"));
+        }
+        Ok(Self {
+            data: OBSERVABLE_BIT | id,
+        })
+    }
+
+    pub fn relative_detector_id(id: u64) -> Result<Self> {
+        if id > MAX_DET {
+            return Err(StimError::new("Relative detector id too large."));
+        }
+        Ok(Self { data: id })
+    }
+
+    #[must_use]
+    pub const fn separator() -> Self {
+        Self {
+            data: SEPARATOR_SYGIL,
+        }
+    }
+
+    #[must_use]
+    pub fn is_logical_observable_id(self) -> bool {
+        self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) != 0
+    }
+
+    #[must_use]
+    pub fn is_separator(self) -> bool {
+        self.data == SEPARATOR_SYGIL
+    }
+
+    #[must_use]
+    pub fn is_relative_detector_id(self) -> bool {
+        self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) == 0
+    }
+
+    #[must_use]
+    pub fn raw_id(self) -> u64 {
+        self.data & !OBSERVABLE_BIT
+    }
+
+    pub fn val(self) -> Result<u64> {
+        if self.is_separator() {
+            return Err(StimError::new("Separator doesn't have an integer value."));
+        }
+        Ok(self.raw_id())
+    }
+
+    pub fn shift_if_detector_id(&mut self, offset: i64) -> Result<()> {
+        if self.is_relative_detector_id() {
+            let shifted = (self.data as i64)
+                .checked_add(offset)
+                .ok_or_else(|| StimError::new("detector id shift overflowed"))?;
+            if shifted < 0 {
+                return Err(StimError::new(
+                    "detector id shift produced a negative value",
+                ));
+            }
+            *self = Self::relative_detector_id(shifted as u64)?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for DemTarget {
+    type Err = StimError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::from_text(s)
+    }
+}
+
+impl Display for DemTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if self.is_separator() {
+            f.write_str("^")
+        } else if self.is_relative_detector_id() {
+            write!(f, "D{}", self.raw_id())
+        } else {
+            write!(f, "L{}", self.raw_id())
+        }
+    }
+}
+
+impl fmt::Debug for DemTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if self.is_separator() {
+            f.write_str("stim::target_separator()")
+        } else if self.is_relative_detector_id() {
+            write!(f, "stim::DemTarget('D{}')", self.raw_id())
+        } else {
+            write!(f, "stim::DemTarget('L{}')", self.raw_id())
+        }
+    }
+}
+
+impl DemTargetWithCoords {
+    #[must_use]
+    pub fn new(dem_target: DemTarget, coords: Vec<f64>) -> Self {
+        Self { dem_target, coords }
+    }
+
+    #[must_use]
+    pub fn dem_target(&self) -> DemTarget {
+        self.dem_target
+    }
+
+    #[must_use]
+    pub fn coords(&self) -> &[f64] {
+        &self.coords
+    }
+}
+
+impl Eq for DemTargetWithCoords {}
+
+impl PartialOrd for DemTargetWithCoords {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DemTargetWithCoords {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.dem_target
+            .cmp(&other.dem_target)
+            .then_with(|| compare_coord_slices(&self.coords, &other.coords))
+    }
+}
+
+impl std::hash::Hash for DemTargetWithCoords {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.dem_target.hash(state);
+        for coord in &self.coords {
+            coord.to_bits().hash(state);
+        }
+    }
+}
+
+impl Display for DemTargetWithCoords {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.dem_target)?;
+        if !self.coords.is_empty() {
+            f.write_str("[coords ")?;
+            for (index, coord) in self.coords.iter().enumerate() {
+                if index > 0 {
+                    f.write_str(",")?;
+                }
+                write!(f, "{coord}")?;
+            }
+            f.write_str("]")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for DemTargetWithCoords {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("stim::DemTargetWithCoords")
+            .field("dem_target", &self.dem_target)
+            .field("coords", &self.coords)
+            .finish()
+    }
+}
+
+pub fn target_relative_detector_id(index: u64) -> Result<DemTarget> {
+    DemTarget::relative_detector_id(index)
+}
+
+pub fn target_logical_observable_id(index: u64) -> Result<DemTarget> {
+    DemTarget::logical_observable_id(index)
+}
+
+#[must_use]
+pub fn target_separator() -> DemTarget {
+    DemTarget::separator()
+}
+
+fn parse_u64(text: &str, kind: &str) -> Result<u64> {
+    text.parse::<u64>()
+        .map_err(|_| StimError::new(format!("failed to parse {kind}: {text:?}")))
+}
+
+fn compare_coord_slices(left: &[f64], right: &[f64]) -> std::cmp::Ordering {
+    for (l, r) in left.iter().zip(right.iter()) {
+        let cmp = l.to_bits().cmp(&r.to_bits());
+        if cmp != std::cmp::Ordering::Equal {
+            return cmp;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeSet, HashSet};
+    use std::str::FromStr;
+
+    use super::{
+        DemTarget, DemTargetWithCoords, target_logical_observable_id, target_relative_detector_id,
+        target_separator,
+    };
+
+    #[test]
+    fn dem_target_supports_equality_order_hash_and_representation() {
+        let det_three = target_relative_detector_id(3).expect("detector target should build");
+        let same_det_three = DemTarget::new(det_three);
+        let det_four = target_relative_detector_id(4).expect("detector target should build");
+        let obs_three = target_logical_observable_id(3).expect("observable target should build");
+        let separator = target_separator();
+
+        assert_eq!(det_three, same_det_three);
+        assert_ne!(det_three, det_four);
+        assert_ne!(det_three, obs_three);
+        assert_ne!(obs_three, separator);
+
+        let ordered = [separator, obs_three, det_four, det_three, same_det_three]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(ordered, vec![det_three, det_four, obs_three, separator]);
+
+        let hashed = [det_three, det_four, same_det_three, obs_three, separator]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        assert_eq!(hashed.len(), 4);
+        assert!(hashed.contains(&det_three));
+        assert!(hashed.contains(&det_four));
+        assert!(hashed.contains(&obs_three));
+        assert!(hashed.contains(&separator));
+
+        assert_eq!(det_three.to_string(), "D3");
+        assert_eq!(format!("{det_three:?}"), "stim::DemTarget('D3')");
+        assert_eq!(obs_three.to_string(), "L3");
+        assert_eq!(format!("{obs_three:?}"), "stim::DemTarget('L3')");
+        assert_eq!(separator.to_string(), "^");
+        assert_eq!(format!("{separator:?}"), "stim::target_separator()");
+    }
+
+    #[test]
+    fn dem_target_exposes_detector_observable_and_separator_classification() {
+        let detector = target_relative_detector_id(8).expect("detector target should build");
+        let observable =
+            target_logical_observable_id(2).expect("logical observable target should build");
+        let separator = target_separator();
+
+        assert!(detector.is_relative_detector_id());
+        assert!(!detector.is_logical_observable_id());
+        assert!(!detector.is_separator());
+        assert_eq!(detector.raw_id(), 8);
+        assert_eq!(
+            detector.val().expect("detector target should have a value"),
+            8
+        );
+
+        assert!(observable.is_logical_observable_id());
+        assert!(!observable.is_relative_detector_id());
+        assert!(!observable.is_separator());
+        assert_eq!(observable.raw_id(), 2);
+        assert_eq!(
+            observable
+                .val()
+                .expect("logical observable target should have a value"),
+            2
+        );
+
+        assert!(separator.is_separator());
+        assert!(!separator.is_relative_detector_id());
+        assert!(!separator.is_logical_observable_id());
+        assert_eq!(separator.raw_id(), u64::MAX >> 1);
+
+        let error = separator
+            .val()
+            .expect_err("separator should not expose an integer value");
+        assert!(
+            error
+                .message()
+                .contains("Separator doesn't have an integer value")
+        );
+    }
+
+    #[test]
+    fn dem_target_parses_representative_strings() {
+        assert_eq!(
+            DemTarget::from_str("D7").expect("detector target should parse"),
+            target_relative_detector_id(7).expect("detector target should build")
+        );
+        assert_eq!(
+            DemTarget::from_str("L5").expect("logical observable target should parse"),
+            target_logical_observable_id(5).expect("logical observable target should build")
+        );
+        assert_eq!(
+            DemTarget::from_str("^").expect("separator target should parse"),
+            target_separator()
+        );
+
+        let error = DemTarget::from_str("rec[-1]").expect_err("invalid DEM target should fail");
+        assert!(
+            error
+                .message()
+                .contains("failed to parse as a stim.DemTarget: 'rec[-1]'")
+        );
+    }
+
+    #[test]
+    fn dem_target_with_coords_constructor_exposes_target_and_coords() {
+        let detector = target_relative_detector_id(5).expect("detector target should build");
+        let target_with_coords = DemTargetWithCoords::new(detector, vec![1.0, -2.5, 3.25]);
+
+        assert_eq!(target_with_coords.dem_target(), detector);
+        assert_eq!(target_with_coords.coords(), &[1.0, -2.5, 3.25]);
+    }
+
+    #[test]
+    fn dem_target_with_coords_supports_equality_order_and_hash() {
+        let detector_one = target_relative_detector_id(1).expect("detector target should build");
+        let detector_two = target_relative_detector_id(2).expect("detector target should build");
+        let logical = target_logical_observable_id(0).expect("logical target should build");
+
+        let first = DemTargetWithCoords::new(detector_one, vec![1.0]);
+        let same_as_first = DemTargetWithCoords::new(detector_one, vec![1.0]);
+        let second = DemTargetWithCoords::new(detector_one, vec![2.0]);
+        let third = DemTargetWithCoords::new(detector_two, vec![]);
+        let fourth = DemTargetWithCoords::new(logical, vec![]);
+
+        assert_eq!(first, same_as_first);
+        assert_ne!(first, second);
+        assert_ne!(first, third);
+
+        let ordered = [
+            fourth.clone(),
+            second.clone(),
+            third.clone(),
+            same_as_first.clone(),
+            first.clone(),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+        assert_eq!(ordered, vec![first.clone(), second, third, fourth.clone()]);
+
+        let hashed = [first.clone(), same_as_first, fourth.clone()]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        assert_eq!(hashed.len(), 2);
+        assert!(hashed.contains(&first));
+        assert!(hashed.contains(&fourth));
+    }
+
+    #[test]
+    fn dem_target_with_coords_display_and_debug_are_informative() {
+        let detector = DemTargetWithCoords::new(
+            target_relative_detector_id(5).expect("detector target should build"),
+            vec![1.0, -2.5],
+        );
+        let logical = DemTargetWithCoords::new(
+            target_logical_observable_id(2).expect("logical target should build"),
+            vec![],
+        );
+
+        assert_eq!(detector.to_string(), "D5[coords 1,-2.5]");
+        assert_eq!(
+            format!("{detector:?}"),
+            "stim::DemTargetWithCoords { dem_target: stim::DemTarget('D5'), coords: [1.0, -2.5] }"
+        );
+
+        assert_eq!(logical.to_string(), "L2");
+        assert_eq!(
+            format!("{logical:?}"),
+            "stim::DemTargetWithCoords { dem_target: stim::DemTarget('L2'), coords: [] }"
+        );
+    }
+
+    #[test]
+    fn dem_target_helpers_build_expected_targets_and_classify_them() {
+        let detector = target_relative_detector_id(12).expect("detector helper should succeed");
+        let observable =
+            target_logical_observable_id(34).expect("logical observable helper should succeed");
+        let separator = target_separator();
+
+        assert_eq!(detector, DemTarget::relative_detector_id(12).unwrap());
+        assert!(detector.is_relative_detector_id());
+        assert!(!detector.is_logical_observable_id());
+        assert!(!detector.is_separator());
+        assert_eq!(detector.raw_id(), 12);
+        assert_eq!(detector.val().unwrap(), 12);
+        assert_eq!(detector.to_string(), "D12");
+        assert_eq!(format!("{detector:?}"), "stim::DemTarget('D12')");
+
+        assert_eq!(observable, DemTarget::logical_observable_id(34).unwrap());
+        assert!(observable.is_logical_observable_id());
+        assert!(!observable.is_relative_detector_id());
+        assert!(!observable.is_separator());
+        assert_eq!(observable.raw_id(), 34);
+        assert_eq!(observable.val().unwrap(), 34);
+        assert_eq!(observable.to_string(), "L34");
+        assert_eq!(format!("{observable:?}"), "stim::DemTarget('L34')");
+
+        assert!(separator.is_separator());
+        assert!(!separator.is_relative_detector_id());
+        assert!(!separator.is_logical_observable_id());
+        assert_eq!(separator.to_string(), "^");
+        assert_eq!(format!("{separator:?}"), "stim::target_separator()");
+    }
+
+    #[test]
+    fn dem_target_helpers_support_maximum_constructor_bounds() {
+        let max_detector = target_relative_detector_id((1u64 << 62) - 1)
+            .expect("maximum relative detector id should succeed");
+        let max_observable = target_logical_observable_id(0xFFFF_FFFF)
+            .expect("maximum logical observable id should succeed");
+
+        assert_eq!(max_detector.val().unwrap(), (1u64 << 62) - 1);
+        assert_eq!(max_detector.to_string(), format!("D{}", (1u64 << 62) - 1));
+
+        assert_eq!(max_observable.val().unwrap(), 0xFFFF_FFFF);
+        assert_eq!(max_observable.to_string(), "L4294967295");
+    }
+
+    #[test]
+    fn dem_target_helpers_reject_out_of_range_constructor_inputs() {
+        let detector_error = target_relative_detector_id(1u64 << 62)
+            .expect_err("out-of-range detector id should fail");
+        let observable_error = target_logical_observable_id(0x1_0000_0000)
+            .expect_err("out-of-range observable id should fail");
+
+        assert_eq!(
+            detector_error.to_string(),
+            "Relative detector id too large."
+        );
+        assert_eq!(observable_error.to_string(), "id > 0xFFFFFFFF");
+    }
+
+    #[test]
+    fn target_separator_rejects_integer_value_access() {
+        let separator = target_separator();
+
+        let error = separator
+            .val()
+            .expect_err("separator should not expose an integer value");
+
+        assert_eq!(
+            error.to_string(),
+            "Separator doesn't have an integer value."
+        );
+    }
+
+    #[test]
+    fn dem_target_from_str_matches_from_text_for_representative_cases() {
+        for text in ["D0", "D17", "L0", "L99", "^"] {
+            assert_eq!(
+                DemTarget::from_str(text).expect("FromStr should parse representative target"),
+                DemTarget::from_text(text).expect("from_text should parse representative target")
+            );
+        }
+    }
+
+    #[test]
+    fn dem_target_rejects_malformed_inputs() {
+        for text in ["", "5", "d3", "l2", "^^", "rec[-1]", "*"] {
+            let error = DemTarget::from_text(text).expect_err("malformed target should fail");
+            assert!(
+                error
+                    .message()
+                    .contains(&format!("failed to parse as a stim.DemTarget: '{text}'")),
+                "unexpected error for {text:?}: {}",
+                error.message()
+            );
+        }
+
+        for (text, expected_fragment) in [
+            ("D", "failed to parse relative detector id"),
+            ("D-1", "failed to parse relative detector id"),
+            ("L", "failed to parse logical observable id"),
+            ("L-1", "failed to parse logical observable id"),
+            ("D 1", "failed to parse relative detector id"),
+            ("L 1", "failed to parse logical observable id"),
+        ] {
+            let error =
+                DemTarget::from_str(text).expect_err("malformed prefixed target should fail");
+            assert!(
+                error.message().contains(expected_fragment),
+                "unexpected error for {text:?}: {}",
+                error.message()
+            );
+        }
+    }
+
+    #[test]
+    fn dem_target_rejects_ids_outside_supported_bounds() {
+        let max_detector = (1u64 << 62) - 1;
+        let max_observable = 0xFFFF_FFFFu64;
+
+        assert_eq!(
+            DemTarget::from_text(&format!("D{max_detector}"))
+                .expect("largest supported detector id should parse"),
+            target_relative_detector_id(max_detector).expect("helper should build")
+        );
+        assert_eq!(
+            DemTarget::from_text(&format!("L{max_observable}"))
+                .expect("largest supported observable id should parse"),
+            target_logical_observable_id(max_observable).expect("helper should build")
+        );
+
+        let detector_error = DemTarget::from_text(&format!("D{}", max_detector + 1))
+            .expect_err("too-large detector id should fail");
+        assert!(
+            detector_error
+                .message()
+                .contains("Relative detector id too large."),
+            "unexpected detector error: {}",
+            detector_error.message()
+        );
+
+        let observable_error = DemTarget::from_text(&format!("L{}", max_observable + 1))
+            .expect_err("too-large observable id should fail");
+        assert!(
+            observable_error.message().contains("id > 0xFFFFFFFF"),
+            "unexpected observable error: {}",
+            observable_error.message()
+        );
+    }
+
+    #[test]
+    fn dem_target_shift_if_detector_id_offsets_relative_detector_targets() {
+        let mut target = target_relative_detector_id(4).expect("detector target should build");
+
+        target
+            .shift_if_detector_id(9)
+            .expect("positive shift should succeed");
+        assert_eq!(target, target_relative_detector_id(13).unwrap());
+        assert!(target.is_relative_detector_id());
+        assert!(!target.is_logical_observable_id());
+        assert!(!target.is_separator());
+        assert_eq!(target.val().unwrap(), 13);
+        assert_eq!(target.to_string(), "D13");
+
+        target
+            .shift_if_detector_id(-5)
+            .expect("in-range negative shift should succeed");
+        assert_eq!(target, target_relative_detector_id(8).unwrap());
+        assert_eq!(target.val().unwrap(), 8);
+        assert_eq!(target.to_string(), "D8");
+    }
+
+    #[test]
+    fn dem_target_shift_if_detector_id_is_a_no_op_for_observables_and_separators() {
+        let observable = target_logical_observable_id(7).expect("observable target should build");
+        let separator = target_separator();
+
+        let mut shifted_observable = observable;
+        shifted_observable
+            .shift_if_detector_id(i64::MIN)
+            .expect("observable targets should ignore detector shifts");
+        assert_eq!(shifted_observable, observable);
+        assert!(shifted_observable.is_logical_observable_id());
+        assert_eq!(shifted_observable.val().unwrap(), 7);
+        assert_eq!(shifted_observable.to_string(), "L7");
+
+        let mut shifted_separator = separator;
+        shifted_separator
+            .shift_if_detector_id(i64::MAX)
+            .expect("separator targets should ignore detector shifts");
+        assert_eq!(shifted_separator, separator);
+        assert!(shifted_separator.is_separator());
+        assert_eq!(shifted_separator.to_string(), "^");
+    }
+
+    #[test]
+    fn dem_target_shift_if_detector_id_rejects_negative_results_without_mutating_target() {
+        let mut target = target_relative_detector_id(2).expect("detector target should build");
+
+        let error = target
+            .shift_if_detector_id(-3)
+            .expect_err("shifts below zero should fail");
+
+        assert!(
+            error
+                .message()
+                .contains("detector id shift produced a negative value")
+        );
+        assert_eq!(target, target_relative_detector_id(2).unwrap());
+        assert_eq!(target.to_string(), "D2");
+    }
+}
