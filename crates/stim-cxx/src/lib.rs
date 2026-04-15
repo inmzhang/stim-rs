@@ -73,10 +73,6 @@ pub fn all_gate_names() -> Vec<String> {
     ffi::all_gate_names()
 }
 
-pub fn main(command_line_args: Vec<String>) -> i32 {
-    ffi::stim_main(command_line_args)
-}
-
 pub fn canonicalize_flow_text(text: &str) -> Result<String, cxx::Exception> {
     ffi::canonicalize_flow_text(text)
 }
@@ -2233,7 +2229,6 @@ mod ffi {
             num_observables: u64,
         ) -> Result<()>;
         fn all_gate_names() -> Vec<String>;
-        fn stim_main(command_line_args: Vec<String>) -> i32;
         fn canonicalize_flow_text(text: &str) -> Result<String>;
         fn multiply_flow_texts(left: &str, right: &str) -> Result<String>;
 

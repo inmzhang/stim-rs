@@ -3,13 +3,33 @@ use std::str::FromStr;
 
 use crate::{DemTarget, DetectorErrorModel, Result, StimError};
 
+/// A target used inside a DEM instruction.
+///
+/// This is either a [`DemTarget`] (a detector, observable, or separator) or a
+/// raw integer offset used by instructions like `shift_detectors`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::{DemInstructionTarget, DemTarget};
+///
+/// let det = stim::target_relative_detector_id(3).expect("valid id");
+/// let target = DemInstructionTarget::from(det);
+/// assert!(!target.is_separator());
+///
+/// let offset = DemInstructionTarget::from(42u64);
+/// assert!(!offset.is_separator());
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DemInstructionTarget {
+    /// A detector, observable, or separator target.
     DemTarget(DemTarget),
+    /// A raw integer offset, used by `shift_detectors` and similar instructions.
     RelativeOffset(u64),
 }
 
 impl DemInstructionTarget {
+    /// Returns `true` if this target is a [`DemTarget`] separator (`^`).
     #[must_use]
     pub fn is_separator(self) -> bool {
         matches!(self, Self::DemTarget(target) if target.is_separator())
@@ -58,6 +78,27 @@ impl fmt::Debug for DemInstructionTarget {
     }
 }
 
+/// An instruction from a detector error model.
+///
+/// A `DemInstruction` has four components:
+/// - A **type** string identifying the instruction kind (e.g. `"error"`,
+///   `"detector"`, `"logical_observable"`, `"shift_detectors"`).
+/// - An optional **tag** (the `[...]` annotation after the type name).
+/// - A list of floating-point **arguments** (the `(...)` parenthesized values).
+/// - A list of **targets** ([`DemInstructionTarget`] values).
+///
+/// Instructions can be constructed programmatically via [`new`](Self::new) or
+/// parsed from DEM text via [`from_dem_text`](Self::from_dem_text) /
+/// [`str::parse`].
+///
+/// # Examples
+///
+/// ```
+/// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid DEM line");
+/// assert_eq!(inst.r#type(), "error");
+/// assert_eq!(inst.args_copy(), vec![0.125]);
+/// assert_eq!(inst.targets_copy().len(), 2);
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct DemInstruction {
     instruction_type: String,
@@ -67,6 +108,30 @@ pub struct DemInstruction {
 }
 
 impl DemInstruction {
+    /// Constructs a new DEM instruction from its components.
+    ///
+    /// The instruction is validated against the Stim DEM parser after
+    /// construction; invalid combinations will return an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `instruction_type` is empty or the assembled
+    /// instruction text is not valid DEM.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst = stim::DemInstruction::new(
+    ///     "error",
+    ///     [0.125],
+    ///     [
+    ///         stim::target_relative_detector_id(5).expect("valid id"),
+    ///         stim::target_logical_observable_id(2).expect("valid id"),
+    ///     ],
+    ///     "",
+    /// ).expect("valid instruction");
+    /// assert_eq!(inst.to_string(), "error(0.125) D5 L2");
+    /// ```
     pub fn new(
         instruction_type: impl Into<String>,
         args: impl IntoIterator<Item = f64>,
@@ -83,6 +148,24 @@ impl DemInstruction {
         Ok(instruction)
     }
 
+    /// Parses a single DEM instruction from its textual representation.
+    ///
+    /// The text must contain exactly one DEM instruction (not a repeat block,
+    /// not multiple lines). Comments are stripped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the text is empty, contains a repeat block, or
+    /// contains more than one instruction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst = stim::DemInstruction::from_dem_text("error(0.125) D5 L6 ^ D4  # comment")
+    ///     .expect("valid DEM text");
+    /// assert_eq!(inst.r#type(), "error");
+    /// assert_eq!(inst.to_string(), "error(0.125) D5 L6 ^ D4");
+    /// ```
     pub fn from_dem_text(text: &str) -> Result<Self> {
         let normalized = DetectorErrorModel::from_str(text)?.to_string();
         if normalized.is_empty() {
@@ -107,26 +190,61 @@ impl DemInstruction {
         Self::new(instruction_type, args, targets, tag)
     }
 
+    /// Returns the instruction type name (e.g. `"error"`, `"detector"`).
     #[must_use]
     pub fn r#type(&self) -> &str {
         &self.instruction_type
     }
 
+    /// Returns the instruction's tag, or an empty string if untagged.
+    ///
+    /// Tags are the `[...]` annotation appearing after the instruction type
+    /// name, e.g. `error[my-tag](0.125) D0`.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
+    /// Returns a copy of the instruction's parenthesized arguments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst: stim::DemInstruction = "error(0.125) D0".parse().expect("valid");
+    /// assert_eq!(inst.args_copy(), vec![0.125]);
+    /// ```
     #[must_use]
     pub fn args_copy(&self) -> Vec<f64> {
         self.args.clone()
     }
 
+    /// Returns a copy of the instruction's target list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid");
+    /// assert_eq!(inst.targets_copy().len(), 2);
+    /// ```
     #[must_use]
     pub fn targets_copy(&self) -> Vec<DemInstructionTarget> {
         self.targets.clone()
     }
 
+    /// Splits the target list into groups delimited by separator targets (`^`).
+    ///
+    /// Separator targets themselves are not included in the returned groups.
+    /// If the instruction has no targets, a single empty group is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst: stim::DemInstruction = "error(0.01) D0 D1 ^ D2".parse().expect("valid");
+    /// let groups = inst.target_groups();
+    /// assert_eq!(groups.len(), 2);
+    /// assert_eq!(groups[0].len(), 2); // D0 D1
+    /// assert_eq!(groups[1].len(), 1); // D2
+    /// ```
     #[must_use]
     pub fn target_groups(&self) -> Vec<Vec<DemInstructionTarget>> {
         if self.targets.is_empty() {

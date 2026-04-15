@@ -147,22 +147,6 @@ std::string escape_html_for_srcdoc(std::string_view src) {
 
 namespace stimrs::bridge {
 
-std::int32_t stim_main(rust::Vec<rust::String> command_line_args) {
-  std::vector<std::string> owned_args;
-  owned_args.reserve(command_line_args.size() + 1);
-  owned_args.push_back("stim");
-  for (const auto &arg : command_line_args) {
-    owned_args.emplace_back(arg);
-  }
-
-  std::vector<const char *> argv;
-  argv.reserve(owned_args.size());
-  for (const auto &arg : owned_args) {
-    argv.push_back(arg.c_str());
-  }
-  return stim::main(static_cast<int>(argv.size()), argv.data());
-}
-
 GateTargetWithCoordsData convert_gate_target_with_coords(const stim::GateTargetWithCoords &value) {
   GateTargetWithCoordsData result{
       .raw_target = value.gate_target.data,

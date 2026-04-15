@@ -3,6 +3,22 @@ use std::hash::{Hash, Hasher};
 
 use crate::{Circuit, Result, StimError};
 
+/// A `REPEAT` block from a circuit, representing a sub-circuit that is
+/// executed a fixed number of times.
+///
+/// Repeat blocks are the primary looping construct in Stim circuits. They
+/// contain a body [`Circuit`] and a repetition count, and may carry an
+/// optional string tag for annotation.
+///
+/// # Examples
+///
+/// ```
+/// let body: stim::Circuit = "CX 0 1\nM 0".parse().expect("valid body");
+/// let block = stim::CircuitRepeatBlock::new(100, &body, "")
+///     .expect("repeat count must be > 0");
+/// assert_eq!(block.repeat_count(), 100);
+/// assert_eq!(block.num_measurements(), 100);
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct CircuitRepeatBlock {
     repeat_count: u64,
@@ -11,6 +27,22 @@ pub struct CircuitRepeatBlock {
 }
 
 impl CircuitRepeatBlock {
+    /// Creates a new repeat block that executes `body` exactly
+    /// `repeat_count` times.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repeat_count` is zero, since a zero-iteration
+    /// loop is not meaningful in Stim circuits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let body: stim::Circuit = "H 0\nM 0".parse().expect("valid body");
+    /// let block = stim::CircuitRepeatBlock::new(5, &body, "my-tag")
+    ///     .expect("nonzero repeat count");
+    /// assert_eq!(block.tag(), "my-tag");
+    /// ```
     pub fn new(repeat_count: u64, body: &Circuit, tag: impl Into<String>) -> Result<Self> {
         if repeat_count == 0 {
             return Err(StimError::new("Can't repeat 0 times."));
@@ -22,26 +54,33 @@ impl CircuitRepeatBlock {
         })
     }
 
+    /// Returns `"REPEAT"`, the fixed name for all repeat blocks.
     #[must_use]
     pub fn name(&self) -> &str {
         "REPEAT"
     }
 
+    /// Returns the block's tag string, or `""` if no tag was set.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
+    /// Returns the number of times the body circuit is repeated.
     #[must_use]
     pub fn repeat_count(&self) -> u64 {
         self.repeat_count
     }
 
+    /// Returns the total number of measurements produced by the block,
+    /// which equals the body's measurement count multiplied by the repeat
+    /// count.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.body.num_measurements() * self.repeat_count
     }
 
+    /// Returns a clone of the body circuit.
     #[must_use]
     pub fn body_copy(&self) -> Circuit {
         self.body.clone()
@@ -49,6 +88,23 @@ impl CircuitRepeatBlock {
 }
 
 impl Circuit {
+    /// Appends a `REPEAT` block to this circuit.
+    ///
+    /// The block executes `body` exactly `repeat_count` times. An optional
+    /// `tag` string is attached as an annotation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repeat_count` is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut circuit = stim::Circuit::new();
+    /// let body: stim::Circuit = "CX 0 1\nM 0".parse().expect("valid body");
+    /// circuit.append_repeat_block(3, &body, "").expect("nonzero count");
+    /// assert_eq!(circuit.num_measurements(), 3);
+    /// ```
     pub fn append_repeat_block(
         &mut self,
         repeat_count: u64,

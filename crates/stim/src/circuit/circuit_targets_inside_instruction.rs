@@ -3,6 +3,19 @@ use std::hash::{Hash, Hasher};
 
 pub use crate::GateTargetWithCoords;
 
+/// The resolved targets from a specific instruction at a specific location
+/// inside a circuit.
+///
+/// When Stim explains a circuit error, it needs to identify not just which
+/// instruction caused the error, but which subset of that instruction's
+/// targets were involved. This struct captures the gate name, its arguments,
+/// the relevant target range, and the fully resolved targets (with
+/// coordinates) within that range.
+///
+/// Instances are typically found inside [`CircuitErrorLocation`] rather than
+/// constructed directly.
+///
+/// [`CircuitErrorLocation`]: crate::CircuitErrorLocation
 #[derive(Clone, PartialEq)]
 pub struct CircuitTargetsInsideInstruction {
     gate: String,
@@ -14,6 +27,14 @@ pub struct CircuitTargetsInsideInstruction {
 }
 
 impl CircuitTargetsInsideInstruction {
+    /// Creates a new resolved-targets descriptor.
+    ///
+    /// - `gate` / `tag` / `args`: identify the instruction.
+    /// - `target_range_start` / `target_range_end`: the half-open range
+    ///   `[start, end)` of target indices within the instruction that
+    ///   participated in the error.
+    /// - `targets_in_range`: the resolved targets (with coordinates) in the
+    ///   selected range.
     #[must_use]
     pub fn new(
         gate: impl Into<String>,
@@ -33,31 +54,40 @@ impl CircuitTargetsInsideInstruction {
         }
     }
 
+    /// Returns the canonical gate name (e.g. `"X_ERROR"`, `"MPP"`).
     #[must_use]
     pub fn gate(&self) -> &str {
         &self.gate
     }
 
+    /// Returns the instruction's tag string, or `""` if untagged.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
+    /// Returns the gate's numeric arguments (e.g. error probability).
     #[must_use]
     pub fn args(&self) -> &[f64] {
         &self.args
     }
 
+    /// Returns the start of the half-open target index range `[start, end)`
+    /// within the instruction.
     #[must_use]
     pub fn target_range_start(&self) -> usize {
         self.target_range_start
     }
 
+    /// Returns the end of the half-open target index range `[start, end)`
+    /// within the instruction.
     #[must_use]
     pub fn target_range_end(&self) -> usize {
         self.target_range_end
     }
 
+    /// Returns the resolved targets (with coordinates) that fall within
+    /// the selected range.
     #[must_use]
     pub fn targets_in_range(&self) -> &[GateTargetWithCoords] {
         &self.targets_in_range

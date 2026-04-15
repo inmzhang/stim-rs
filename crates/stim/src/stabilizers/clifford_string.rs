@@ -2,8 +2,12 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign};
 
 /// A replacement value accepted by [`CliffordString::set`].
+///
+/// Either a gate name string or a [`crate::GateData`] reference.
 pub enum CliffordGateValue<'a> {
+    /// A gate name like `"H"` or `"S"`.
     Name(&'a str),
+    /// A reference to gate metadata.
     GateData(&'a crate::GateData),
 }
 

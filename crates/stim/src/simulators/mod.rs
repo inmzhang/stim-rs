@@ -37,9 +37,13 @@ pub struct FlipSimulator {
     pub(crate) inner: stim_cxx::FlipSimulator,
 }
 
+/// Alias for [`MeasurementSampler`] to match the Python `compile_sampler()` naming.
 pub type CompiledMeasurementSampler = MeasurementSampler;
+/// Alias for [`DetectorSampler`] to match the Python `compile_detector_sampler()` naming.
 pub type CompiledDetectorSampler = DetectorSampler;
+/// Alias for [`DemSampler`] to match the Python `compile_sampler()` naming on detector error models.
 pub type CompiledDemSampler = DemSampler;
+/// Alias for [`MeasurementsToDetectionEventsConverter`] to match the Python naming.
 pub type CompiledMeasurementsToDetectionEventsConverter = MeasurementsToDetectionEventsConverter;
 type UnpackedBitMatrix = Array2<bool>;
 type PackedObservablePair = (Vec<u8>, Vec<u8>);
@@ -69,7 +73,9 @@ pub enum ConvertedMeasurements {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitTable {
+    /// Unpacked boolean matrix where each cell is one bit.
     BoolMatrix(Array2<bool>),
+    /// Packed boolean matrix where bits are packed into bytes row by row.
     PackedMatrix(Array2<u8>),
 }
 
@@ -86,10 +92,15 @@ pub enum BitTable {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlipSimulatorArrays {
+    /// X-basis flip state per qubit per batch instance.
     pub xs: BitTable,
+    /// Z-basis flip state per qubit per batch instance.
     pub zs: BitTable,
+    /// Measurement flip records.
     pub measurement_flips: BitTable,
+    /// Detector flip records.
     pub detector_flips: BitTable,
+    /// Observable flip records.
     pub observable_flips: BitTable,
 }
 
@@ -273,7 +284,7 @@ impl TableauSimulator {
         self.inner.do_tableau(&tableau.inner, targets);
     }
 
-    /// Applies a circuit-like operation accepted by [`TableauSimulatorOperation`].
+    /// Applies a circuit-like operation accepted by `TableauSimulatorOperation`.
     pub fn r#do<'a>(
         &mut self,
         operation: impl Into<TableauSimulatorOperation<'a>>,
@@ -964,7 +975,7 @@ impl FlipSimulator {
         self.inner.do_circuit(&circuit.inner);
     }
 
-    /// Applies a circuit-like operation accepted by [`FlipSimulatorOperation`].
+    /// Applies a circuit-like operation accepted by `FlipSimulatorOperation`.
     pub fn r#do<'a>(&mut self, operation: impl Into<FlipSimulatorOperation<'a>>) -> Result<()> {
         match operation.into() {
             FlipSimulatorOperation::Circuit(circuit) => {
@@ -1161,10 +1172,13 @@ impl fmt::Debug for FlipSimulator {
     }
 }
 
-/// Operations accepted by [`FlipSimulator::do`].
+/// Operations accepted by `FlipSimulator::do`.
 pub enum FlipSimulatorOperation<'a> {
+    /// Apply an entire circuit.
     Circuit(&'a crate::Circuit),
+    /// Apply a single instruction.
     Instruction(&'a crate::CircuitInstruction),
+    /// Apply a repeat block.
     RepeatBlock(&'a crate::CircuitRepeatBlock),
 }
 
@@ -1186,11 +1200,15 @@ impl<'a> From<&'a crate::CircuitRepeatBlock> for FlipSimulatorOperation<'a> {
     }
 }
 
-/// Operations accepted by [`TableauSimulator::do`].
+/// Operations accepted by `TableauSimulator::do`.
 pub enum TableauSimulatorOperation<'a> {
+    /// Apply an entire circuit.
     Circuit(&'a crate::Circuit),
+    /// Apply a Pauli string as a gate.
     PauliString(&'a crate::PauliString),
+    /// Apply a single instruction.
     Instruction(&'a crate::CircuitInstruction),
+    /// Apply a repeat block.
     RepeatBlock(&'a crate::CircuitRepeatBlock),
 }
 

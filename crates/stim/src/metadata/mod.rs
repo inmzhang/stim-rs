@@ -1,8 +1,8 @@
-pub mod explained_error;
-pub mod flipped_measurement;
-pub mod gate_data;
-pub mod gate_target;
-pub mod gate_target_with_coords;
+pub(crate) mod explained_error;
+pub(crate) mod flipped_measurement;
+pub(crate) mod gate_data;
+pub(crate) mod gate_target;
+pub(crate) mod gate_target_with_coords;
 
 pub use explained_error::ExplainedError;
 pub use flipped_measurement::FlippedMeasurement;

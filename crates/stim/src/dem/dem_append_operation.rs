@@ -1,9 +1,29 @@
 use crate::{DemInstruction, DemRepeatBlock, DetectorErrorModel};
 
+/// An operation that can be appended to a detector error model.
+///
+/// This enum unifies the three types that [`DetectorErrorModel::append_operation`]
+/// accepts:
+/// - A single [`DemInstruction`].
+/// - A [`DemRepeatBlock`].
+/// - An entire [`DetectorErrorModel`] (whose items are concatenated).
+///
+/// Values of each inner type convert into `DemAppendOperation` via `From`.
+///
+/// # Examples
+///
+/// ```
+/// let inst: stim::DemInstruction = "error(0.125) D1".parse().expect("valid");
+/// let op = stim::DemAppendOperation::from(inst);
+/// assert!(matches!(op, stim::DemAppendOperation::Instruction(_)));
+/// ```
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DemAppendOperation {
+    /// Append a single instruction.
     Instruction(DemInstruction),
+    /// Append a repeat block.
     RepeatBlock(DemRepeatBlock),
+    /// Append all items from another detector error model.
     DetectorErrorModel(DetectorErrorModel),
 }
 

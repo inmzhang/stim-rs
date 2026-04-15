@@ -1,3 +1,5 @@
+/// An iterator over Pauli strings produced by range accessors on
+/// [`crate::PauliString`].
 #[derive(Clone)]
 pub struct PauliStringIterator {
     pub(crate) inner: stim_cxx::PauliStringIterator,

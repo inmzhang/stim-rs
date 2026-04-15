@@ -4,17 +4,28 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Neg};
 use ndarray::{Array1, ArrayView1};
 
 /// A single Pauli value accepted by [`PauliString::set`].
+///
+/// Either a numeric code (`0` = I, `1` = X, `2` = Y, `3` = Z) or a
+/// character symbol (`'I'`, `'X'`, `'Y'`, `'Z'`, `'_'`).
 pub enum PauliValue {
+    /// A numeric Pauli code (0=I, 1=X, 2=Y, 3=Z).
     Code(u8),
+    /// A character Pauli symbol (`'I'`, `'X'`, `'Y'`, `'Z'`, `'_'`).
     Symbol(char),
 }
 
 /// The unit complex phase carried by a [`PauliString`].
+///
+/// One of the four values `+1`, `+i`, `-1`, or `-i`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauliPhase {
+    /// The phase `+1`.
     Positive,
+    /// The phase `+i`.
     PositiveImaginary,
+    /// The phase `-1`.
     Negative,
+    /// The phase `-i`.
     NegativeImaginary,
 }
 
@@ -50,11 +61,19 @@ impl From<char> for PauliValue {
 }
 
 /// Operations accepted by [`PauliString::after`] and [`PauliString::before`].
+///
+/// Describes a Clifford operation that can conjugate a Pauli string forward
+/// or backward in time.
 pub enum PauliStringConjugation<'a> {
+    /// Conjugate through an entire circuit.
     Circuit(&'a crate::Circuit),
+    /// Conjugate through a single instruction.
     Instruction(&'a crate::CircuitInstruction),
+    /// Conjugate through a tableau applied to specific target qubits.
     Tableau {
+        /// The Clifford tableau to conjugate through.
         tableau: &'a crate::Tableau,
+        /// The qubit indices the tableau acts on.
         targets: &'a [usize],
     },
 }

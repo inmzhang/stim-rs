@@ -8,11 +8,50 @@ const MAX_DET: u64 = (1u64 << 62) - 1;
 const OBSERVABLE_BIT: u64 = 1u64 << 63;
 const SEPARATOR_SYGIL: u64 = u64::MAX;
 
+/// An instruction target from a detector error model (`.dem`) file.
+///
+/// A `DemTarget` is one of three things:
+/// - A **relative detector id** (`D0`, `D1`, ...) referencing a detector.
+/// - A **logical observable id** (`L0`, `L1`, ...) referencing an observable.
+/// - A **separator** (`^`) used to delimit groups of targets within an instruction.
+///
+/// Targets are lightweight `Copy` values that can be compared, hashed, and sorted.
+///
+/// # Examples
+///
+/// ```
+/// let det = stim::target_relative_detector_id(5).expect("valid detector id");
+/// assert!(det.is_relative_detector_id());
+/// assert_eq!(det.to_string(), "D5");
+///
+/// let obs = stim::target_logical_observable_id(2).expect("valid observable id");
+/// assert!(obs.is_logical_observable_id());
+/// assert_eq!(obs.to_string(), "L2");
+///
+/// let sep = stim::target_separator();
+/// assert!(sep.is_separator());
+/// assert_eq!(sep.to_string(), "^");
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DemTarget {
     data: u64,
 }
 
+/// A DEM target paired with coordinate metadata.
+///
+/// Wraps a [`DemTarget`] together with an optional vector of floating-point
+/// coordinates describing its spatial position. Coordinates are primarily
+/// used for visualization and matching graph construction.
+///
+/// # Examples
+///
+/// ```
+/// let det = stim::target_relative_detector_id(5).expect("valid detector id");
+/// let with_coords = stim::DemTargetWithCoords::new(det, vec![1.0, -2.5, 3.25]);
+/// assert_eq!(with_coords.dem_target(), det);
+/// assert_eq!(with_coords.coords(), &[1.0, -2.5, 3.25]);
+/// assert_eq!(with_coords.to_string(), "D5[coords 1,-2.5,3.25]");
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct DemTargetWithCoords {
     dem_target: DemTarget,
@@ -20,11 +59,37 @@ pub struct DemTargetWithCoords {
 }
 
 impl DemTarget {
+    /// Creates a `DemTarget` from any type that converts into one.
+    ///
+    /// This is a convenience wrapper around `Into<DemTarget>`.
     #[must_use]
     pub fn new(value: impl Into<Self>) -> Self {
         value.into()
     }
 
+    /// Parses a `DemTarget` from its textual representation.
+    ///
+    /// Accepted formats are `D<id>` for relative detector ids, `L<id>` for
+    /// logical observable ids, and `^` for the separator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `text` does not match a known target format or
+    /// if the numeric id is out of range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let det = stim::DemTarget::from_text("D7").expect("valid detector");
+    /// assert!(det.is_relative_detector_id());
+    /// assert_eq!(det.val().expect("has value"), 7);
+    ///
+    /// let obs = stim::DemTarget::from_text("L5").expect("valid observable");
+    /// assert!(obs.is_logical_observable_id());
+    ///
+    /// let sep = stim::DemTarget::from_text("^").expect("valid separator");
+    /// assert!(sep.is_separator());
+    /// ```
     pub fn from_text(text: &str) -> Result<Self> {
         if text == "^" {
             return Ok(Self::separator());
@@ -42,6 +107,20 @@ impl DemTarget {
         )))
     }
 
+    /// Creates a logical observable target (`L<id>`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` exceeds `0xFFFF_FFFF`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let obs = stim::DemTarget::logical_observable_id(3).expect("valid id");
+    /// assert!(obs.is_logical_observable_id());
+    /// assert_eq!(obs.val().expect("has value"), 3);
+    /// assert_eq!(obs.to_string(), "L3");
+    /// ```
     pub fn logical_observable_id(id: u64) -> Result<Self> {
         if id > MAX_OBS {
             return Err(StimError::new("id > 0xFFFFFFFF"));
@@ -51,6 +130,21 @@ impl DemTarget {
         })
     }
 
+    /// Creates a relative detector target (`D<id>`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` exceeds the maximum supported detector index
+    /// (2^62 - 1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let det = stim::DemTarget::relative_detector_id(5).expect("valid id");
+    /// assert!(det.is_relative_detector_id());
+    /// assert_eq!(det.val().expect("has value"), 5);
+    /// assert_eq!(det.to_string(), "D5");
+    /// ```
     pub fn relative_detector_id(id: u64) -> Result<Self> {
         if id > MAX_DET {
             return Err(StimError::new("Relative detector id too large."));
@@ -58,6 +152,17 @@ impl DemTarget {
         Ok(Self { data: id })
     }
 
+    /// Returns the separator target (`^`).
+    ///
+    /// Separators delimit groups of targets within a single DEM instruction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let sep = stim::DemTarget::separator();
+    /// assert!(sep.is_separator());
+    /// assert_eq!(sep.to_string(), "^");
+    /// ```
     #[must_use]
     pub const fn separator() -> Self {
         Self {
@@ -65,26 +170,52 @@ impl DemTarget {
         }
     }
 
+    /// Returns `true` if this target is a logical observable id (`L<id>`).
     #[must_use]
     pub fn is_logical_observable_id(self) -> bool {
         self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) != 0
     }
 
+    /// Returns `true` if this target is the separator (`^`).
     #[must_use]
     pub fn is_separator(self) -> bool {
         self.data == SEPARATOR_SYGIL
     }
 
+    /// Returns `true` if this target is a relative detector id (`D<id>`).
     #[must_use]
     pub fn is_relative_detector_id(self) -> bool {
         self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) == 0
     }
 
+    /// Returns the numeric id with the observable/detector classification bit
+    /// stripped.
+    ///
+    /// For detector targets this equals the detector index. For observable
+    /// targets this equals the observable index. For separators the return
+    /// value is not meaningful; prefer [`val`](Self::val) when you need a
+    /// checked id.
     #[must_use]
     pub fn raw_id(self) -> u64 {
         self.data & !OBSERVABLE_BIT
     }
 
+    /// Returns the numeric id of this target, failing for separators.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this target is a separator, since separators do
+    /// not carry an integer value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let det = stim::target_relative_detector_id(8).expect("valid id");
+    /// assert_eq!(det.val().expect("has value"), 8);
+    ///
+    /// let sep = stim::target_separator();
+    /// assert!(sep.val().is_err());
+    /// ```
     pub fn val(self) -> Result<u64> {
         if self.is_separator() {
             return Err(StimError::new("Separator doesn't have an integer value."));
@@ -92,6 +223,25 @@ impl DemTarget {
         Ok(self.raw_id())
     }
 
+    /// Adds `offset` to this target's detector index, if it is a relative
+    /// detector id. Observable and separator targets are left unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shift overflows or produces a negative value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut det = stim::target_relative_detector_id(4).expect("valid id");
+    /// det.shift_if_detector_id(9).expect("shift succeeds");
+    /// assert_eq!(det.val().expect("has value"), 13);
+    ///
+    /// // Observable targets are unaffected:
+    /// let mut obs = stim::target_logical_observable_id(7).expect("valid id");
+    /// obs.shift_if_detector_id(100).expect("no-op for observables");
+    /// assert_eq!(obs.val().expect("has value"), 7);
+    /// ```
     pub fn shift_if_detector_id(&mut self, offset: i64) -> Result<()> {
         if self.is_relative_detector_id() {
             let shifted = (self.data as i64)
@@ -141,16 +291,19 @@ impl fmt::Debug for DemTarget {
 }
 
 impl DemTargetWithCoords {
+    /// Creates a new target-with-coordinates pairing.
     #[must_use]
     pub fn new(dem_target: DemTarget, coords: Vec<f64>) -> Self {
         Self { dem_target, coords }
     }
 
+    /// Returns the underlying [`DemTarget`].
     #[must_use]
     pub fn dem_target(&self) -> DemTarget {
         self.dem_target
     }
 
+    /// Returns the coordinate metadata as a slice.
     #[must_use]
     pub fn coords(&self) -> &[f64] {
         &self.coords
@@ -208,14 +361,55 @@ impl fmt::Debug for DemTargetWithCoords {
     }
 }
 
+/// Creates a [`DemTarget`] for a relative detector id (`D<index>`).
+///
+/// This is a convenience wrapper around [`DemTarget::relative_detector_id`].
+///
+/// # Errors
+///
+/// Returns an error if `index` exceeds the maximum supported detector index.
+///
+/// # Examples
+///
+/// ```
+/// let det = stim::target_relative_detector_id(5).expect("valid detector id");
+/// assert!(det.is_relative_detector_id());
+/// assert_eq!(det.to_string(), "D5");
+/// ```
 pub fn target_relative_detector_id(index: u64) -> Result<DemTarget> {
     DemTarget::relative_detector_id(index)
 }
 
+/// Creates a [`DemTarget`] for a logical observable id (`L<index>`).
+///
+/// This is a convenience wrapper around [`DemTarget::logical_observable_id`].
+///
+/// # Errors
+///
+/// Returns an error if `index` exceeds `0xFFFF_FFFF`.
+///
+/// # Examples
+///
+/// ```
+/// let obs = stim::target_logical_observable_id(2).expect("valid observable id");
+/// assert!(obs.is_logical_observable_id());
+/// assert_eq!(obs.to_string(), "L2");
+/// ```
 pub fn target_logical_observable_id(index: u64) -> Result<DemTarget> {
     DemTarget::logical_observable_id(index)
 }
 
+/// Returns the separator [`DemTarget`] (`^`).
+///
+/// This is a convenience wrapper around [`DemTarget::separator`].
+///
+/// # Examples
+///
+/// ```
+/// let sep = stim::target_separator();
+/// assert!(sep.is_separator());
+/// assert_eq!(sep.to_string(), "^");
+/// ```
 #[must_use]
 pub fn target_separator() -> DemTarget {
     DemTarget::separator()

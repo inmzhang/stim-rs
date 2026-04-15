@@ -1,3 +1,4 @@
+/// An iterator over stabilizer tableaux produced by [`crate::Tableau::iter_all`].
 #[derive(Clone)]
 pub struct TableauIterator {
     pub(crate) inner: stim_cxx::TableauIterator,

@@ -1,10 +1,10 @@
-pub mod bit_packing;
-pub mod bridge;
-pub mod complex32;
-pub mod error;
-pub mod io;
-pub mod parse;
-pub mod slicing;
+pub(crate) mod bit_packing;
+pub(crate) mod bridge;
+pub(crate) mod complex32;
+pub(crate) mod error;
+pub(crate) mod io;
+pub(crate) mod parse;
+pub(crate) mod slicing;
 
 pub use bridge::upstream_commit;
 pub use complex32::Complex32;

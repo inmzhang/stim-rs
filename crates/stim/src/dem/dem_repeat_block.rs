@@ -3,6 +3,22 @@ use std::hash::{Hash, Hasher};
 
 use crate::{DetectorErrorModel, Result, StimError};
 
+/// A repeat block from a detector error model.
+///
+/// Represents a `repeat N { ... }` construct where a sub-model is repeated
+/// `N` times. The repetition count must be at least 1.
+///
+/// # Examples
+///
+/// ```
+/// let body: stim::DetectorErrorModel = "error(0.125) D0 D1\nshift_detectors 1"
+///     .parse()
+///     .expect("valid body");
+/// let block = stim::DemRepeatBlock::new(100, &body).expect("valid repeat block");
+/// assert_eq!(block.repeat_count(), 100);
+/// assert_eq!(block.r#type(), "repeat");
+/// assert_eq!(block.body_copy(), body);
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct DemRepeatBlock {
     repeat_count: u64,
@@ -10,6 +26,19 @@ pub struct DemRepeatBlock {
 }
 
 impl DemRepeatBlock {
+    /// Creates a new repeat block with the given count and body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `repeat_count` is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let body: stim::DetectorErrorModel = "error(0.125) D0".parse().expect("valid");
+    /// let block = stim::DemRepeatBlock::new(5, &body).expect("valid repeat");
+    /// assert_eq!(block.repeat_count(), 5);
+    /// ```
     pub fn new(repeat_count: u64, block: &DetectorErrorModel) -> Result<Self> {
         if repeat_count == 0 {
             return Err(StimError::new("Can't repeat 0 times."));
@@ -20,16 +49,19 @@ impl DemRepeatBlock {
         })
     }
 
+    /// Returns the number of times the body is repeated.
     #[must_use]
     pub fn repeat_count(&self) -> u64 {
         self.repeat_count
     }
 
+    /// Returns an independent copy of the repeated body model.
     #[must_use]
     pub fn body_copy(&self) -> DetectorErrorModel {
         self.block.clone()
     }
 
+    /// Returns the type name of this block, always `"repeat"`.
     #[must_use]
     pub fn r#type(&self) -> &str {
         "repeat"

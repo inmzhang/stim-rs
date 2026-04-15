@@ -5,6 +5,16 @@ use crate::{
     GateTargetWithCoords,
 };
 
+/// Describes the location of an error mechanism within a circuit.
+///
+/// When Stim explains how a particular fault affects detectors and
+/// observables, each fault is localized to a specific instruction and
+/// target range inside the circuit. This struct bundles that location
+/// information together with the Pauli product that was flipped and, for
+/// measurement errors, which measurement record was affected.
+///
+/// Instances are typically obtained from [`crate::ExplainedError`] rather
+/// than constructed directly.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CircuitErrorLocation {
     tick_offset: u64,
@@ -16,6 +26,7 @@ pub struct CircuitErrorLocation {
 }
 
 impl CircuitErrorLocation {
+    /// Creates a new error location from its constituent parts.
     #[must_use]
     pub fn new(
         tick_offset: u64,
@@ -35,31 +46,49 @@ impl CircuitErrorLocation {
         }
     }
 
+    /// Returns the number of `TICK` instructions that precede this error
+    /// location in the circuit's execution timeline.
     #[must_use]
     pub fn tick_offset(&self) -> u64 {
         self.tick_offset
     }
 
+    /// Returns the Pauli operators (with coordinates) that are flipped by
+    /// this error mechanism.
     #[must_use]
     pub fn flipped_pauli_product(&self) -> &[GateTargetWithCoords] {
         &self.flipped_pauli_product
     }
 
+    /// Returns the measurement that is flipped by this error, if the error
+    /// is a measurement error.
+    ///
+    /// Returns `None` for purely Pauli errors that do not flip any
+    /// measurement outcome.
     #[must_use]
     pub fn flipped_measurement(&self) -> Option<&FlippedMeasurement> {
         self.flipped_measurement.as_ref()
     }
 
+    /// Returns the resolved instruction and target range where the error
+    /// occurs.
     #[must_use]
     pub fn instruction_targets(&self) -> &CircuitTargetsInsideInstruction {
         &self.instruction_targets
     }
 
+    /// Returns the stack of frames that locate this error within nested
+    /// `REPEAT` blocks.
+    ///
+    /// The outermost frame (index 0) refers to the top-level circuit. Each
+    /// subsequent frame descends one level into a `REPEAT` block.
     #[must_use]
     pub fn stack_frames(&self) -> &[CircuitErrorLocationStackFrame] {
         &self.stack_frames
     }
 
+    /// Returns the noise tag associated with this error location, or `""`
+    /// if no tag was set on the noise instruction.
     #[must_use]
     pub fn noise_tag(&self) -> &str {
         &self.noise_tag

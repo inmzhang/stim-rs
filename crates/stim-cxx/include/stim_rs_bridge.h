@@ -315,7 +315,6 @@ void write_shot_data_file_bit_packed(
     std::uint64_t num_detectors,
     std::uint64_t num_observables);
 rust::Vec<rust::String> all_gate_names();
-std::int32_t stim_main(rust::Vec<rust::String> command_line_args);
 std::unique_ptr<GateDataHandle> gate_data_by_name(rust::Str name);
 rust::String canonicalize_flow_text(rust::Str text);
 rust::String multiply_flow_texts(rust::Str left, rust::Str right);

@@ -4,6 +4,42 @@ use super::bit_packing::{pack_rows_array, unpack_rows_array};
 use super::{Result, StimError};
 use ndarray::{Array2, ArrayView2};
 
+/// Reads shot data from a file in one of Stim's supported formats.
+///
+/// Each row of the returned array contains the concatenated measurement,
+/// detector, and observable bits for a single shot. The total number of
+/// columns equals `num_measurements + num_detectors + num_observables`.
+///
+/// # Errors
+///
+/// Returns a [`StimError`] if the file path is not valid UTF-8, the file
+/// cannot be read, or its contents do not match the declared format and
+/// dimensions.
+///
+/// # Examples
+///
+/// Round-trip through the `"01"` plain-text format:
+///
+/// ```
+/// use stim::{read_shot_data_file, write_shot_data_file};
+/// use ndarray::Array2;
+///
+/// let path = std::env::temp_dir().join("stim-doctest-read.01");
+///
+/// let data = Array2::from_shape_vec(
+///     (2, 3),
+///     vec![true, false, true, false, true, false],
+/// ).expect("shape should be valid");
+///
+/// write_shot_data_file(data.view(), &path, "01", 3, 0, 0)
+///     .expect("write should succeed");
+///
+/// let read_back = read_shot_data_file(&path, "01", 3, 0, 0)
+///     .expect("read should succeed");
+/// assert_eq!(read_back, data);
+///
+/// std::fs::remove_file(&path).expect("cleanup should succeed");
+/// ```
 pub fn read_shot_data_file(
     filepath: impl AsRef<Path>,
     format_name: &str,
@@ -27,6 +63,43 @@ pub fn read_shot_data_file(
     Ok(unpack_rows_array(&packed, bit_len))
 }
 
+/// Writes shot data to a file in one of Stim's supported formats.
+///
+/// Each row of `data` must contain exactly
+/// `num_measurements + num_detectors + num_observables` columns. The columns
+/// are interpreted in that order: measurements first, then detectors, then
+/// observables.
+///
+/// # Errors
+///
+/// Returns a [`StimError`] if the file path is not valid UTF-8, the row
+/// width does not match the declared dimensions, or the file cannot be
+/// written.
+///
+/// # Examples
+///
+/// Write two shots of three measurement bits to a `"01"` file:
+///
+/// ```
+/// use stim::write_shot_data_file;
+/// use ndarray::Array2;
+///
+/// let path = std::env::temp_dir().join("stim-doctest-write.01");
+///
+/// let data = Array2::from_shape_vec(
+///     (2, 3),
+///     vec![true, false, true, false, true, false],
+/// ).expect("shape should be valid");
+///
+/// write_shot_data_file(data.view(), &path, "01", 3, 0, 0)
+///     .expect("write should succeed");
+///
+/// let contents = std::fs::read_to_string(&path)
+///     .expect("file should be readable");
+/// assert_eq!(contents, "101\n010\n");
+///
+/// std::fs::remove_file(&path).expect("cleanup should succeed");
+/// ```
 pub fn write_shot_data_file(
     data: ArrayView2<'_, bool>,
     filepath: impl AsRef<Path>,

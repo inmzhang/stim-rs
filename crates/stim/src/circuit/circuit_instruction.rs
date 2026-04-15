@@ -3,6 +3,34 @@ use std::str::FromStr;
 
 use crate::{Circuit, GateTarget, Result, StimError, gate_data};
 
+/// A single instruction from a stabilizer circuit, such as `H 0 1` or
+/// `CNOT rec[-1] 5`.
+///
+/// Each instruction consists of a gate name, zero or more numeric gate
+/// arguments (e.g. the error probability for `DEPOLARIZE1(0.01)`), an ordered
+/// list of [`GateTarget`]s the gate acts on, and an optional string tag for
+/// annotation.
+///
+/// Gate names are canonicalized on construction, so aliases like `"cnot"` are
+/// stored as `"CX"`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CircuitInstruction;
+///
+/// let h = CircuitInstruction::new(
+///     "H", [0u32, 1u32], std::iter::empty::<f64>(), "",
+/// ).expect("H is a valid gate");
+/// assert_eq!(h.name(), "H");
+/// assert_eq!(h.num_measurements(), 0);
+///
+/// // Aliases are canonicalized automatically.
+/// let cx = CircuitInstruction::new(
+///     "cnot", [0u32, 1u32], std::iter::empty::<f64>(), "",
+/// ).expect("cnot is an alias for CX");
+/// assert_eq!(cx.name(), "CX");
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct CircuitInstruction {
     name: String,
@@ -13,6 +41,27 @@ pub struct CircuitInstruction {
 }
 
 impl CircuitInstruction {
+    /// Creates a new circuit instruction with the given gate name, targets,
+    /// gate arguments, and optional tag.
+    ///
+    /// The gate name is canonicalized so that aliases resolve to the standard
+    /// name used by Stim (e.g. `"cnot"` becomes `"CX"`). The number of
+    /// measurements produced by this instruction is computed eagerly and
+    /// cached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the combination of gate name, targets, and
+    /// arguments is not valid according to Stim's gate definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let inst = stim::CircuitInstruction::new(
+    ///     "X_ERROR", [5u32, 7u32], [0.125], "",
+    /// ).expect("valid instruction");
+    /// assert_eq!(inst.to_string(), "X_ERROR(0.125) 5 7");
+    /// ```
     pub fn new(
         name: impl Into<String>,
         targets: impl IntoIterator<Item = impl Into<GateTarget>>,
@@ -34,6 +83,27 @@ impl CircuitInstruction {
         })
     }
 
+    /// Parses a single instruction from Stim program text.
+    ///
+    /// The text must contain exactly one instruction — not a `REPEAT` block
+    /// and not multiple lines of operations.
+    ///
+    /// This is also available via the [`FromStr`] implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the text contains multiple operations, a `REPEAT`
+    /// block, or is otherwise not a valid single instruction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stim::CircuitInstruction;
+    ///
+    /// let inst = CircuitInstruction::from_stim_program_text("H 0 1")
+    ///     .expect("valid instruction text");
+    /// assert_eq!(inst.name(), "H");
+    /// ```
     pub fn from_stim_program_text(text: &str) -> Result<Self> {
         let circuit = Circuit::from_str(text)?;
         let normalized = circuit.to_string();
@@ -56,31 +126,58 @@ impl CircuitInstruction {
         Self::new(name, targets, gate_args, tag)
     }
 
+    /// Returns the canonical gate name (e.g. `"CX"`, `"H"`, `"M"`).
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Returns the instruction's tag string, or `""` if no tag was set.
+    ///
+    /// Tags are the bracketed annotations in Stim syntax, e.g. the `100ns`
+    /// in `I[100ns] 2`.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
+    /// Returns a copy of the gate's numeric arguments.
+    ///
+    /// For example, `DEPOLARIZE1(0.01)` has a single gate argument `[0.01]`,
+    /// while `H 0` has an empty argument list.
     #[must_use]
     pub fn gate_args_copy(&self) -> Vec<f64> {
         self.gate_args.clone()
     }
 
+    /// Returns a copy of all targets the instruction acts on.
     #[must_use]
     pub fn targets_copy(&self) -> Vec<GateTarget> {
         self.targets.clone()
     }
 
+    /// Returns the number of measurement results this instruction produces.
+    ///
+    /// Non-measuring gates like `H` return `0`, while `M 2 3 5 7 11` returns
+    /// `5`. Two-qubit measurements like `MXX` count each pair as one
+    /// measurement.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.num_measurements
     }
 
+    /// Groups the instruction's targets into logical operation groups.
+    ///
+    /// The grouping strategy depends on the gate type:
+    ///
+    /// - **Single-qubit gates and measurements**: each target becomes its own
+    ///   group of size 1.
+    /// - **Two-qubit gates**: targets are paired into groups of size 2.
+    /// - **Gates with combiners** (e.g. `MPP X0*Y1`): targets are split on
+    ///   combiner boundaries.
+    /// - **Other gates**: all targets form a single group.
+    ///
+    /// Returns an empty `Vec` if the instruction has no targets.
     #[must_use]
     pub fn target_groups(&self) -> Vec<Vec<GateTarget>> {
         if self.targets.is_empty() {
@@ -196,6 +293,27 @@ impl fmt::Debug for CircuitInstruction {
 }
 
 impl Circuit {
+    /// Appends a [`CircuitInstruction`] to the end of this circuit.
+    ///
+    /// The instruction is serialized to Stim program text and re-parsed by
+    /// the underlying C++ engine, so the result is always consistent with
+    /// Stim's own representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the instruction's name is empty or if the
+    /// serialized text is rejected by the Stim parser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut circuit = stim::Circuit::new();
+    /// let h = stim::CircuitInstruction::new(
+    ///     "H", [0u32], std::iter::empty::<f64>(), "",
+    /// ).expect("valid instruction");
+    /// circuit.append_instruction(&h).expect("append succeeds");
+    /// assert_eq!(circuit.to_string(), "H 0");
+    /// ```
     pub fn append_instruction(&mut self, instruction: &CircuitInstruction) -> Result<()> {
         if instruction.name().trim().is_empty() {
             return Err(StimError::new("instruction name must not be empty"));
