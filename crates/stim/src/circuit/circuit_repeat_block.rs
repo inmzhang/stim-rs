@@ -6,9 +6,41 @@ use crate::{Circuit, Result, StimError};
 /// A `REPEAT` block from a circuit, representing a sub-circuit that is
 /// executed a fixed number of times.
 ///
-/// Repeat blocks are the primary looping construct in Stim circuits. They
-/// contain a body [`Circuit`] and a repetition count, and may carry an
-/// optional string tag for annotation.
+/// This is the Rust equivalent of Python's `stim.CircuitRepeatBlock`.
+/// Repeat blocks are the primary looping construct in Stim circuits.
+/// They contain a body [`Circuit`] and a repetition count, and may carry
+/// an optional string tag for annotation.
+///
+/// In Stim circuit text, repeat blocks look like:
+///
+/// ```text
+/// REPEAT 100 {
+///     CX 0 1
+///     M 0
+/// }
+/// ```
+///
+/// # Duck-typing with `CircuitInstruction`
+///
+/// Both `CircuitRepeatBlock` and [`CircuitInstruction`](crate::CircuitInstruction)
+/// expose a [`name()`](Self::name) method and a [`tag()`](Self::tag) method,
+/// which enables code that iterates over heterogeneous circuit items
+/// (via [`CircuitItem`](crate::CircuitItem)) to inspect the name without
+/// needing a type check first. For repeat blocks, `name()` always returns
+/// `"REPEAT"`.
+///
+/// # Measurement counting
+///
+/// The total number of measurements produced by a repeat block equals the
+/// body circuit's measurement count multiplied by the repeat count. For
+/// example, a body containing `M 0 1` (2 measurements) repeated 25 times
+/// produces 50 measurements total.
+///
+/// # Ordering and hashing
+///
+/// `CircuitRepeatBlock` implements [`Eq`], [`Ord`], and [`Hash`].
+/// Ordering is lexicographic by repeat count, then tag, then the string
+/// representation of the body circuit.
 ///
 /// # Examples
 ///
@@ -18,6 +50,15 @@ use crate::{Circuit, Result, StimError};
 ///     .expect("repeat count must be > 0");
 /// assert_eq!(block.repeat_count(), 100);
 /// assert_eq!(block.num_measurements(), 100);
+/// ```
+///
+/// Appending a repeat block to a circuit:
+///
+/// ```
+/// let mut circuit = stim::Circuit::new();
+/// let body: stim::Circuit = "M 0".parse().expect("valid body");
+/// circuit.append_repeat_block(25, &body, "").expect("nonzero count");
+/// assert_eq!(circuit.num_measurements(), 25);
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct CircuitRepeatBlock {
@@ -29,6 +70,19 @@ pub struct CircuitRepeatBlock {
 impl CircuitRepeatBlock {
     /// Creates a new repeat block that executes `body` exactly
     /// `repeat_count` times.
+    ///
+    /// This is the Rust equivalent of Python's
+    /// `stim.CircuitRepeatBlock.__init__`.
+    ///
+    /// # Arguments
+    ///
+    /// * `repeat_count` — The number of times the body circuit will be
+    ///   executed. Must be at least 1.
+    /// * `body` — The sub-circuit to repeat. The body is cloned into the
+    ///   block, so subsequent mutations of the original `body` circuit do
+    ///   not affect this block.
+    /// * `tag` — An arbitrary string annotation attached to the `REPEAT`
+    ///   instruction. Use `""` for no tag.
     ///
     /// # Errors
     ///
@@ -55,32 +109,54 @@ impl CircuitRepeatBlock {
     }
 
     /// Returns `"REPEAT"`, the fixed name for all repeat blocks.
+    ///
+    /// This is a duck-typing convenience method. It exists so that code
+    /// iterating over mixed [`CircuitItem`](crate::CircuitItem) values
+    /// (which may be either a [`CircuitInstruction`](crate::CircuitInstruction)
+    /// or a `CircuitRepeatBlock`) can check the item's name without
+    /// performing a type check first.
     #[must_use]
     pub fn name(&self) -> &str {
         "REPEAT"
     }
 
     /// Returns the block's tag string, or `""` if no tag was set.
+    ///
+    /// The tag is an arbitrary custom string attached to the `REPEAT`
+    /// instruction. Tags appear in Stim syntax as bracketed annotations,
+    /// e.g. `REPEAT[my-tag] 5 { ... }`. Stim will attempt to propagate
+    /// tags across circuit transformations but otherwise ignores them.
+    /// The default tag, when none is specified, is the empty string.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
     /// Returns the number of times the body circuit is repeated.
+    ///
+    /// This value is always at least 1, since the constructor rejects
+    /// zero-iteration loops.
     #[must_use]
     pub fn repeat_count(&self) -> u64 {
         self.repeat_count
     }
 
-    /// Returns the total number of measurements produced by the block,
-    /// which equals the body's measurement count multiplied by the repeat
-    /// count.
+    /// Returns the total number of measurement results (bits) produced by
+    /// the block, which equals the body's measurement count multiplied by
+    /// the repeat count.
+    ///
+    /// For example, if the body contains `M 0 1` (2 measurements) and the
+    /// repeat count is 25, this method returns 50.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.body.num_measurements() * self.repeat_count
     }
 
     /// Returns a clone of the body circuit.
+    ///
+    /// A fresh copy is returned each time to make it clear that editing the
+    /// result will not change the block's body. This follows the same
+    /// semantics as Python's `stim.CircuitRepeatBlock.body_copy()`.
     #[must_use]
     pub fn body_copy(&self) -> Circuit {
         self.body.clone()

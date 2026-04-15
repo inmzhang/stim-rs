@@ -8,25 +8,40 @@
 //!
 //! # Core types
 //!
-//! - [`Circuit`] — a mutable stabilizer circuit that describes a noisy quantum
+//! - [`Circuit`] -- a mutable stabilizer circuit that describes a noisy quantum
 //!   computation.
-//! - [`DetectorErrorModel`] — an error model listing independent fault
+//! - [`DetectorErrorModel`] -- an error model listing independent fault
 //!   mechanisms and the detectors/observables they flip.
-//! - [`PauliString`] — a signed tensor product of Pauli operators.
-//! - [`Tableau`] — a stabilizer tableau representing a Clifford operation.
+//! - [`PauliString`] -- a signed tensor product of Pauli operators.
+//! - [`Tableau`] -- a stabilizer tableau representing a Clifford operation.
 //!
 //! # Simulators
 //!
-//! - [`TableauSimulator`] — an interactive stabilizer simulator backed by
-//!   tableaus that supports gate-by-gate execution.
-//! - [`FlipSimulator`] — a batched simulator that tracks Pauli flips and
+//! - [`TableauSimulator`] -- an interactive stabilizer simulator backed by
+//!   an inverse stabilizer tableau. Supports gate-by-gate execution,
+//!   mid-circuit measurements, resets, and noise channels.
+//! - [`FlipSimulator`] -- a batched simulator that tracks Pauli flips and
 //!   classical flip records, requiring only O(1) work per gate.
-//! - [`MeasurementSampler`] — fast repeated measurement sampling from a
-//!   compiled circuit.
-//! - [`DetectorSampler`] — fast repeated detector-event sampling from a
-//!   compiled circuit.
-//! - [`DemSampler`] — fast repeated sampling from a compiled detector error
-//!   model.
+//! - [`MeasurementSampler`] -- fast repeated measurement sampling from a
+//!   compiled circuit (also available as [`CompiledMeasurementSampler`]).
+//! - [`DetectorSampler`] -- fast repeated detector-event sampling from a
+//!   compiled circuit (also available as [`CompiledDetectorSampler`]).
+//! - [`DemSampler`] -- fast repeated sampling from a compiled detector error
+//!   model (also available as [`CompiledDemSampler`]).
+//! - [`MeasurementsToDetectionEventsConverter`] -- converts raw measurement
+//!   results into detection events using a compiled circuit.
+//!
+//! # I/O
+//!
+//! - [`read_shot_data_file`] -- reads shot data from files in Stim's various
+//!   result formats (`"01"`, `"b8"`, `"r8"`, `"dets"`, `"hits"`, `"ptb64"`).
+//! - [`write_shot_data_file`] -- writes shot data to files in those formats.
+//!
+//! # Error handling
+//!
+//! All fallible operations return [`Result<T>`], which is an alias for
+//! `std::result::Result<T, StimError>`. The [`StimError`] type wraps a
+//! human-readable message and implements `std::error::Error`.
 //!
 //! # Quick start
 //!

@@ -5,16 +5,71 @@ use crate::{
     GateTargetWithCoords,
 };
 
-/// Describes the location of an error mechanism within a circuit.
+/// Describes the location of an error mechanism within a Stim circuit.
 ///
 /// When Stim explains how a particular fault affects detectors and
-/// observables, each fault is localized to a specific instruction and
-/// target range inside the circuit. This struct bundles that location
-/// information together with the Pauli product that was flipped and, for
-/// measurement errors, which measurement record was affected.
+/// observables (e.g. via [`Circuit::shortest_graphlike_error`]), each
+/// fault is localized to a specific instruction and target range inside
+/// the circuit. This struct bundles that location information together
+/// with the Pauli product that was flipped, the measurement that was
+/// flipped (for measurement errors), a stack trace through nested
+/// `REPEAT` blocks, and a noise tag string.
+///
+/// The location uniquely identifies a single error site by providing:
+///
+/// - **`tick_offset`** -- the number of `TICK` instructions that executed
+///   before the error, counting TICKs inside loops multiple times.
+/// - **`flipped_pauli_product`** -- the Pauli operators (with qubit
+///   coordinates) applied by the error mechanism. Empty for pure
+///   measurement errors.
+/// - **`flipped_measurement`** -- for measurement errors, which
+///   measurement record entry was flipped and what observable it
+///   corresponds to. `None` for purely Pauli errors.
+/// - **`instruction_targets`** -- the gate name, arguments, and the
+///   subset of that instruction's targets that participated in the error.
+/// - **`stack_frames`** -- a stack trace from the top-level circuit down
+///   through nested `REPEAT` blocks to the instruction that caused the
+///   error.
+/// - **`noise_tag`** -- the custom `[tag]` annotation on the noise
+///   instruction, or `""` if none was set.
 ///
 /// Instances are typically obtained from [`crate::ExplainedError`] rather
 /// than constructed directly.
+///
+/// # Examples
+///
+/// ```
+/// use stim::{
+///     CircuitErrorLocation, CircuitErrorLocationStackFrame,
+///     CircuitTargetsInsideInstruction, GateTarget, GateTargetWithCoords,
+/// };
+///
+/// let location = CircuitErrorLocation::new(
+///     3, // after 3 TICKs
+///     vec![GateTargetWithCoords::new(
+///         stim::target_x(0u32, false).expect("valid target"),
+///         vec![],
+///     )],
+///     None, // no flipped measurement (Pauli error)
+///     CircuitTargetsInsideInstruction::new(
+///         "DEPOLARIZE1",
+///         "",
+///         vec![0.001],
+///         0,
+///         1,
+///         vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+///     ),
+///     vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
+///     "",
+/// );
+///
+/// assert_eq!(location.tick_offset(), 3);
+/// assert!(location.flipped_measurement().is_none());
+/// assert_eq!(location.flipped_pauli_product().len(), 1);
+/// assert_eq!(location.stack_frames().len(), 1);
+/// ```
+///
+/// [`Circuit::shortest_graphlike_error`]: crate::Circuit::shortest_graphlike_error
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CircuitErrorLocation {
     tick_offset: u64,
@@ -27,6 +82,29 @@ pub struct CircuitErrorLocation {
 
 impl CircuitErrorLocation {
     /// Creates a new error location from its constituent parts.
+    ///
+    /// This constructor assembles all the pieces that identify where an
+    /// error occurred in a circuit, what Pauli operators it flipped, and
+    /// whether it also flipped a measurement.
+    ///
+    /// # Arguments
+    ///
+    /// - `tick_offset` -- number of `TICK` instructions that preceded the
+    ///   error in the circuit's execution timeline (counting loop
+    ///   iterations).
+    /// - `flipped_pauli_product` -- the Pauli operators (with qubit
+    ///   coordinates) applied by the error. Pass an empty collection for
+    ///   pure measurement errors.
+    /// - `flipped_measurement` -- `Some(...)` when the error flips a
+    ///   measurement outcome, `None` for purely Pauli errors.
+    /// - `instruction_targets` -- the gate name, arguments, and target
+    ///   sub-range that identify the specific operation that caused the
+    ///   error.
+    /// - `stack_frames` -- the nesting stack trace from the top-level
+    ///   circuit down through `REPEAT` blocks to the instruction. The
+    ///   outermost frame should come first.
+    /// - `noise_tag` -- the `[tag]` annotation on the noise instruction,
+    ///   or `""` if none.
     #[must_use]
     pub fn new(
         tick_offset: u64,
@@ -48,13 +126,41 @@ impl CircuitErrorLocation {
 
     /// Returns the number of `TICK` instructions that precede this error
     /// location in the circuit's execution timeline.
+    ///
+    /// This counts TICKs occurring multiple times during loops. For
+    /// example, a `TICK` inside a `REPEAT 5 { ... }` block that has
+    /// fully completed contributes 5 to the tick offset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use stim::*;
+    /// let location = CircuitErrorLocation::new(
+    ///     3,
+    ///     Vec::<GateTargetWithCoords>::new(),
+    ///     None,
+    ///     CircuitTargetsInsideInstruction::new(
+    ///         "X_ERROR", "", vec![0.1], 0, 1,
+    ///         vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+    ///     ),
+    ///     vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
+    ///     "",
+    /// );
+    /// assert_eq!(location.tick_offset(), 3);
+    /// ```
     #[must_use]
     pub fn tick_offset(&self) -> u64 {
         self.tick_offset
     }
 
-    /// Returns the Pauli operators (with coordinates) that are flipped by
-    /// this error mechanism.
+    /// Returns the Pauli operators (with qubit coordinates) that are
+    /// flipped by this error mechanism.
+    ///
+    /// Each element describes a single-qubit Pauli (X, Y, or Z) applied
+    /// to a specific qubit, together with the qubit's coordinate data
+    /// from any `QUBIT_COORDS` instructions in the circuit.
+    ///
+    /// When the error is a pure measurement error, this slice is empty.
     #[must_use]
     pub fn flipped_pauli_product(&self) -> &[GateTargetWithCoords] {
         &self.flipped_pauli_product
@@ -63,8 +169,11 @@ impl CircuitErrorLocation {
     /// Returns the measurement that is flipped by this error, if the error
     /// is a measurement error.
     ///
-    /// Returns `None` for purely Pauli errors that do not flip any
-    /// measurement outcome.
+    /// For measurement errors (e.g. from `M(p)` instructions), this
+    /// returns the measurement record index and the observable that the
+    /// measurement corresponds to. For purely Pauli errors that do not
+    /// flip any measurement outcome (e.g. from `X_ERROR` or
+    /// `DEPOLARIZE1`), this returns `None`.
     #[must_use]
     pub fn flipped_measurement(&self) -> Option<&FlippedMeasurement> {
         self.flipped_measurement.as_ref()
@@ -72,6 +181,12 @@ impl CircuitErrorLocation {
 
     /// Returns the resolved instruction and target range where the error
     /// occurs.
+    ///
+    /// An error instruction (such as `X_ERROR(0.25) 0 1 2 3`) may have
+    /// many targets, but only a subset of those targets is involved in a
+    /// given error. This accessor provides the gate name, its arguments,
+    /// and the specific target sub-range (with coordinates) that
+    /// produced the error.
     #[must_use]
     pub fn instruction_targets(&self) -> &CircuitTargetsInsideInstruction {
         &self.instruction_targets
@@ -81,7 +196,14 @@ impl CircuitErrorLocation {
     /// `REPEAT` blocks.
     ///
     /// The outermost frame (index 0) refers to the top-level circuit. Each
-    /// subsequent frame descends one level into a `REPEAT` block.
+    /// subsequent frame descends one level into a `REPEAT` block. The
+    /// innermost frame identifies the actual instruction that caused the
+    /// error.
+    ///
+    /// Multiple frames are needed because the error may occur within a
+    /// loop, or a loop nested inside a loop, etc. Each frame records
+    /// the instruction offset at that nesting level, the iteration
+    /// index within the enclosing loop, and the loop's repetition count.
     #[must_use]
     pub fn stack_frames(&self) -> &[CircuitErrorLocationStackFrame] {
         &self.stack_frames
@@ -89,6 +211,11 @@ impl CircuitErrorLocation {
 
     /// Returns the noise tag associated with this error location, or `""`
     /// if no tag was set on the noise instruction.
+    ///
+    /// Tags are the `[...]` annotation that can appear after a noise
+    /// instruction's name, e.g. `Y_ERROR[test-tag](0.125) 0`. They are
+    /// arbitrary strings that Stim propagates but otherwise ignores,
+    /// allowing user code to attach metadata to specific noise channels.
     #[must_use]
     pub fn noise_tag(&self) -> &str {
         &self.noise_tag

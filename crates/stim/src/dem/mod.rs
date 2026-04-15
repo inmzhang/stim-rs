@@ -24,13 +24,69 @@ pub use dem_target::{
     target_separator,
 };
 
-/// A detector error model describing how faults trigger detectors and observables.
+/// An error model built out of independent error mechanisms, describing how faults
+/// trigger detectors and logical observables.
+///
+/// `DetectorErrorModel` is one of the most important types in Stim, because it is
+/// the mechanism used to explain quantum error correction circuits to decoders. A
+/// typical quantum error correction workflow looks like:
+///
+/// 1. Create a quantum error correction [`Circuit`](crate::Circuit) annotated with
+///    detectors and observables.
+/// 2. Call [`Circuit::detector_error_model`](crate::Circuit::detector_error_model)
+///    (with `decompose_errors=true` if working with a matching-based decoder). This
+///    converts the circuit's error mechanisms into a straightforward list of
+///    independent "with probability *p*, these detectors and observables get flipped"
+///    terms.
+/// 3. Feed the detector error model into your decoder of choice (e.g., pymatching,
+///    fusion_blossom, or another graph-based decoder).
+/// 4. Sample detection events with
+///    [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler),
+///    feed them to the decoder, and compare its observable-flip predictions to the
+///    actual flips.
+///
+/// Error mechanisms are described in terms of the visible detection events (e.g.
+/// `D0`, `D1`) and the hidden observable frame changes (e.g. `L0`) they cause.
+/// Error mechanisms can also suggest decompositions of their effects into
+/// components, which is helpful for decoders that want to work with a simpler
+/// decomposed error model instead of the full error model.
+///
+/// # Key operations
+///
+/// - **Construction**: parse from a `.dem`-format string via [`FromStr`], read from a
+///   file with [`from_file`](Self::from_file), or build programmatically with
+///   [`append`](Self::append).
+/// - **Sampling**: compile a [`DemSampler`] with
+///   [`compile_sampler`](Self::compile_sampler) to generate detection event and
+///   observable-flip samples directly from the error model.
+/// - **Error analysis**: find the shortest graphlike logical error with
+///   [`shortest_graphlike_error`](Self::shortest_graphlike_error), or encode the
+///   distance problem as a maxSAT instance with
+///   [`shortest_error_sat_problem`](Self::shortest_error_sat_problem).
+/// - **Arithmetic**: concatenate models with `+`, wrap in repeat blocks with `*`.
+///
+/// # Examples
+///
+/// ```
+/// let model: stim::DetectorErrorModel = "
+///     error(0.125) D0
+///     error(0.125) D0 D1 L0
+///     error(0.125) D1 D2
+///     error(0.125) D2 D3
+///     error(0.125) D3
+/// ".parse().unwrap();
+/// assert_eq!(model.len(), 5);
+/// ```
 pub struct DetectorErrorModel {
     pub(crate) inner: stim_cxx::DetectorErrorModel,
 }
 
 impl DetectorErrorModel {
-    /// Creates an empty detector error model.
+    /// Creates an empty detector error model with no instructions.
+    ///
+    /// This is the starting point for programmatically building a detector error
+    /// model. Use [`append`](Self::append) or the `+=` operator to add
+    /// instructions after construction.
     ///
     /// # Examples
     ///
@@ -38,6 +94,9 @@ impl DetectorErrorModel {
     /// let dem = stim::DetectorErrorModel::new();
     /// assert!(dem.is_empty());
     /// assert_eq!(dem.len(), 0);
+    /// assert_eq!(dem.num_detectors(), 0);
+    /// assert_eq!(dem.num_errors(), 0);
+    /// assert_eq!(dem.num_observables(), 0);
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -46,42 +105,147 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Returns the number of top-level items in the detector error model.
+    /// Returns the number of top-level instructions and blocks in the detector
+    /// error model.
+    ///
+    /// Instructions inside of repeat blocks are **not** included in this count.
+    /// A repeat block counts as a single item regardless of how many
+    /// instructions it contains or how many times it repeats.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Each top-level instruction counts as one item.
+    /// let dem: stim::DetectorErrorModel = "
+    ///     error(0.1) D0 D1
+    ///     shift_detectors 100
+    ///     logical_observable L5
+    /// ".parse().unwrap();
+    /// assert_eq!(dem.len(), 3);
+    ///
+    /// // A repeat block containing two instructions still counts as one item.
+    /// let dem: stim::DetectorErrorModel = "
+    ///     repeat 100 {
+    ///         error(0.1) D0 D1
+    ///         error(0.1) D1 D2
+    ///     }
+    /// ".parse().unwrap();
+    /// assert_eq!(dem.len(), 1);
+    /// ```
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
-    /// Returns whether the detector error model is empty.
+    /// Returns whether the detector error model contains no instructions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::DetectorErrorModel::new().is_empty());
+    /// assert!("error(0.1) D0".parse::<stim::DetectorErrorModel>().unwrap().is_empty() == false);
+    /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    /// Returns the total number of detectors mentioned by the model.
+    /// Counts the total number of detectors (e.g. `D2`) mentioned by the model.
+    ///
+    /// Detector indices are assumed to be contiguous from 0 up to the maximum
+    /// detector id. If the largest detector's absolute id is *n* − 1, the number
+    /// of detectors is *n*. The `shift_detectors` instruction is taken into
+    /// account when computing absolute ids.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dem: stim::DetectorErrorModel = "error(0.1) D0 D199".parse().unwrap();
+    /// assert_eq!(dem.num_detectors(), 200);
+    ///
+    /// // shift_detectors offsets subsequent detector ids.
+    /// let dem: stim::DetectorErrorModel = "
+    ///     shift_detectors 1000
+    ///     error(0.1) D0 D199
+    /// ".parse().unwrap();
+    /// assert_eq!(dem.num_detectors(), 1200);
+    /// ```
     #[must_use]
     pub fn num_detectors(&self) -> u64 {
         self.inner.num_detectors()
     }
 
-    /// Returns the number of error mechanisms in the model.
+    /// Counts the total number of error mechanisms (e.g. `error(0.1) D0`) in
+    /// the model.
+    ///
+    /// Error instructions inside repeat blocks count once per repetition.
+    /// Redundant errors with the same targets count as separate errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dem: stim::DetectorErrorModel = "
+    ///     error(0.125) D0
+    ///     repeat 100 {
+    ///         repeat 5 {
+    ///             error(0.25) D1
+    ///         }
+    ///     }
+    /// ".parse().unwrap();
+    /// assert_eq!(dem.num_errors(), 501);
+    /// ```
     #[must_use]
     pub fn num_errors(&self) -> u64 {
         self.inner.num_errors()
     }
 
-    /// Returns the number of observables mentioned by the model.
+    /// Counts the number of logical observables (e.g. `L2`) referenced by the
+    /// model.
+    ///
+    /// Observable indices are assumed to be contiguous from 0 up to the maximum
+    /// observable id. If the largest observable's id is *n* − 1, the number of
+    /// observables is *n*.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dem: stim::DetectorErrorModel = "error(0.1) L399".parse().unwrap();
+    /// assert_eq!(dem.num_observables(), 400);
+    /// ```
     #[must_use]
     pub fn num_observables(&self) -> u64 {
         self.inner.num_observables()
     }
 
-    /// Clears all items from the detector error model.
+    /// Clears all instructions from the detector error model, making it empty.
+    ///
+    /// After calling this method, [`is_empty`](Self::is_empty) returns `true`
+    /// and [`len`](Self::len) returns `0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut model: stim::DetectorErrorModel = "error(0.1) D0 D1".parse().unwrap();
+    /// assert!(!model.is_empty());
+    /// model.clear();
+    /// assert!(model.is_empty());
+    /// assert_eq!(model, stim::DetectorErrorModel::new());
+    /// ```
     pub fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Reads a detector error model from a file.
+    /// Reads a detector error model from a file on disk.
+    ///
+    /// The file should contain text in the detector error model (`.dem`) format,
+    /// as defined at
+    /// <https://github.com/quantumlib/Stim/blob/main/doc/file_format_dem_detector_error_model.md>.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read (e.g. the path does not
+    /// exist or permissions are insufficient), or if the file contents are not
+    /// valid `.dem` text.
     ///
     /// # Examples
     ///
@@ -97,7 +261,15 @@ impl DetectorErrorModel {
         Self::from_str(&text)
     }
 
-    /// Writes the detector error model to a file with a trailing newline.
+    /// Writes the detector error model to a file on disk, with a trailing newline.
+    ///
+    /// The output uses the detector error model (`.dem`) format, as defined at
+    /// <https://github.com/quantumlib/Stim/blob/main/doc/file_format_dem_detector_error_model.md>.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written (e.g. the parent
+    /// directory does not exist or permissions are insufficient).
     ///
     /// # Examples
     ///
@@ -115,13 +287,33 @@ impl DetectorErrorModel {
         fs::write(path, format!("{self}\n")).map_err(|error| StimError::new(error.to_string()))
     }
 
-    /// Returns an owned copy of the detector error model.
+    /// Returns an independent owned copy of the detector error model.
+    ///
+    /// The copy has identical contents but is a separate allocation, so
+    /// mutating one will not affect the other. This is equivalent to
+    /// [`Clone::clone`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let original: stim::DetectorErrorModel = "error(0.1) D0 D1".parse().unwrap();
+    /// let copy = original.copy();
+    /// assert_eq!(copy, original);
+    /// ```
     #[must_use]
     pub fn copy(&self) -> Self {
         self.clone()
     }
 
-    /// Compares two detector error models using an absolute tolerance on probabilities.
+    /// Checks whether two detector error models are approximately equal,
+    /// using an absolute tolerance on numeric arguments such as probabilities.
+    ///
+    /// Two models are approximately equal if they are equal up to slight
+    /// perturbations of instruction arguments (e.g. probabilities). For
+    /// example, `error(0.100) D0` is approximately equal to `error(0.099) D0`
+    /// within an absolute tolerance of `0.002`. All other details of the
+    /// models — including the ordering of errors, their targets, and their
+    /// structure — must be exactly the same.
     ///
     /// # Examples
     ///
@@ -130,13 +322,24 @@ impl DetectorErrorModel {
     /// let near: stim::DetectorErrorModel = "error(0.101) D0 D1".parse().unwrap();
     /// assert!(base.approx_equals(&near, 0.01));
     /// assert!(!base.approx_equals(&near, 0.0001));
+    ///
+    /// // Structural differences (different targets) are never approximately equal,
+    /// // regardless of the tolerance.
+    /// let different: stim::DetectorErrorModel = "error(0.099) D0 D1 L2".parse().unwrap();
+    /// assert!(!base.approx_equals(&different, 9999.0));
     /// ```
     #[must_use]
     pub fn approx_equals(&self, other: &Self, atol: f64) -> bool {
         self.inner.approx_equals(&other.inner, atol)
     }
 
-    /// Returns the model with all tags removed.
+    /// Returns a copy of the detector error model with all tags removed from
+    /// every instruction.
+    ///
+    /// Tags are arbitrary text annotations attached to instructions in square
+    /// brackets, such as the `[tag]` in `error[tag](0.25) D0`. This method
+    /// strips all such annotations while preserving every other aspect of the
+    /// model, including instructions inside repeat blocks.
     ///
     /// # Examples
     ///
@@ -157,7 +360,18 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Returns the model with repeat blocks flattened and shifts propagated.
+    /// Returns an equivalent detector error model with repeat blocks fully
+    /// unrolled and `shift_detectors` instructions inlined.
+    ///
+    /// The returned model contains the same errors in the same order, but with
+    /// all repeat loops expanded into their individual iterations and all
+    /// coordinate/index shifts folded into the detector and observable ids of
+    /// each error instruction. The result contains no `repeat` or
+    /// `shift_detectors` instructions.
+    ///
+    /// This is useful for analysis that needs to enumerate every error
+    /// mechanism with its absolute detector ids, at the cost of a potentially
+    /// much larger model.
     ///
     /// # Examples
     ///
@@ -178,7 +392,33 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Returns the model with probabilities rounded to a given number of digits.
+    /// Creates an equivalent detector error model with error probabilities
+    /// rounded to a given number of decimal digits.
+    ///
+    /// Only the parenthesized arguments of `error` instructions are rounded;
+    /// arguments on other instructions (e.g. `detector` coordinates,
+    /// `shift_detectors` offsets) are left unchanged. Error instructions whose
+    /// probability rounds to zero are still included in the output.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dem: stim::DetectorErrorModel = "
+    ///     error(0.019499) D0
+    ///     error(0.000001) D0 D1
+    /// ".parse().unwrap();
+    ///
+    /// // Rounding is applied to error probabilities only. Use approx_equals
+    /// // to verify the rounded values are within tolerance.
+    /// assert!(dem.rounded(2).approx_equals(
+    ///     &"error(0.02) D0\nerror(0) D0 D1".parse().unwrap(),
+    ///     1e-15,
+    /// ));
+    /// assert!(dem.rounded(3).approx_equals(
+    ///     &"error(0.019) D0\nerror(0) D0 D1".parse().unwrap(),
+    ///     1e-15,
+    /// ));
+    /// ```
     #[must_use]
     pub fn rounded(&self, digits: u8) -> Self {
         Self {
@@ -186,7 +426,19 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Compiles a sampler for the detector error model using the default seed.
+    /// Compiles a [`DemSampler`] for the detector error model, seeded from
+    /// system entropy.
+    ///
+    /// The returned sampler can efficiently generate batches of detection event
+    /// samples and observable flip samples directly from the error model,
+    /// without simulating a full circuit. Each call to
+    /// [`DemSampler::sample`](crate::DemSampler::sample) independently fires
+    /// each error mechanism with its stated probability, then computes which
+    /// detectors and observables are flipped.
+    ///
+    /// Because the seed is drawn from system entropy, results are
+    /// non-deterministic. Use [`compile_sampler_with_seed`](Self::compile_sampler_with_seed)
+    /// for reproducible sampling.
     ///
     /// # Examples
     ///
@@ -205,7 +457,30 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Compiles a sampler for the detector error model using an explicit seed.
+    /// Compiles a [`DemSampler`] for the detector error model using an
+    /// explicit seed for the random number generator.
+    ///
+    /// When set to the same seed, making the exact same series of calls on the
+    /// exact same machine with the exact same version of Stim will produce the
+    /// exact same simulation results.
+    ///
+    /// **Caution:** Simulation results are *not* guaranteed to be consistent
+    /// between different versions of Stim, across machines with different SIMD
+    /// instruction widths (e.g. AVX vs. SSE), or if you vary the number of
+    /// shots per call.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dem: stim::DetectorErrorModel = "error(0.5) D0 L0".parse().unwrap();
+    /// let mut s1 = dem.compile_sampler_with_seed(42);
+    /// let mut s2 = dem.compile_sampler_with_seed(42);
+    /// let (d1, o1, e1) = s1.sample(10);
+    /// let (d2, o2, e2) = s2.sample(10);
+    /// assert_eq!(d1, d2);
+    /// assert_eq!(o1, o2);
+    /// assert_eq!(e1, e2);
+    /// ```
     #[must_use]
     pub fn compile_sampler_with_seed(&self, seed: u64) -> DemSampler {
         DemSampler {
@@ -213,7 +488,43 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Returns a shortest graphlike logical error of the detector error model.
+    /// Finds a minimum-weight set of graphlike errors that produces an
+    /// undetected logical error (a logical error that flips at least one
+    /// observable while triggering no detection events).
+    ///
+    /// This method does **not** pay attention to error probabilities (other
+    /// than ignoring errors with probability 0). It searches for a logical
+    /// error with the minimum *number* of physical error mechanisms, not the
+    /// maximum probability of those mechanisms all occurring. Use
+    /// [`likeliest_error_sat_problem`](Self::likeliest_error_sat_problem) if
+    /// you need a probability-aware search.
+    ///
+    /// A "graphlike error" is an error that produces at most two detection
+    /// events (symptoms). Errors that decompose into graphlike components via
+    /// the `^` separator are also accepted. Non-graphlike errors (e.g.
+    /// `error(0.1) D0 D1 D2` without decomposition) are either skipped or
+    /// cause an error, depending on `ignore_ungraphlike_errors`.
+    ///
+    /// The search works by converting each frame-changing error into one or
+    /// two symptoms and a net frame change, then performing a breadth-first
+    /// search that moves symptoms along error edges until they cancel or
+    /// reach a boundary. If a net frame change remains when all symptoms are
+    /// gone, a logical error has been found.
+    ///
+    /// The returned model contains only `error` instructions (no `repeat` or
+    /// `shift_detectors`), all with probability set to 1. The `len()` of the
+    /// returned model is the graphlike code distance.
+    ///
+    /// **Note:** The true code distance may be smaller than the graphlike code
+    /// distance. For example, in the XZ surface code with twists, the true
+    /// minimum-sized logical error likely uses Y errors, each of which
+    /// decomposes into two graphlike components.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `ignore_ungraphlike_errors` is `false` and the
+    /// model contains errors that are not graphlike and not decomposed into
+    /// graphlike components.
     ///
     /// # Examples
     ///
@@ -234,24 +545,91 @@ impl DetectorErrorModel {
             .map_err(StimError::from)
     }
 
-    /// Returns a SAT problem encoding the shortest error search.
+    /// Encodes the shortest-error search as a weighted partial maxSAT problem
+    /// in WDIMACS format.
+    ///
+    /// The optimal solution to the returned problem is the fault distance of
+    /// the model: the minimum number of error mechanisms that combine to flip
+    /// at least one logical observable while producing no detection events.
+    /// This method ignores error probabilities — it only minimises the count
+    /// of triggered mechanisms.
+    ///
+    /// The output string can be fed to any maxSAT solver that accepts WDIMACS
+    /// format (see <http://www.maxhs.org/docs/wdimacs.html>).
+    ///
+    /// This is a convenience wrapper that calls
+    /// [`shortest_error_sat_problem_with_format`](Self::shortest_error_sat_problem_with_format)
+    /// with `"WDIMACS"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot be converted to a SAT problem
+    /// (e.g. it contains no observables).
     pub fn shortest_error_sat_problem(&self) -> Result<String> {
         self.shortest_error_sat_problem_with_format("WDIMACS")
     }
 
-    /// Returns a SAT problem encoding in the requested format.
+    /// Encodes the shortest-error search as a maxSAT problem in the specified
+    /// format.
+    ///
+    /// See [`shortest_error_sat_problem`](Self::shortest_error_sat_problem)
+    /// for a description of the problem being encoded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `format_name` is not a recognised format string, or
+    /// if the model cannot be converted to a SAT problem.
     pub fn shortest_error_sat_problem_with_format(&self, format_name: &str) -> Result<String> {
         self.inner
             .shortest_error_sat_problem(format_name)
             .map_err(StimError::from)
     }
 
-    /// Returns a SAT problem encoding the likeliest logical error search.
+    /// Encodes the likeliest-error search as a weighted partial maxSAT problem
+    /// in WDIMACS format, using the default quantization of 100.
+    ///
+    /// The optimal solution to the returned problem is the highest-likelihood
+    /// set of error mechanisms that combine to flip at least one logical
+    /// observable while producing no detection events. Unlike
+    /// [`shortest_error_sat_problem`](Self::shortest_error_sat_problem), this
+    /// method **does** take error probabilities into account: each error is
+    /// weighted by the log-odds of its probability, so that more likely errors
+    /// are preferred.
+    ///
+    /// Error probabilities are converted to log-odds and scaled/rounded to
+    /// positive integers. If any error has probability *p* > 0.5, it is
+    /// inverted so the weight remains positive. Errors with probability close
+    /// to 0.5 may receive a weight of 0, meaning they can be included or
+    /// excluded with no effect on the objective.
+    ///
+    /// This is a convenience wrapper that calls
+    /// [`likeliest_error_sat_problem_with_options`](Self::likeliest_error_sat_problem_with_options)
+    /// with `quantization = 100` and `format_name = "WDIMACS"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot be converted to a SAT problem.
     pub fn likeliest_error_sat_problem(&self) -> Result<String> {
         self.likeliest_error_sat_problem_with_options(100, "WDIMACS")
     }
 
-    /// Returns a likeliest-error SAT problem encoding with explicit options.
+    /// Encodes the likeliest-error search as a maxSAT problem with explicit
+    /// quantization and format options.
+    ///
+    /// `quantization` controls the precision of the log-odds weights: error
+    /// probabilities are converted to log-odds and scaled/rounded to positive
+    /// integers at most this large. A larger value gives more accurate
+    /// quantization (the returned error set's likelihood will be closer to the
+    /// true optimum) at the cost of potentially slower maxSAT solving.
+    ///
+    /// `format_name` selects the output format. `"WDIMACS"` is the standard
+    /// weighted partial maxSAT format (see
+    /// <http://www.maxhs.org/docs/wdimacs.html>).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `format_name` is not a recognised format string, or
+    /// if the model cannot be converted to a SAT problem.
     ///
     /// # Examples
     ///
@@ -270,7 +648,22 @@ impl DetectorErrorModel {
             .map_err(StimError::from)
     }
 
-    /// Returns detector coordinates, optionally filtered to specific ids.
+    /// Returns the coordinate metadata of detectors in the error model.
+    ///
+    /// Detector coordinates are set by `detector(...)` and
+    /// `shift_detectors(...)` instructions. This method resolves all shifts
+    /// and returns a map from detector index to its coordinate list. Detectors
+    /// with no explicitly specified coordinates are mapped to an empty `Vec`.
+    ///
+    /// If `only` is `Some`, only the listed detector indices are included in
+    /// the result and `set(result.keys()) == set(only)`. If `only` is `None`,
+    /// all detectors from index 0 up to [`num_detectors`](Self::num_detectors)
+    /// − 1 are included.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any detector index in `only` exceeds the model's
+    /// detector count.
     ///
     /// # Examples
     ///
@@ -311,7 +704,26 @@ impl DetectorErrorModel {
         parse_detector_coordinate_map(&serialized)
     }
 
-    /// Returns a visualization of the detector error model.
+    /// Returns a diagram of the detector error model as a string.
+    ///
+    /// The diagram visualises the decoding graph implied by the model.
+    /// Available diagram types are:
+    ///
+    /// - `"matchgraph-svg"` (or `"match-graph-svg"`): An SVG image of the
+    ///   decoding graph. Red lines are errors crossing a logical observable;
+    ///   blue lines are undecomposed hyper-errors.
+    /// - `"match-graph-svg-html"`: Same as `matchgraph-svg` but wrapped in a
+    ///   resizable HTML iframe.
+    /// - `"matchgraph-3d"`: A GLTF 3D model of the decoding graph. GLTF files
+    ///   can be opened in viewers such as
+    ///   <https://gltf-viewer.donmccurdy.com/>. Red lines are errors crossing
+    ///   a logical observable.
+    /// - `"matchgraph-3d-html"`: The 3D model embedded in an HTML page with an
+    ///   interactive THREE.js viewer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `type_name` is not a recognized diagram type.
     ///
     /// # Examples
     ///
@@ -327,7 +739,24 @@ impl DetectorErrorModel {
         self.inner.diagram(type_name).map_err(StimError::from)
     }
 
-    /// Appends a detector error model instruction built from parts.
+    /// Appends a new detector error model instruction built from its
+    /// constituent parts: instruction type name, parenthesized arguments,
+    /// targets, and an optional tag.
+    ///
+    /// This is the primary way to programmatically build up a detector error
+    /// model instruction by instruction. The `instruction_type` is a string
+    /// like `"error"`, `"shift_detectors"`, `"detector"`, or
+    /// `"logical_observable"`. The `parens_arguments` are the numeric values
+    /// inside the parentheses (e.g. the `0.25` in `error(0.25) D0`). The
+    /// `targets` are the instruction targets (e.g. detector ids, observable
+    /// ids, separators, or raw integers). The `tag` is an arbitrary string
+    /// annotation placed in square brackets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the instruction type is not recognised, or if the
+    /// combination of arguments and targets is invalid (e.g. an empty
+    /// instruction type string).
     ///
     /// # Examples
     ///
@@ -355,17 +784,41 @@ impl DetectorErrorModel {
         self.append_dem_instruction(&instruction)
     }
 
-    /// Appends an existing instruction item.
+    /// Appends an existing [`DemInstruction`] to the end of this model.
+    ///
+    /// The instruction is serialized and re-parsed, so the appended
+    /// instruction is an independent copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the serialized instruction text is invalid (this
+    /// should not happen for well-formed `DemInstruction` values).
     pub fn append_dem_instruction(&mut self, instruction: &DemInstruction) -> Result<()> {
         self.append_text_item(&instruction.to_string())
     }
 
-    /// Appends an existing repeat block item.
+    /// Appends an existing [`DemRepeatBlock`] to the end of this model.
+    ///
+    /// The repeat block is serialized and re-parsed, so the appended block is
+    /// an independent copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the serialized repeat block text is invalid.
     pub fn append_dem_repeat_block(&mut self, repeat_block: &DemRepeatBlock) -> Result<()> {
         self.append_text_item(&repeat_block.to_string())
     }
 
-    /// Appends another detector error model.
+    /// Appends all instructions from another [`DetectorErrorModel`] to the end
+    /// of this model.
+    ///
+    /// If the other model is empty, this is a no-op. The appended model is
+    /// serialized and re-parsed, so mutations to the source after appending
+    /// have no effect on this model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-parsing the combined model text fails.
     pub fn append_detector_error_model(&mut self, model: &DetectorErrorModel) -> Result<()> {
         if model.is_empty() {
             return Ok(());
@@ -373,7 +826,21 @@ impl DetectorErrorModel {
         self.append_text_item(&model.to_string())
     }
 
-    /// Appends a detector-error-model operation of any supported owned type.
+    /// Appends a detector-error-model operation of any supported owned type:
+    /// a [`DemInstruction`], a [`DemRepeatBlock`], or an entire
+    /// [`DetectorErrorModel`].
+    ///
+    /// This is a convenience method that dispatches to
+    /// [`append_dem_instruction`](Self::append_dem_instruction),
+    /// [`append_dem_repeat_block`](Self::append_dem_repeat_block), or
+    /// [`append_detector_error_model`](Self::append_detector_error_model)
+    /// depending on the variant of the [`DemAppendOperation`]. It also accepts
+    /// references and owned values of the underlying types via `Into`
+    /// conversions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the serialized text of the operation is invalid.
     ///
     /// # Examples
     ///
@@ -397,7 +864,39 @@ impl DetectorErrorModel {
         }
     }
 
-    /// Returns a top-level item by index.
+    /// Returns a copy of a single top-level item by index.
+    ///
+    /// The `index` supports Python-style negative indexing: `-1` is the last
+    /// item, `-2` is the second-to-last, and so on. The returned [`DemItem`]
+    /// is an independent copy; mutating it does not affect this model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of range for the number of
+    /// top-level items.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let model: stim::DetectorErrorModel = "
+    ///     error(0.125) D0
+    ///     error(0.125) D1 L1
+    ///     repeat 100 {
+    ///         error(0.125) D1 D2
+    ///         shift_detectors 1
+    ///     }
+    ///     detector D5
+    /// ".parse().unwrap();
+    ///
+    /// // First item is an error instruction.
+    /// assert!(matches!(model.get(0).unwrap(), stim::DemItem::Instruction(_)));
+    ///
+    /// // Third item (index 2) is a repeat block.
+    /// assert!(matches!(model.get(2).unwrap(), stim::DemItem::RepeatBlock(_)));
+    ///
+    /// // Negative indexing: last item.
+    /// assert!(matches!(model.get(-1).unwrap(), stim::DemItem::Instruction(_)));
+    /// ```
     pub fn get(&self, index: isize) -> Result<DemItem> {
         let items = self.top_level_item_texts()?;
         let normalized = normalize_index(index, items.len())
@@ -405,7 +904,35 @@ impl DetectorErrorModel {
         parse_dem_item(&items[normalized])
     }
 
-    /// Returns a sliced detector error model over top-level items.
+    /// Returns a new detector error model containing a slice of top-level
+    /// items, analogous to Python's `model[start:stop:step]` syntax.
+    ///
+    /// The `start`, `stop`, and `step` parameters follow Python slice
+    /// semantics, including support for negative indices.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `step` is zero, or if the resulting text cannot be
+    /// parsed back into a valid model.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let model: stim::DetectorErrorModel = "
+    ///     error(0.125) D0
+    ///     error(0.125) D1 L1
+    ///     error(0.125) D2
+    ///     detector D5
+    /// ".parse().unwrap();
+    ///
+    /// // Every other item starting from index 1.
+    /// let sliced = model.slice(Some(1), None, 2).unwrap();
+    /// assert_eq!(sliced.len(), 2);
+    ///
+    /// // Last two items.
+    /// let tail = model.slice(Some(-2), None, 1).unwrap();
+    /// assert_eq!(tail.len(), 2);
+    /// ```
     pub fn slice(&self, start: Option<isize>, stop: Option<isize>, step: isize) -> Result<Self> {
         if step == 0 {
             return Err(StimError::new("slice step cannot be zero"));
@@ -453,6 +980,12 @@ impl Default for DetectorErrorModel {
     }
 }
 
+/// Determines if two detector error models have identical contents.
+///
+/// Two models are equal if and only if they have the exact same sequence of
+/// instructions with the exact same arguments and targets. Approximate
+/// equality (e.g. within a tolerance on probabilities) is available via
+/// [`approx_equals`](DetectorErrorModel::approx_equals).
 impl PartialEq for DetectorErrorModel {
     fn eq(&self, other: &Self) -> bool {
         self.inner.equals(&other.inner)
@@ -461,6 +994,20 @@ impl PartialEq for DetectorErrorModel {
 
 impl Eq for DetectorErrorModel {}
 
+/// Creates a new detector error model by concatenating two models.
+///
+/// The resulting model contains all instructions from the left-hand side
+/// followed by all instructions from the right-hand side. Neither operand
+/// is modified.
+///
+/// # Examples
+///
+/// ```
+/// let m1: stim::DetectorErrorModel = "error(0.125) D0".parse().unwrap();
+/// let m2: stim::DetectorErrorModel = "error(0.25) D1".parse().unwrap();
+/// let combined = m1 + m2;
+/// assert_eq!(combined.to_string(), "error(0.125) D0\nerror(0.25) D1");
+/// ```
 impl Add for DetectorErrorModel {
     type Output = Self;
 
@@ -471,12 +1018,43 @@ impl Add for DetectorErrorModel {
     }
 }
 
+/// Appends a detector error model into the receiving model, mutating it
+/// in place.
+///
+/// After `a += b`, `a` contains all of its original instructions followed
+/// by all instructions from `b`.
+///
+/// # Examples
+///
+/// ```
+/// let mut m1: stim::DetectorErrorModel = "error(0.125) D0".parse().unwrap();
+/// let m2: stim::DetectorErrorModel = "error(0.25) D1".parse().unwrap();
+/// m1 += m2;
+/// assert_eq!(m1.to_string(), "error(0.125) D0\nerror(0.25) D1");
+/// ```
 impl AddAssign for DetectorErrorModel {
     fn add_assign(&mut self, rhs: Self) {
         self.inner.add_assign(&rhs.inner);
     }
 }
 
+/// Repeats the detector error model by wrapping its contents in a repeat
+/// block.
+///
+/// Has special cases:
+/// - `model * 0` returns an empty model.
+/// - `model * 1` returns a copy of the model (no repeat block wrapper).
+/// - `model * n` (for `n >= 2`) returns a model with a single `repeat n { … }` block.
+///
+/// # Examples
+///
+/// ```
+/// let m: stim::DetectorErrorModel = "error(0.25) D0\nshift_detectors 1".parse().unwrap();
+/// assert_eq!(
+///     (m * 3).to_string(),
+///     "repeat 3 {\n    error(0.25) D0\n    shift_detectors 1\n}"
+/// );
+/// ```
 impl Mul<u64> for DetectorErrorModel {
     type Output = Self;
 
@@ -487,6 +1065,20 @@ impl Mul<u64> for DetectorErrorModel {
     }
 }
 
+/// Repeats the detector error model (right-multiply variant), allowing
+/// `3 * model` as an alternative spelling of `model * 3`.
+///
+/// See [`Mul<u64> for DetectorErrorModel`] for full semantics.
+///
+/// # Examples
+///
+/// ```
+/// let m: stim::DetectorErrorModel = "error(0.25) D0\nshift_detectors 1".parse().unwrap();
+/// assert_eq!(
+///     (3 * m).to_string(),
+///     "repeat 3 {\n    error(0.25) D0\n    shift_detectors 1\n}"
+/// );
+/// ```
 impl Mul<DetectorErrorModel> for u64 {
     type Output = DetectorErrorModel;
 
@@ -495,18 +1087,44 @@ impl Mul<DetectorErrorModel> for u64 {
     }
 }
 
+/// Mutates the detector error model by wrapping its contents in a repeat
+/// block in place.
+///
+/// - `model *= 0` clears the model.
+/// - `model *= 1` is a no-op.
+/// - `model *= n` (for `n >= 2`) replaces the model's contents with a
+///   single `repeat n { … }` block.
+///
+/// # Examples
+///
+/// ```
+/// let mut m: stim::DetectorErrorModel = "error(0.25) D0\nshift_detectors 1".parse().unwrap();
+/// m *= 3;
+/// assert_eq!(
+///     m.to_string(),
+///     "repeat 3 {\n    error(0.25) D0\n    shift_detectors 1\n}"
+/// );
+/// ```
 impl MulAssign<u64> for DetectorErrorModel {
     fn mul_assign(&mut self, rhs: u64) {
         self.inner.repeat_assign(rhs);
     }
 }
 
+/// Returns the contents of the detector error model in the `.dem` file
+/// format.
+///
+/// The output can be parsed back into an equivalent model via
+/// [`FromStr`].
 impl Display for DetectorErrorModel {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(&self.inner.to_dem_text())
     }
 }
 
+/// Produces a debug representation that resembles the Rust constructor
+/// syntax: `stim::DetectorErrorModel("""...""")` for non-empty models, or
+/// `stim::DetectorErrorModel()` for empty ones.
 impl fmt::Debug for DetectorErrorModel {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self == &Self::new() {
@@ -517,6 +1135,14 @@ impl fmt::Debug for DetectorErrorModel {
     }
 }
 
+/// Parses a detector error model from its `.dem` text representation.
+///
+/// # Examples
+///
+/// ```
+/// let model: stim::DetectorErrorModel = "error(0.125) D0 D1 L0".parse().unwrap();
+/// assert_eq!(model.len(), 1);
+/// ```
 impl FromStr for DetectorErrorModel {
     type Err = StimError;
 

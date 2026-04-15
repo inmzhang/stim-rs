@@ -46,7 +46,7 @@ fn main() {
     let vendor_sources = collect_vendor_sources(&vendor_dir);
 
     println!("cargo:rustc-env=STIM_RS_CXX_STANDARD=c++20");
-    println!("cargo:rustc-env=STIM_RS_PINNED_STIM_COMMIT=75d9cb12626a9dccca3e9917a5020aa1d3f3dc46");
+    println!("cargo:rustc-env=STIM_RS_PINNED_STIM_COMMIT=bdaecd7748bf4e85d88cbe4d2c2e01dc56562d6f");
     println!(
         "cargo:rustc-env=STIM_RS_TARGET={}",
         env::var("TARGET").expect("missing TARGET")

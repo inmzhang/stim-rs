@@ -23,3 +23,16 @@ cargo add stim
 ## Contributing
 
 Issues and pull requests are very welcome, whether they relate to performance, ergonomics, or bugs.
+
+### Updating the vendored Stim C++ source
+
+The upstream Stim C++ library is vendored as a git submodule at
+`crates/stim-cxx/vendor/stim`. To update it:
+
+```bash
+git -C crates/stim-cxx/vendor/stim fetch origin
+git -C crates/stim-cxx/vendor/stim checkout <commit-or-tag>
+# Update STIM_RS_PINNED_STIM_COMMIT in crates/stim-cxx/build.rs to match.
+cargo nextest run -p stim && cargo test --doc -p stim
+git add crates/stim-cxx/vendor/stim crates/stim-cxx/build.rs
+```

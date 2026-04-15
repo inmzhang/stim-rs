@@ -3,6 +3,37 @@ use std::hash::{Hash, Hasher};
 
 use super::GateTarget;
 
+/// A gate target paired with associated coordinate information.
+///
+/// When Stim explains errors or other analysis results, bare qubit
+/// indices are often insufficient for understanding what is happening
+/// physically. If the circuit contains `QUBIT_COORDS` instructions,
+/// Stim can associate coordinate data (typically spatial positions)
+/// with each qubit index. This struct bundles a
+/// [`GateTarget`](crate::GateTarget) together with its coordinate
+/// vector, making debugging and visualization much easier.
+///
+/// The coordinates come from the `QUBIT_COORDS` instruction for the
+/// qubit. If no coordinates were declared, the `coords` slice is empty.
+///
+/// # Examples
+///
+/// ```
+/// use stim::{GateTarget, GateTargetWithCoords};
+///
+/// // A plain qubit target with 2D coordinates.
+/// let target = GateTargetWithCoords::new(GateTarget::new(0u32), vec![1.5, 2.0]);
+/// assert_eq!(target.gate_target(), GateTarget::new(0u32));
+/// assert_eq!(target.coords(), &[1.5, 2.0]);
+///
+/// // A Pauli target with no coordinates.
+/// let pauli = GateTargetWithCoords::new(
+///     stim::target_x(5u32, false).expect("valid target"),
+///     vec![],
+/// );
+/// assert!(pauli.coords().is_empty());
+/// assert_eq!(pauli.to_string(), "X5");
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct GateTargetWithCoords {
     gate_target: GateTarget,
@@ -10,6 +41,16 @@ pub struct GateTargetWithCoords {
 }
 
 impl GateTargetWithCoords {
+    /// Creates a new gate target with associated coordinate data.
+    ///
+    /// # Arguments
+    ///
+    /// - `gate_target` -- the gate target (qubit index, Pauli target,
+    ///   measurement record target, combiner, etc.). Any type that
+    ///   implements `Into<GateTarget>` is accepted.
+    /// - `coords` -- the coordinate data for the target, typically from
+    ///   a `QUBIT_COORDS` instruction. Pass an empty `Vec` if no
+    ///   coordinate information is available.
     #[must_use]
     pub fn new(gate_target: impl Into<GateTarget>, coords: Vec<f64>) -> Self {
         Self {
@@ -18,11 +59,23 @@ impl GateTargetWithCoords {
         }
     }
 
+    /// Returns the actual gate target as a [`GateTarget`](crate::GateTarget).
+    ///
+    /// This may be a plain qubit index, a Pauli target (X/Y/Z on a
+    /// qubit), a measurement record reference, a sweep bit reference,
+    /// or a combiner (`*`), depending on the context in which this
+    /// value was produced.
     #[must_use]
     pub fn gate_target(&self) -> GateTarget {
         self.gate_target
     }
 
+    /// Returns the associated coordinate information as a slice of
+    /// floats.
+    ///
+    /// The coordinates come from `QUBIT_COORDS` instructions in the
+    /// circuit. If no coordinate data was declared for this qubit, the
+    /// returned slice is empty.
     #[must_use]
     pub fn coords(&self) -> &[f64] {
         &self.coords

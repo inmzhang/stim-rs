@@ -3,11 +3,14 @@ use std::ops::{Add, AddAssign, Mul, MulAssign};
 
 /// A replacement value accepted by [`CliffordString::set`].
 ///
-/// Either a gate name string or a [`crate::GateData`] reference.
+/// This enum allows `set` to accept either a gate name string (like `"H"` or
+/// `"S"`) or a reference to a [`crate::GateData`] instance. Both variants
+/// are converted through the corresponding [`From`] implementations, so
+/// callers can pass either type directly.
 pub enum CliffordGateValue<'a> {
-    /// A gate name like `"H"` or `"S"`.
+    /// A gate name like `"H"`, `"S"`, or `"SQRT_X"`.
     Name(&'a str),
-    /// A reference to gate metadata.
+    /// A reference to gate metadata obtained from [`crate::gate_data`].
     GateData(&'a crate::GateData),
 }
 
@@ -23,7 +26,42 @@ impl<'a> From<&'a crate::GateData> for CliffordGateValue<'a> {
     }
 }
 
-/// A sequence of single-qubit Clifford gates.
+/// A tensor product of single-qubit Clifford gates (e.g. "H x X x S").
+///
+/// Represents a sequence of single-qubit Clifford operations, one per qubit,
+/// applied independently. This is useful for representing per-qubit Clifford
+/// layers in a circuit, such as a round of single-qubit gates before or after
+/// entangling operations. Global phase is ignored.
+///
+/// There are exactly 24 single-qubit Clifford gates (the symmetry group of
+/// the octahedron). A `CliffordString` assigns one of these 24 gates to each
+/// qubit position. The gates are represented by their canonical Stim names
+/// (e.g. `I`, `X`, `Y`, `Z`, `H`, `S`, `S_DAG`, `SQRT_X`, `C_XYZ`, etc.).
+///
+/// `CliffordString` supports several arithmetic operations:
+///
+/// - **Concatenation** (`+`, `+=`): appends one string after another.
+/// - **Pairwise multiplication** (`*`, `*=` with another `CliffordString`):
+///   composes corresponding Clifford gates element-wise. When lengths differ,
+///   the shorter string is implicitly padded with identity gates.
+/// - **Repetition** (`*`, `*=` with a `u64`): repeats the contents.
+/// - **Exponentiation** (`pow`, `ipow`): raises each gate to a power.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CliffordString;
+///
+/// // Parse from comma-separated gate names.
+/// let c = CliffordString::from_text("H,S,C_XYZ").unwrap();
+/// assert_eq!(c.len(), 3);
+/// assert_eq!(c.get(0).unwrap().name(), "H");
+///
+/// // Pairwise composition: H*H = I, S*H = C_ZYX, C_XYZ*H = SQRT_X_DAG.
+/// let composed = CliffordString::from_text("H,S,C_XYZ").unwrap()
+///     * CliffordString::from_text("H,H,H").unwrap();
+/// assert_eq!(composed.to_string(), "I,C_ZYX,SQRT_X_DAG");
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct CliffordString {
     pub(crate) inner: stim_cxx::CliffordString,
@@ -32,12 +70,17 @@ pub struct CliffordString {
 impl CliffordString {
     /// Creates an identity Clifford string over `num_qubits` qubits.
     ///
+    /// Every gate in the resulting string is the single-qubit identity `I`.
+    ///
     /// # Examples
     ///
     /// ```
     /// let c = stim::CliffordString::new(3);
     /// assert_eq!(c.to_string(), "I,I,I");
     /// assert_eq!(c.len(), 3);
+    ///
+    /// let empty = stim::CliffordString::new(0);
+    /// assert!(empty.is_empty());
     /// ```
     #[must_use]
     pub fn new(num_qubits: usize) -> Self {
@@ -46,7 +89,18 @@ impl CliffordString {
         }
     }
 
-    /// Parses a Clifford string from comma-separated gate names.
+    /// Parses a Clifford string from a comma-separated list of gate names.
+    ///
+    /// Each token between commas should be the canonical Stim name of a
+    /// single-qubit Clifford gate. Leading and trailing whitespace around each
+    /// token is trimmed, and a trailing comma is allowed. Gate name aliases
+    /// (e.g. `H_XZ` for `H`) are accepted and normalized to their canonical
+    /// form.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any token is not a recognized single-qubit Clifford
+    /// gate name.
     ///
     /// # Examples
     ///
@@ -54,6 +108,10 @@ impl CliffordString {
     /// let s = stim::CliffordString::from_text("X,Y,Z,H,SQRT_X,C_XYZ").unwrap();
     /// assert_eq!(s.get(2).unwrap().name(), "Z");
     /// assert_eq!(s.get(-1).unwrap().name(), "C_XYZ");
+    ///
+    /// // Whitespace is trimmed.
+    /// let s = stim::CliffordString::from_text("  H  ,  S  ").unwrap();
+    /// assert_eq!(s.to_string(), "H,S");
     /// ```
     pub fn from_text(text: &str) -> crate::Result<Self> {
         stim_cxx::CliffordString::from_text(text)
@@ -61,13 +119,18 @@ impl CliffordString {
             .map_err(crate::StimError::from)
     }
 
-    /// Converts a Pauli string into the corresponding Clifford string.
+    /// Converts a [`crate::PauliString`] into the corresponding Clifford string.
+    ///
+    /// Each Pauli operator in the input string (`I`, `X`, `Y`, `Z`) becomes the
+    /// corresponding single-qubit Clifford gate. The sign of the Pauli string
+    /// is ignored, since `CliffordString` does not track global phase.
     ///
     /// # Examples
     ///
     /// ```
     /// let p = stim::PauliString::from_text("-XYZ").unwrap();
     /// let c = stim::CliffordString::from_pauli_string(&p);
+    /// // The sign is discarded.
     /// assert_eq!(c.to_string(), "X,Y,Z");
     /// ```
     #[must_use]
@@ -77,13 +140,28 @@ impl CliffordString {
         }
     }
 
-    /// Extracts the Clifford action of a circuit as a Clifford string.
+    /// Extracts the per-qubit Clifford action of a circuit as a Clifford string.
+    ///
+    /// The circuit must contain only single-qubit unitary operations and
+    /// annotations (like `TICK`). Multi-qubit gates such as `CNOT` are not
+    /// allowed. The resulting string describes the composed single-qubit
+    /// Clifford applied to each qubit across all layers of the circuit.
+    ///
+    /// The length of the returned string equals the number of qubits used by
+    /// the circuit (including implicit identity qubits for unused indices up to
+    /// the maximum qubit index).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit contains multi-qubit gates or non-unitary
+    /// operations.
     ///
     /// # Examples
     ///
     /// ```
     /// let circuit: stim::Circuit = "H 0 1\nS 1 2".parse().unwrap();
     /// let c = stim::CliffordString::from_circuit(&circuit).unwrap();
+    /// // Qubit 0: H, Qubit 1: H then S = C_ZYX, Qubit 2: S.
     /// assert_eq!(c.to_string(), "H,C_ZYX,S");
     /// ```
     pub fn from_circuit(circuit: &crate::Circuit) -> crate::Result<Self> {
@@ -92,7 +170,10 @@ impl CliffordString {
             .map_err(crate::StimError::from)
     }
 
-    /// Returns a random Clifford string of the requested length.
+    /// Returns a uniformly random Clifford string of the given length.
+    ///
+    /// Each qubit position is independently assigned one of the 24 single-qubit
+    /// Clifford gates with equal probability.
     ///
     /// # Examples
     ///
@@ -108,7 +189,16 @@ impl CliffordString {
         }
     }
 
-    /// Returns the 24 single-qubit Clifford gates in Stim's canonical order.
+    /// Returns a 24-element Clifford string containing each single-qubit Clifford
+    /// gate exactly once, in Stim's canonical order.
+    ///
+    /// This is useful for enumerating or testing behavior across all 24
+    /// single-qubit Cliffords. The canonical order groups the gates as:
+    ///
+    /// - Indices 0--3: Paulis (`I`, `X`, `Y`, `Z`)
+    /// - Indices 4--7: axis-exchange half-turns (`H_XY`, `S`, `S_DAG`, `H_NXY`)
+    /// - Indices 8--15: other quarter/half-turns (`H`, `SQRT_Y_DAG`, ...)
+    /// - Indices 16--23: order-3 rotations (`C_XYZ`, `C_XYNZ`, ...)
     ///
     /// # Examples
     ///
@@ -127,33 +217,76 @@ impl CliffordString {
         }
     }
 
-    /// Returns an owned copy of the Clifford string.
+    /// Returns an independent copy of the Clifford string.
+    ///
+    /// This is equivalent to `Clone::clone`, but provided for API parity with
+    /// the Python `stim.CliffordString.copy()` method. Mutating the copy does
+    /// not affect the original.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let original = stim::CliffordString::from_text("H,S").unwrap();
+    /// let copy = original.copy();
+    /// assert_eq!(original, copy);
+    /// ```
     #[must_use]
     pub fn copy(&self) -> Self {
         self.clone()
     }
 
-    /// Returns the number of single-qubit Clifford entries.
+    /// Returns the number of qubit positions in the Clifford string.
+    ///
+    /// This is identical to [`CliffordString::len`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let c = stim::CliffordString::from_text("H,S,I").unwrap();
+    /// assert_eq!(c.num_qubits(), 3);
+    /// ```
     #[must_use]
     pub fn num_qubits(&self) -> usize {
         self.inner.num_qubits()
     }
 
-    /// Returns the number of single-qubit Clifford entries.
+    /// Returns the number of single-qubit Clifford entries in the string.
+    ///
+    /// This is identical to [`CliffordString::num_qubits`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let c = stim::CliffordString::from_text("I,X,Y,Z,H").unwrap();
+    /// assert_eq!(c.len(), 5);
+    /// ```
     #[must_use]
     pub fn len(&self) -> usize {
         self.num_qubits()
     }
 
-    /// Returns whether the Clifford string is empty.
+    /// Returns whether the Clifford string contains zero entries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::CliffordString::new(0).is_empty());
+    /// assert!(!stim::CliffordString::new(1).is_empty());
+    /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Returns a gate by index.
+    /// Returns the single-qubit Clifford gate at the given index as a
+    /// [`crate::GateData`].
     ///
-    /// Negative indices count from the end.
+    /// Negative indices count backwards from the end of the string, following
+    /// the Python convention (e.g. `-1` is the last element).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of bounds.
     ///
     /// # Examples
     ///
@@ -169,7 +302,16 @@ impl CliffordString {
             .and_then(|name| crate::gate_data(&name))
     }
 
-    /// Replaces a gate by index.
+    /// Replaces the single-qubit Clifford gate at the given index.
+    ///
+    /// The replacement `value` can be a gate name string (e.g. `"H"`) or a
+    /// reference to a [`crate::GateData`] instance. Negative indices count
+    /// backwards from the end.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of bounds or `value` is not a
+    /// recognized single-qubit Clifford gate.
     ///
     /// # Examples
     ///
@@ -200,13 +342,27 @@ impl CliffordString {
         Ok(())
     }
 
-    /// Returns a sliced Clifford string.
+    /// Returns a sub-sequence of the Clifford string selected by Python-style
+    /// slice parameters.
+    ///
+    /// The `start`, `stop`, and `step` parameters follow the same semantics as
+    /// Python's `slice(start, stop, step)`. Negative values for `start` and
+    /// `stop` count backwards from the end of the string. `None` means "use the
+    /// natural bound" (beginning or end, depending on sign of `step`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `step` is zero.
     ///
     /// # Examples
     ///
     /// ```
     /// let c = stim::CliffordString::from_text("I,X,H,Y,S").unwrap();
+    ///
+    /// // Omit the last element.
     /// assert_eq!(c.slice(None, Some(-1), 1).unwrap().to_string(), "I,X,H,Y");
+    ///
+    /// // Every other element.
     /// assert_eq!(c.slice(None, None, 2).unwrap().to_string(), "I,H,S");
     /// ```
     pub fn slice(
@@ -227,9 +383,20 @@ impl CliffordString {
         })
     }
 
-    /// Returns the Clifford outputs of the X generators.
+    /// Returns what each Clifford in the string conjugates an X input into.
     ///
-    /// The returned boolean vector contains the sign bits for each output.
+    /// For each qubit position, this computes the result of conjugating the
+    /// single-qubit X operator by the Clifford gate at that position. For
+    /// example, `H` conjugates X into +Z, and `Y` conjugates X into -X.
+    ///
+    /// Combined with [`CliffordString::z_outputs`], the X outputs completely
+    /// specify the single-qubit Clifford applied at each position.
+    ///
+    /// Returns a `(paulis, signs)` tuple where:
+    /// - `paulis` is a [`crate::PauliString`] (always positive sign) giving
+    ///   the output Pauli type at each qubit.
+    /// - `signs` is a `Vec<bool>` where `true` means the output has a negative
+    ///   sign.
     ///
     /// # Examples
     ///
@@ -249,13 +416,18 @@ impl CliffordString {
         )
     }
 
-    /// Returns the X outputs and packed sign bits.
+    /// Returns the X outputs with sign data in bit-packed form.
+    ///
+    /// This is the same as [`CliffordString::x_outputs`] except the sign data
+    /// is returned as a `Vec<u8>` with 8 sign bits packed into each byte in
+    /// little-endian bit order. The vector length is `ceil(num_qubits / 8)`.
     ///
     /// # Examples
     ///
     /// ```
     /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().x_outputs_bit_packed();
     /// assert_eq!(paulis, stim::PauliString::from_text("+XXZY").unwrap());
+    /// // Bit 1 is set (Y at index 1 negates X), giving 0b00000010 = 2.
     /// assert_eq!(signs, vec![2]);
     /// ```
     pub fn x_outputs_bit_packed(&self) -> (crate::PauliString, Vec<u8>) {
@@ -269,7 +441,22 @@ impl CliffordString {
         )
     }
 
-    /// Returns the Y outputs and unpacked sign bits.
+    /// Returns what each Clifford in the string conjugates a Y input into.
+    ///
+    /// For each qubit position, this computes the result of conjugating the
+    /// single-qubit Y operator by the Clifford gate at that position. For
+    /// example, `H` conjugates Y into -Y, and `S_DAG` conjugates Y into +X.
+    ///
+    /// Returns a `(paulis, signs)` tuple with the same structure as
+    /// [`CliffordString::x_outputs`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (paulis, signs) = stim::CliffordString::from_text("I,X,H,S").unwrap().y_outputs();
+    /// assert_eq!(paulis, stim::PauliString::from_text("+YYYX").unwrap());
+    /// assert_eq!(signs, vec![false, true, true, true]);
+    /// ```
     pub fn y_outputs(&self) -> (crate::PauliString, Vec<bool>) {
         let signs = self.inner.y_signs_bit_packed();
         (
@@ -281,7 +468,20 @@ impl CliffordString {
         )
     }
 
-    /// Returns the Y outputs and packed sign bits.
+    /// Returns the Y outputs with sign data in bit-packed form.
+    ///
+    /// This is the same as [`CliffordString::y_outputs`] except the sign data
+    /// is returned as a `Vec<u8>` with 8 sign bits packed per byte in
+    /// little-endian bit order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (paulis, signs) = stim::CliffordString::from_text("I,X,H,S").unwrap().y_outputs_bit_packed();
+    /// assert_eq!(paulis, stim::PauliString::from_text("+YYYX").unwrap());
+    /// // Bits 1, 2, 3 are set: 0b00001110 = 14.
+    /// assert_eq!(signs, vec![14]);
+    /// ```
     pub fn y_outputs_bit_packed(&self) -> (crate::PauliString, Vec<u8>) {
         let signs = self.inner.y_signs_bit_packed();
         (
@@ -293,7 +493,25 @@ impl CliffordString {
         )
     }
 
-    /// Returns the Z outputs and unpacked sign bits.
+    /// Returns what each Clifford in the string conjugates a Z input into.
+    ///
+    /// For each qubit position, this computes the result of conjugating the
+    /// single-qubit Z operator by the Clifford gate at that position. For
+    /// example, `H` conjugates Z into +X, and `SQRT_X` conjugates Z into -Y.
+    ///
+    /// Combined with [`CliffordString::x_outputs`], the Z outputs completely
+    /// specify the single-qubit Clifford applied at each position.
+    ///
+    /// Returns a `(paulis, signs)` tuple with the same structure as
+    /// [`CliffordString::x_outputs`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().z_outputs();
+    /// assert_eq!(paulis, stim::PauliString::from_text("+ZZXZ").unwrap());
+    /// assert_eq!(signs, vec![false, true, false, false]);
+    /// ```
     pub fn z_outputs(&self) -> (crate::PauliString, Vec<bool>) {
         let signs = self.inner.z_signs_bit_packed();
         (
@@ -305,7 +523,20 @@ impl CliffordString {
         )
     }
 
-    /// Returns the Z outputs and packed sign bits.
+    /// Returns the Z outputs with sign data in bit-packed form.
+    ///
+    /// This is the same as [`CliffordString::z_outputs`] except the sign data
+    /// is returned as a `Vec<u8>` with 8 sign bits packed per byte in
+    /// little-endian bit order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().z_outputs_bit_packed();
+    /// assert_eq!(paulis, stim::PauliString::from_text("+ZZXZ").unwrap());
+    /// // Bit 1 is set (Y at index 1 negates Z): 0b00000010 = 2.
+    /// assert_eq!(signs, vec![2]);
+    /// ```
     pub fn z_outputs_bit_packed(&self) -> (crate::PauliString, Vec<u8>) {
         let signs = self.inner.z_signs_bit_packed();
         (
@@ -317,14 +548,19 @@ impl CliffordString {
         )
     }
 
-    /// Raises each Clifford gate in the string to the given power.
+    /// Returns a new Clifford string with each gate raised to the given power.
+    ///
+    /// Each single-qubit Clifford gate in the string is independently raised
+    /// to `exponent`. Since single-qubit Cliffords have order dividing 24,
+    /// the exponent is effectively taken modulo the gate's order. Negative
+    /// exponents produce the inverse (e.g. `S` raised to `-1` gives `S_DAG`).
     ///
     /// # Examples
     ///
     /// ```
-    /// let mut c = stim::CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
-    /// c.ipow(3);
-    /// assert_eq!(c, stim::CliffordString::from_text("I,X,H,S_DAG,I").unwrap());
+    /// let c = stim::CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
+    /// assert_eq!(c.pow(3).to_string(), "I,X,H,S_DAG,I");
+    /// assert_eq!(c.pow(-1).to_string(), "I,X,H,S_DAG,C_ZYX");
     /// ```
     #[must_use]
     pub fn pow(&self, exponent: i64) -> Self {
@@ -333,7 +569,17 @@ impl CliffordString {
         }
     }
 
-    /// Mutates the Clifford string by raising each entry to a power in place.
+    /// Raises each Clifford gate in the string to the given power in place.
+    ///
+    /// This is the mutating variant of [`CliffordString::pow`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut c = stim::CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
+    /// c.ipow(3);
+    /// assert_eq!(c, stim::CliffordString::from_text("I,X,H,S_DAG,I").unwrap());
+    /// ```
     pub fn ipow(&mut self, exponent: i64) {
         self.inner.ipow(exponent);
     }
@@ -357,6 +603,20 @@ impl fmt::Debug for CliffordString {
     }
 }
 
+/// Concatenates two Clifford strings end-to-end.
+///
+/// The result has length `self.len() + rhs.len()`, with the entries of `self`
+/// followed by the entries of `rhs`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CliffordString;
+///
+/// let ab = CliffordString::from_text("I,X,H").unwrap()
+///     + CliffordString::from_text("Y,S").unwrap();
+/// assert_eq!(ab.to_string(), "I,X,H,Y,S");
+/// ```
 impl Add for CliffordString {
     type Output = Self;
 
@@ -367,12 +627,32 @@ impl Add for CliffordString {
     }
 }
 
+/// Concatenates another Clifford string onto the end of this one in place.
+///
+/// After `self += rhs`, `self` contains its original entries followed by the
+/// entries of `rhs`.
 impl AddAssign for CliffordString {
     fn add_assign(&mut self, rhs: Self) {
         self.inner.add_assign(&rhs.inner);
     }
 }
 
+/// Composes two Clifford strings element-wise (pairwise gate multiplication).
+///
+/// The Clifford gate at each qubit position is the composition of the
+/// corresponding gates from `self` and `rhs`. When the strings have different
+/// lengths, the shorter one is implicitly padded with identity gates.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CliffordString;
+///
+/// // S * S = Z on the first qubit, X * Z = Y on the second.
+/// let product = CliffordString::from_text("S,X,X").unwrap()
+///     * CliffordString::from_text("S,Z,H,Z").unwrap();
+/// assert_eq!(product.to_string(), "Z,Y,SQRT_Y,Z");
+/// ```
 impl Mul<CliffordString> for CliffordString {
     type Output = Self;
 
@@ -383,12 +663,29 @@ impl Mul<CliffordString> for CliffordString {
     }
 }
 
+/// Composes another Clifford string element-wise into this one in place.
+///
+/// This is the in-place variant of pairwise multiplication. See the
+/// `Mul<CliffordString>` impl for details.
 impl MulAssign<CliffordString> for CliffordString {
     fn mul_assign(&mut self, rhs: CliffordString) {
         self.inner.mul_assign_clifford(&rhs.inner);
     }
 }
 
+/// Repeats the Clifford string's contents `rhs` times.
+///
+/// The result has length `self.len() * rhs`. For example, repeating
+/// `"I,X,H"` by 3 gives `"I,X,H,I,X,H,I,X,H"`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CliffordString;
+///
+/// let repeated = CliffordString::from_text("I,X,H").unwrap() * 3;
+/// assert_eq!(repeated.to_string(), "I,X,H,I,X,H,I,X,H");
+/// ```
 impl Mul<u64> for CliffordString {
     type Output = Self;
 
@@ -402,6 +699,10 @@ impl Mul<u64> for CliffordString {
     }
 }
 
+/// Repeats the Clifford string's contents in place.
+///
+/// This is the in-place variant of repetition. After `self *= n`, `self`
+/// contains its original contents repeated `n` times.
 impl MulAssign<u64> for CliffordString {
     fn mul_assign(&mut self, rhs: u64) {
         self.inner
@@ -410,6 +711,19 @@ impl MulAssign<u64> for CliffordString {
     }
 }
 
+/// Left-multiplication by a repetition count: `n * clifford_string`.
+///
+/// This is the commutative counterpart to `CliffordString * u64`, allowing
+/// `2 * string` as an alternative to `string * 2`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::CliffordString;
+///
+/// let repeated = 2 * CliffordString::from_text("I,X,H").unwrap();
+/// assert_eq!(repeated.to_string(), "I,X,H,I,X,H");
+/// ```
 impl Mul<CliffordString> for u64 {
     type Output = CliffordString;
 

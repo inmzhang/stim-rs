@@ -6,13 +6,49 @@ use crate::{Circuit, GateTarget, Result, StimError, gate_data};
 /// A single instruction from a stabilizer circuit, such as `H 0 1` or
 /// `CNOT rec[-1] 5`.
 ///
-/// Each instruction consists of a gate name, zero or more numeric gate
-/// arguments (e.g. the error probability for `DEPOLARIZE1(0.01)`), an ordered
-/// list of [`GateTarget`]s the gate acts on, and an optional string tag for
-/// annotation.
+/// This is the Rust equivalent of Python's `stim.CircuitInstruction`. It
+/// represents one line of a Stim circuit file — a gate name together with
+/// its numeric arguments, an ordered list of [`GateTarget`]s, and an
+/// optional string tag for annotation.
 ///
-/// Gate names are canonicalized on construction, so aliases like `"cnot"` are
-/// stored as `"CX"`.
+/// # Components
+///
+/// | Component | Accessor | Example |
+/// |-----------|----------|---------|
+/// | Gate name | [`name()`](Self::name) | `"H"`, `"CX"`, `"X_ERROR"`, `"DETECTOR"` |
+/// | Gate arguments | [`gate_args_copy()`](Self::gate_args_copy) | `[0.01]` for `DEPOLARIZE1(0.01)` |
+/// | Targets | [`targets_copy()`](Self::targets_copy) | qubit indices, `rec[-k]` refs, Pauli targets |
+/// | Tag | [`tag()`](Self::tag) | `"100ns"` in `I[100ns] 2` |
+///
+/// # Gate name canonicalization
+///
+/// Gate names are canonicalized on construction so that aliases resolve to
+/// the standard name used by Stim. For instance, `"cnot"`, `"CNOT"`, and
+/// `"ZCX"` all become `"CX"`. This ensures that two `CircuitInstruction`
+/// values built from different aliases of the same gate compare equal and
+/// hash identically.
+///
+/// # Measurement counting
+///
+/// The number of measurement results an instruction produces is computed
+/// eagerly during construction and cached. Access it with
+/// [`num_measurements()`](Self::num_measurements). Non-measuring gates
+/// return `0`; single-qubit measurements like `M` count one per target;
+/// two-qubit measurements like `MXX` count one per *pair* of targets; and
+/// Pauli-product measurements like `MPP` count one per product group.
+///
+/// # Display and Debug
+///
+/// - [`Display`](std::fmt::Display) formats the instruction as a valid
+///   Stim circuit file line, e.g. `X_ERROR(0.125) 5 7`.
+/// - [`Debug`](std::fmt::Debug) produces the Rust-repr form, e.g.
+///   `stim::CircuitInstruction("X_ERROR", [stim::GateTarget(5), stim::GateTarget(7)], [0.125])`.
+///
+/// # Ordering and hashing
+///
+/// `CircuitInstruction` implements [`Eq`], [`Ord`], and [`Hash`].
+/// Ordering is lexicographic by name, then tag, then gate arguments (by
+/// bit-pattern), then targets.
 ///
 /// # Examples
 ///
@@ -31,6 +67,28 @@ use crate::{Circuit, GateTarget, Result, StimError, gate_data};
 /// ).expect("cnot is an alias for CX");
 /// assert_eq!(cx.name(), "CX");
 /// ```
+///
+/// Parsing from Stim program text:
+///
+/// ```
+/// use stim::CircuitInstruction;
+///
+/// let inst = CircuitInstruction::from_stim_program_text("DEPOLARIZE1(0.25) 5")
+///     .expect("valid instruction text");
+/// assert_eq!(inst.name(), "DEPOLARIZE1");
+/// assert_eq!(inst.gate_args_copy(), vec![0.25]);
+/// ```
+///
+/// Tagged instructions:
+///
+/// ```
+/// use stim::CircuitInstruction;
+///
+/// let inst = CircuitInstruction::from_stim_program_text("I[100ns] 2")
+///     .expect("valid instruction");
+/// assert_eq!(inst.tag(), "100ns");
+/// assert_eq!(inst.to_string(), "I[100ns] 2");
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct CircuitInstruction {
     name: String,
@@ -44,15 +102,37 @@ impl CircuitInstruction {
     /// Creates a new circuit instruction with the given gate name, targets,
     /// gate arguments, and optional tag.
     ///
+    /// This is the primary constructor for `CircuitInstruction`. It
+    /// corresponds to Python's `stim.CircuitInstruction.__init__`.
+    ///
     /// The gate name is canonicalized so that aliases resolve to the standard
-    /// name used by Stim (e.g. `"cnot"` becomes `"CX"`). The number of
-    /// measurements produced by this instruction is computed eagerly and
-    /// cached.
+    /// name used by Stim (e.g. `"cnot"` becomes `"CX"`, `"ZCX"` becomes
+    /// `"CX"`). The number of measurements produced by the instruction is
+    /// computed eagerly during construction and cached for later retrieval
+    /// via [`num_measurements()`](Self::num_measurements).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — The gate name (e.g. `"H"`, `"CX"`, `"DEPOLARIZE1"`).
+    ///   Aliases are accepted and will be resolved to the canonical name.
+    /// * `targets` — The qubits, measurement record references, or Pauli
+    ///   targets this instruction acts on. Raw `u32` values are interpreted
+    ///   as qubit indices; use [`GateTarget`] for richer target types such
+    ///   as `rec[-1]` or Pauli `X0`.
+    /// * `gate_args` — Numeric parameters for the gate. For noise channels
+    ///   these are probabilities (e.g. `[0.01]` for `DEPOLARIZE1`). For
+    ///   `OBSERVABLE_INCLUDE` it is the logical observable index. Most
+    ///   unitary gates have no arguments.
+    /// * `tag` — An arbitrary string annotation attached to the instruction.
+    ///   Stim propagates tags across circuit transformations but otherwise
+    ///   ignores them. Use an empty string (`""`) for no tag.
     ///
     /// # Errors
     ///
     /// Returns an error if the combination of gate name, targets, and
-    /// arguments is not valid according to Stim's gate definitions.
+    /// arguments is not valid according to Stim's gate definitions — for
+    /// example, if a two-qubit gate receives an odd number of targets, or
+    /// if an unknown gate name is provided.
     ///
     /// # Examples
     ///
@@ -86,14 +166,23 @@ impl CircuitInstruction {
     /// Parses a single instruction from Stim program text.
     ///
     /// The text must contain exactly one instruction — not a `REPEAT` block
-    /// and not multiple lines of operations.
+    /// and not multiple lines of operations. Comments (text after `#`) are
+    /// stripped during parsing, so `"CX rec[-1] 5  # comment"` is valid.
     ///
-    /// This is also available via the [`FromStr`] implementation.
+    /// This is the Rust counterpart to the Python pattern of constructing a
+    /// `stim.CircuitInstruction` by passing a full instruction line as the
+    /// name with no targets or gate args.
+    ///
+    /// This is also available via the [`FromStr`] implementation, so you
+    /// can use `"H 0 1".parse::<CircuitInstruction>()`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the text contains multiple operations, a `REPEAT`
-    /// block, or is otherwise not a valid single instruction.
+    /// Returns an error if:
+    ///
+    /// - The text contains multiple operations (multiple lines).
+    /// - The text is a `REPEAT` block.
+    /// - The text is otherwise not a valid single Stim instruction.
     ///
     /// # Examples
     ///
@@ -103,6 +192,10 @@ impl CircuitInstruction {
     /// let inst = CircuitInstruction::from_stim_program_text("H 0 1")
     ///     .expect("valid instruction text");
     /// assert_eq!(inst.name(), "H");
+    ///
+    /// // Using the FromStr impl:
+    /// let cx: CircuitInstruction = "CX 0 1".parse().expect("valid");
+    /// assert_eq!(cx.name(), "CX");
     /// ```
     pub fn from_stim_program_text(text: &str) -> Result<Self> {
         let circuit = Circuit::from_str(text)?;
@@ -126,7 +219,12 @@ impl CircuitInstruction {
         Self::new(name, targets, gate_args, tag)
     }
 
-    /// Returns the canonical gate name (e.g. `"CX"`, `"H"`, `"M"`).
+    /// Returns the canonical gate name (e.g. `"CX"`, `"H"`, `"M"`,
+    /// `"X_ERROR"`, `"DETECTOR"`).
+    ///
+    /// The name is always the canonical form, regardless of which alias was
+    /// used during construction. For example, constructing with `"cnot"`
+    /// will still return `"CX"` from this accessor.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -134,8 +232,14 @@ impl CircuitInstruction {
 
     /// Returns the instruction's tag string, or `""` if no tag was set.
     ///
-    /// Tags are the bracketed annotations in Stim syntax, e.g. the `100ns`
-    /// in `I[100ns] 2`.
+    /// The tag is an arbitrary custom string attached to the instruction.
+    /// Tags appear in Stim syntax as bracketed annotations, e.g. the
+    /// `100ns` in `I[100ns] 2`. Stim will attempt to propagate tags across
+    /// circuit transformations (such as unrolling repeat blocks) but will
+    /// otherwise completely ignore them. They can be used by custom code
+    /// for purposes like specifying timing information for noise insertion.
+    ///
+    /// The default tag, when none is specified, is the empty string.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
@@ -143,39 +247,76 @@ impl CircuitInstruction {
 
     /// Returns a copy of the gate's numeric arguments.
     ///
-    /// For example, `DEPOLARIZE1(0.01)` has a single gate argument `[0.01]`,
-    /// while `H 0` has an empty argument list.
+    /// Gate arguments are the numbers that parameterize a gate. For noisy
+    /// gates this is typically a list of probabilities — for example,
+    /// `DEPOLARIZE1(0.01)` has a single gate argument `[0.01]`, and
+    /// `PAULI_CHANNEL_1(0.1, 0.2, 0.05)` has three. For
+    /// `OBSERVABLE_INCLUDE` it is a singleton list containing the logical
+    /// observable index. Most unitary gates like `H` have an empty argument
+    /// list.
+    ///
+    /// Each call returns a fresh `Vec`, so callers can mutate the result
+    /// without affecting the instruction.
     #[must_use]
     pub fn gate_args_copy(&self) -> Vec<f64> {
         self.gate_args.clone()
     }
 
     /// Returns a copy of all targets the instruction acts on.
+    ///
+    /// The returned targets are in the same order they appeared when the
+    /// instruction was constructed. For Pauli-product gates like `MPP`, the
+    /// list includes combiner targets (`*`) interleaved with Pauli targets.
+    /// Use [`target_groups()`](Self::target_groups) if you need the targets
+    /// already split into logical groups.
+    ///
+    /// Each call returns a fresh `Vec`, so callers can mutate the result
+    /// without affecting the instruction.
     #[must_use]
     pub fn targets_copy(&self) -> Vec<GateTarget> {
         self.targets.clone()
     }
 
-    /// Returns the number of measurement results this instruction produces.
+    /// Returns the number of measurement results (bits) this instruction
+    /// produces when executed.
     ///
-    /// Non-measuring gates like `H` return `0`, while `M 2 3 5 7 11` returns
-    /// `5`. Two-qubit measurements like `MXX` count each pair as one
-    /// measurement.
+    /// This value is computed eagerly during construction and cached, so
+    /// calling this method is free.
+    ///
+    /// The counting rules depend on the gate:
+    ///
+    /// - **Non-measuring gates** like `H` or `CX` return `0`.
+    /// - **Single-qubit measurements** like `M` count one per target, so
+    ///   `M 2 3 5 7 11` returns `5`.
+    /// - **Two-qubit measurements** like `MXX` count one per pair of
+    ///   targets, so `MXX 0 1 4 5 11 13` returns `3`.
+    /// - **Pauli-product measurements** like `MPP` count one per product
+    ///   group (separated by combiners), so `MPP X0*X1 X0*Z1*Y2` returns
+    ///   `2`.
+    /// - **Heralded operations** like `HERALDED_ERASE` count one per
+    ///   target.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.num_measurements
     }
 
-    /// Groups the instruction's targets into logical operation groups.
+    /// Splits the instruction's targets into logical operation groups.
     ///
-    /// The grouping strategy depends on the gate type:
+    /// The grouping strategy depends on the gate type, following the same
+    /// rules as Stim's Python `CircuitInstruction.target_groups()`:
     ///
-    /// - **Single-qubit gates and measurements**: each target becomes its own
-    ///   group of size 1.
-    /// - **Two-qubit gates**: targets are paired into groups of size 2.
-    /// - **Gates with combiners** (e.g. `MPP X0*Y1`): targets are split on
-    ///   combiner boundaries.
-    /// - **Other gates**: all targets form a single group.
+    /// - **Single-qubit gates and single-qubit measurements** (e.g. `H`,
+    ///   `M`): each target becomes its own group of size 1.
+    /// - **Two-qubit gates** (e.g. `CX`, `MXX`): targets are paired into
+    ///   groups of size 2.
+    /// - **Gates with combiners** (e.g. `MPP X0*Y1 X5*X6`): targets are
+    ///   split on combiner boundaries, and the combiner targets themselves
+    ///   are removed from the output groups.
+    /// - **Instructions taking measurement record targets** (e.g.
+    ///   `DETECTOR rec[-1] rec[-2]`): each record reference forms its own
+    ///   group.
+    /// - **Other gates** (e.g. `CORRELATED_ERROR`): all targets form a
+    ///   single group.
     ///
     /// Returns an empty `Vec` if the instruction has no targets.
     #[must_use]

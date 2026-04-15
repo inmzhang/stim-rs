@@ -5,13 +5,50 @@ use ndarray::Array2;
 
 use crate::{Flow, Result, StimError, Tableau};
 
-/// Metadata about a Stim gate.
+/// Metadata about a gate supported by Stim.
+///
+/// Every gate that Stim recognises — unitaries such as `H` and `CX`, noise channels
+/// such as `X_ERROR` and `DEPOLARIZE1`, measurements (`M`, `MXX`, `MPP`), resets (`R`,
+/// `RX`), and annotations (`DETECTOR`, `TICK`) — has an associated `GateData` value
+/// that exposes its canonical name, aliases, stabilizer flows, Clifford tableau,
+/// unitary matrix, inverse relationships, and various Boolean classification flags.
+///
+/// Obtain a `GateData` through [`GateData::new`], the free function [`gate_data`], or
+/// the bulk inventory [`all_gate_data`].
+///
+/// Two `GateData` values are equal when they refer to the same canonical gate,
+/// regardless of which alias was used to look them up.
+///
+/// # Examples
+///
+/// ```
+/// let h = stim::gate_data("h").unwrap();
+/// assert_eq!(h.name(), "H");
+/// assert!(h.is_unitary());
+///
+/// // The Clifford tableau for H swaps the X and Z bases.
+/// let tableau = h.tableau().unwrap();
+/// assert_eq!(
+///     tableau,
+///     stim::Tableau::from_named_gate("H").unwrap()
+/// );
+/// ```
 pub struct GateData {
     pub(crate) inner: stim_cxx::GateData,
 }
 
 impl GateData {
     /// Looks up metadata for a gate by name or alias.
+    ///
+    /// Gate names are case-insensitive: `"h"`, `"H"`, and `"h_xz"` all resolve to the
+    /// canonical `"H"` gate. Aliases such as `"CNOT"` are also accepted and will
+    /// resolve to the corresponding canonical name (in that case, `"CX"`).
+    ///
+    /// This is equivalent to calling the free function [`gate_data`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` does not match any known gate or alias.
     ///
     /// # Examples
     ///
@@ -24,7 +61,12 @@ impl GateData {
         gate_data(name)
     }
 
-    /// Returns the canonical gate name.
+    /// Returns the canonical name of the gate.
+    ///
+    /// Each Stim gate has exactly one canonical (upper-case) name. When a gate is
+    /// looked up by an alias or a differently-cased variant, the canonical name is
+    /// still returned. For example, looking up `"cnot"` yields a `GateData` whose
+    /// `name()` is `"CX"`.
     ///
     /// # Examples
     ///
@@ -36,7 +78,13 @@ impl GateData {
         self.inner.name()
     }
 
-    /// Returns the accepted aliases for the gate.
+    /// Returns all aliases that can be used to refer to this gate.
+    ///
+    /// Every gate has at least one alias — its canonical name. Many gates have
+    /// additional historical or convenience aliases. For instance, the `CX` gate can
+    /// also be referred to as `CNOT` or `ZCX`. Although gates can be looked up with
+    /// lower- or mixed-case names, the returned list contains only the upper-cased
+    /// aliases.
     ///
     /// # Examples
     ///
@@ -50,7 +98,18 @@ impl GateData {
         self.inner.aliases()
     }
 
-    /// Returns the allowed number of parenthesized numeric arguments.
+    /// Returns the range of allowed parenthesized numeric argument counts for this
+    /// gate.
+    ///
+    /// In Stim circuit syntax, gates can take parenthesized arguments — for example,
+    /// `X_ERROR(0.01) 0` has one argument (the error probability), while `H 0` has
+    /// zero. This method returns the set of valid argument counts as a `Vec<u8>`.
+    ///
+    /// Common patterns:
+    /// - `[0]` — no arguments allowed (e.g. `H`, `R`)
+    /// - `[1]` — exactly one argument required (e.g. `X_ERROR`)
+    /// - `[0, 1]` — zero or one argument (e.g. `M`, where the optional argument is
+    ///   the measurement flip probability)
     ///
     /// # Examples
     ///
@@ -63,61 +122,231 @@ impl GateData {
         self.inner.num_parens_arguments_range()
     }
 
-    /// Returns whether the gate is noisy.
+    /// Returns whether the gate can produce noise.
+    ///
+    /// Noise gates are those whose operation introduces probabilistic errors into the
+    /// system. This includes explicit error channels like `X_ERROR`, `DEPOLARIZE1`, and
+    /// `CORRELATED_ERROR`, but also measurement operations such as `M`, `MXX`, and
+    /// `MPP`, because measurements in Stim can include a flip probability argument
+    /// (e.g. `M(0.001) 2 3 5` flips its result 0.1% of the time).
+    ///
+    /// Unitary gates (`H`, `CX`, …), resets (`R`, `RX`, …), and annotations
+    /// (`DETECTOR`, `TICK`, …) are *not* noisy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("X_ERROR").unwrap().is_noisy_gate());
+    /// assert!(stim::gate_data("M").unwrap().is_noisy_gate());
+    /// assert!(!stim::gate_data("H").unwrap().is_noisy_gate());
+    /// assert!(!stim::gate_data("R").unwrap().is_noisy_gate());
+    /// ```
     #[must_use]
     pub fn is_noisy_gate(&self) -> bool {
         self.inner.is_noisy_gate()
     }
 
-    /// Returns whether the gate is a reset.
+    /// Returns whether the gate resets qubits in any basis.
+    ///
+    /// Reset gates force qubits into a fixed state, destroying whatever state the
+    /// qubit previously held. This includes `R` (reset to |0⟩), `RX` (reset to |+⟩),
+    /// `RY`, and combined measure-reset gates like `MR` and `MRY`.
+    ///
+    /// Measurement-only gates (`M`, `MXX`, `MPP`), unitary gates, noise channels, and
+    /// annotations do *not* count as resets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("R").unwrap().is_reset());
+    /// assert!(stim::gate_data("MR").unwrap().is_reset());
+    /// assert!(!stim::gate_data("M").unwrap().is_reset());
+    /// assert!(!stim::gate_data("H").unwrap().is_reset());
+    /// ```
     #[must_use]
     pub fn is_reset(&self) -> bool {
         self.inner.is_reset()
     }
 
-    /// Returns whether the gate acts on one qubit at a time.
+    /// Returns whether the gate acts on a single qubit at a time.
+    ///
+    /// Single-qubit gates apply their operation independently to each of their
+    /// targets. For example, `H 0 1 2` applies three independent Hadamard operations.
+    ///
+    /// Variable-target-count gates like `CORRELATED_ERROR` and `MPP` are *not*
+    /// considered single-qubit gates, even when they happen to target only one qubit.
+    /// Annotations like `DETECTOR` and `TICK` are also not single-qubit gates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("H").unwrap().is_single_qubit_gate());
+    /// assert!(stim::gate_data("M").unwrap().is_single_qubit_gate());
+    /// assert!(stim::gate_data("X_ERROR").unwrap().is_single_qubit_gate());
+    /// assert!(!stim::gate_data("CX").unwrap().is_single_qubit_gate());
+    /// assert!(!stim::gate_data("MPP").unwrap().is_single_qubit_gate());
+    /// ```
     #[must_use]
     pub fn is_single_qubit_gate(&self) -> bool {
         self.inner.is_single_qubit_gate()
     }
 
-    /// Returns whether the gate is symmetric in its targets.
+    /// Returns whether the gate is unchanged when its targets are swapped.
+    ///
+    /// A two-qubit gate is symmetric if swapping its two targets has no observable
+    /// effect — equivalently, if it is unaffected when conjugated by `SWAP`. For
+    /// example, `CZ` is symmetric (control and target are interchangeable), while `CX`
+    /// is not (the control and target roles differ).
+    ///
+    /// Single-qubit gates are vacuously symmetric. Multi-qubit gates are symmetric if
+    /// swapping *any* pair of their targets has no effect.
+    ///
+    /// Note: symmetry is checked *without broadcasting*. `SWAP` is symmetric even
+    /// though `SWAP 1 2 3 4` is not the same circuit as `SWAP 1 3 2 4`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("CZ").unwrap().is_symmetric_gate());
+    /// assert!(stim::gate_data("ISWAP").unwrap().is_symmetric_gate());
+    /// assert!(!stim::gate_data("CX").unwrap().is_symmetric_gate());
+    /// assert!(!stim::gate_data("CXSWAP").unwrap().is_symmetric_gate());
+    /// ```
     #[must_use]
     pub fn is_symmetric_gate(&self) -> bool {
         self.inner.is_symmetric_gate()
     }
 
-    /// Returns whether the gate acts on two qubits at a time.
+    /// Returns whether the gate acts on exactly two qubits at a time.
+    ///
+    /// Two-qubit gates must be given an even number of targets in a Stim circuit,
+    /// because the targets are consumed in pairs. For example, `CX 0 1 2 3` applies
+    /// two CX operations: one to qubits (0, 1) and another to qubits (2, 3).
+    ///
+    /// Variable-target-count gates like `CORRELATED_ERROR` and `MPP` are *not*
+    /// considered two-qubit gates, even when they happen to target exactly two qubits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("CX").unwrap().is_two_qubit_gate());
+    /// assert!(stim::gate_data("MXX").unwrap().is_two_qubit_gate());
+    /// assert!(!stim::gate_data("H").unwrap().is_two_qubit_gate());
+    /// assert!(!stim::gate_data("MPP").unwrap().is_two_qubit_gate());
+    /// ```
     #[must_use]
     pub fn is_two_qubit_gate(&self) -> bool {
         self.inner.is_two_qubit_gate()
     }
 
-    /// Returns whether the gate is unitary.
+    /// Returns whether the gate is a unitary operation.
+    ///
+    /// Unitary gates are reversible quantum operations whose action can be described by
+    /// a unitary matrix and a Clifford tableau. This includes single-qubit Cliffords
+    /// (`H`, `S`, `X`, `Y`, `Z`, …) and multi-qubit Cliffords (`CX`, `CZ`, `SWAP`,
+    /// `ISWAP`, …).
+    ///
+    /// Resets, measurements, noise channels, and annotations are *not* unitary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("H").unwrap().is_unitary());
+    /// assert!(stim::gate_data("CX").unwrap().is_unitary());
+    /// assert!(!stim::gate_data("M").unwrap().is_unitary());
+    /// assert!(!stim::gate_data("R").unwrap().is_unitary());
+    /// assert!(!stim::gate_data("X_ERROR").unwrap().is_unitary());
+    /// ```
     #[must_use]
     pub fn is_unitary(&self) -> bool {
         self.inner.is_unitary()
     }
 
-    /// Returns whether the gate produces measurements.
+    /// Returns whether the gate produces measurement results.
+    ///
+    /// Gates that produce measurements append one or more bits to the measurement
+    /// record when they are executed. This includes single-qubit measurements (`M`,
+    /// `MX`, `MY`), measure-and-reset gates (`MR`, `MRX`, `MRY`), two-qubit
+    /// measurements (`MXX`, `MYY`, `MZZ`), multi-body measurements (`MPP`), and
+    /// heralded erasure (`HERALDED_ERASE`).
+    ///
+    /// Unitary gates, resets, noise channels, and annotations do *not* produce
+    /// measurements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("M").unwrap().produces_measurements());
+    /// assert!(stim::gate_data("MPP").unwrap().produces_measurements());
+    /// assert!(!stim::gate_data("H").unwrap().produces_measurements());
+    /// assert!(!stim::gate_data("R").unwrap().produces_measurements());
+    /// assert!(!stim::gate_data("DETECTOR").unwrap().produces_measurements());
+    /// ```
     #[must_use]
     pub fn produces_measurements(&self) -> bool {
         self.inner.produces_measurements()
     }
 
-    /// Returns whether the gate accepts measurement-record targets.
+    /// Returns whether the gate can accept measurement-record (`rec`) targets.
+    ///
+    /// Some gates allow referencing previous measurement results as targets using
+    /// `rec[-k]` syntax in Stim circuits. For example, `CX rec[-1] 1` applies a
+    /// controlled-X conditioned on the most recent measurement result. `DETECTOR`
+    /// uses record targets to declare which measurements to compare.
+    ///
+    /// Most gates (unitaries acting on qubits, measurements, resets, noise channels)
+    /// do *not* accept record targets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("CX").unwrap().takes_measurement_record_targets());
+    /// assert!(stim::gate_data("DETECTOR").unwrap().takes_measurement_record_targets());
+    /// assert!(!stim::gate_data("H").unwrap().takes_measurement_record_targets());
+    /// assert!(!stim::gate_data("M").unwrap().takes_measurement_record_targets());
+    /// ```
     #[must_use]
     pub fn takes_measurement_record_targets(&self) -> bool {
         self.inner.takes_measurement_record_targets()
     }
 
-    /// Returns whether the gate accepts Pauli-product targets.
+    /// Returns whether the gate expects Pauli-product targets.
+    ///
+    /// Some gates operate on Pauli-product targets rather than plain qubit indices.
+    /// In Stim circuit syntax these look like `X0`, `Y1`, `Z2` rather than bare `0`,
+    /// `1`, `2`. The two main examples are `CORRELATED_ERROR` (which applies a
+    /// correlated Pauli error across specified qubits) and `MPP` (which measures
+    /// multi-body Pauli products).
+    ///
+    /// Most gates (unitaries, single-qubit measurements, resets, single-qubit noise)
+    /// take plain qubit targets, not Pauli targets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(stim::gate_data("CORRELATED_ERROR").unwrap().takes_pauli_targets());
+    /// assert!(stim::gate_data("MPP").unwrap().takes_pauli_targets());
+    /// assert!(!stim::gate_data("H").unwrap().takes_pauli_targets());
+    /// assert!(!stim::gate_data("CX").unwrap().takes_pauli_targets());
+    /// assert!(!stim::gate_data("X_ERROR").unwrap().takes_pauli_targets());
+    /// ```
     #[must_use]
     pub fn takes_pauli_targets(&self) -> bool {
         self.inner.takes_pauli_targets()
     }
 
-    /// Returns the stabilizer flows associated with the gate, when present.
+    /// Returns the stabilizer flow generators for the gate, or `None` if the gate has
+    /// no fixed set of flows.
+    ///
+    /// A stabilizer flow describes an input-output relationship that a gate satisfies:
+    /// an input Pauli string is transformed into an output Pauli string, potentially
+    /// mediated by certain measurement results. For unitary gates the flows correspond
+    /// to the Clifford tableau conjugation rules; for measurement and reset gates the
+    /// flows capture the measurement and reset semantics.
+    ///
+    /// Returns `None` for variable-target-count gates like `MPP`. This is *not*
+    /// because `MPP` has no stabilizer flows, but because its flows depend on how many
+    /// qubits it targets and in which bases.
     ///
     /// # Examples
     ///
@@ -142,7 +371,14 @@ impl GateData {
         if flows.is_empty() { None } else { Some(flows) }
     }
 
-    /// Returns the tableau of the gate, when it exists.
+    /// Returns the Clifford tableau of the gate, or `None` if the gate is not unitary.
+    ///
+    /// The Clifford tableau describes how a unitary gate conjugates each single-qubit
+    /// Pauli operator (X and Z on each qubit) into a new Pauli string. This
+    /// representation fully specifies any Clifford gate up to global phase.
+    ///
+    /// Non-unitary gates — measurements, resets, noise channels, and annotations —
+    /// do not have tableaux, so this method returns `None` for them.
     ///
     /// # Examples
     ///
@@ -158,7 +394,15 @@ impl GateData {
         self.inner.tableau().map(|inner| Tableau { inner })
     }
 
-    /// Returns the unitary matrix of the gate when it exists.
+    /// Returns the unitary matrix representation of the gate, or `None` if the gate is
+    /// not unitary.
+    ///
+    /// The matrix is computed from the gate's Clifford tableau and returned as an
+    /// [`ndarray::Array2<Complex32>`]. The matrix uses big-endian qubit ordering (the
+    /// first qubit is the most-significant bit of the row/column index).
+    ///
+    /// Non-unitary gates — measurements, resets, noise channels, and annotations —
+    /// do not have unitary matrices, so this method returns `None` for them.
     ///
     /// # Examples
     ///
@@ -185,7 +429,21 @@ impl GateData {
         })
     }
 
-    /// Returns the ordinary inverse of the gate when one exists.
+    /// Returns the inverse of the gate, or `None` if the gate has no inverse.
+    ///
+    /// The inverse `V` of a gate `U` satisfies the property that applying `U` followed
+    /// by `V` (or vice versa) is equivalent to doing nothing. In circuit terms:
+    ///
+    /// ```text
+    /// U 0 1
+    /// V 0 1
+    /// ```
+    ///
+    /// is a no-op.
+    ///
+    /// Only unitary gates have inverses. Noise channels (`X_ERROR`, `DEPOLARIZE1`, …),
+    /// measurements (`M`, `MXX`, …), resets (`R`, …), and annotations (`DETECTOR`,
+    /// `TICK`, …) return `None`.
     ///
     /// # Examples
     ///
@@ -198,7 +456,23 @@ impl GateData {
         self.inner.inverse().map(|inner| Self { inner })
     }
 
-    /// Returns the generalized inverse of the gate.
+    /// Returns the closest-thing-to-an-inverse for the gate, choosing *something* even
+    /// when no true inverse exists.
+    ///
+    /// The generalized inverse applies different rules depending on gate category:
+    ///
+    /// - **Unitary gates**: the generalized inverse is the actual inverse `U⁻¹`.
+    /// - **Reset / measurement gates**: the generalized inverse is a gate whose
+    ///   stabilizer flows are the time-reverses of the original gate's flows (up to
+    ///   Pauli feedback, potentially with additional flows). For example, `R` has the
+    ///   flow `1 -> Z`, and its generalized inverse `M` has the time-reversed flow
+    ///   `Z -> rec[-1]`.
+    /// - **Noise channels** (e.g. `X_ERROR`): the generalized inverse is the same
+    ///   noise channel.
+    /// - **Annotations** (e.g. `TICK`, `DETECTOR`): the generalized inverse is the
+    ///   same annotation.
+    ///
+    /// Unlike [`inverse`](GateData::inverse), this method always returns a value.
     ///
     /// # Examples
     ///
@@ -219,7 +493,25 @@ impl GateData {
         }
     }
 
-    /// Returns the Hadamard-conjugated gate when one exists.
+    /// Returns the Hadamard-conjugated form of the gate, or `None` if Stim does not
+    /// define one.
+    ///
+    /// The Hadamard conjugate can be thought of as the XZ dual of the gate: the gate
+    /// you get by exchanging the X and Z bases on every qubit. Concretely, it is the
+    /// gate `H⊗ⁿ · U · H⊗ⁿ` where `n` is the number of qubits the gate acts on.
+    ///
+    /// For example, the Hadamard conjugate of `X` is `Z`, of `SQRT_X` is `SQRT_Z`,
+    /// and of `CX` is `XCZ` (because swapping X↔Z flips which qubit is the control).
+    ///
+    /// When `unsigned_only` is `false`, the returned gate must be *exactly* the
+    /// Hadamard conjugate. When `unsigned_only` is `true`, the returned gate only
+    /// needs to match up to the signs of its stabilizer flows (i.e. it may differ by
+    /// Pauli gates). This relaxation allows gates like `RY` — whose exact conjugate
+    /// introduces a sign change that does not correspond to any named Stim gate — to
+    /// return `Some` with the unsigned match.
+    ///
+    /// Returns `None` if Stim does not define a gate equal to the (possibly unsigned)
+    /// Hadamard conjugate.
     ///
     /// # Examples
     ///
@@ -243,6 +535,17 @@ impl GateData {
 
 /// Looks up metadata for a gate by name or alias.
 ///
+/// This is the primary entry point for inspecting Stim's built-in gates. The lookup
+/// is case-insensitive: `"h"`, `"H"`, and `"cnot"` all resolve successfully. Aliases
+/// are resolved to their canonical gate — for example, `"CNOT"` resolves to the
+/// canonical `"CX"` gate.
+///
+/// To enumerate *all* canonical gates at once, see [`all_gate_data`].
+///
+/// # Errors
+///
+/// Returns an error if `name` does not match any known gate or alias.
+///
 /// # Examples
 ///
 /// ```
@@ -255,7 +558,14 @@ pub fn gate_data(name: &str) -> Result<GateData> {
         .map_err(StimError::from)
 }
 
-/// Returns the canonical gate inventory keyed by canonical gate name.
+/// Returns the full canonical gate inventory, keyed by canonical gate name.
+///
+/// The returned map contains one entry per canonical Stim gate. Aliases are *not*
+/// included as separate keys — for example, the map contains `"CX"` but not `"CNOT"`.
+/// To look up a gate by alias, use [`gate_data`] instead.
+///
+/// This is useful for enumerating all gates that Stim supports, for example to build
+/// a gate reference or to iterate over gate properties programmatically.
 ///
 /// # Examples
 ///
@@ -263,6 +573,9 @@ pub fn gate_data(name: &str) -> Result<GateData> {
 /// let gates = stim::all_gate_data();
 /// assert!(gates.contains_key("H"));
 /// assert!(gates.contains_key("CX"));
+///
+/// // Aliases are not included as separate keys.
+/// assert!(!gates.contains_key("CNOT"));
 /// ```
 #[must_use]
 pub fn all_gate_data() -> BTreeMap<String, GateData> {

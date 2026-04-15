@@ -3,34 +3,128 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Neg};
 
 use ndarray::{Array1, ArrayView1};
 
-/// A single Pauli value accepted by [`PauliString::set`].
+/// A single Pauli operator value accepted by [`PauliString::set`].
 ///
-/// Either a numeric code (`0` = I, `1` = X, `2` = Y, `3` = Z) or a
-/// character symbol (`'I'`, `'X'`, `'Y'`, `'Z'`, `'_'`).
+/// `PauliValue` provides a type-safe way to specify individual Pauli operators
+/// when mutating entries of a [`PauliString`]. It supports two encodings that
+/// mirror the conventions used throughout the Stim ecosystem:
+///
+/// - **Numeric codes** (`0` = I, `1` = X, `2` = Y, `3` = Z) — the same
+///   integer encoding returned by [`PauliString::get`] and used internally in
+///   the XZ bit representation.
+/// - **Character symbols** (`'I'`, `'_'`, `'X'`, `'Y'`, `'Z'`) — the
+///   human-readable characters used in Pauli string text notation. The
+///   underscore `'_'` is an alias for `'I'` (identity).
+///
+/// You rarely need to construct `PauliValue` directly. Thanks to the blanket
+/// `From<u8>` and `From<char>` implementations, you can pass a `u8` or `char`
+/// directly to any method that expects `impl Into<PauliValue>`.
+///
+/// # Examples
+///
+/// ```
+/// let mut p = stim::PauliString::new(3);
+///
+/// // Set via numeric code
+/// p.set(0, 1u8).unwrap();   // qubit 0 → X
+///
+/// // Set via character symbol
+/// p.set(1, 'Y').unwrap();   // qubit 1 → Y
+/// p.set(2, '_').unwrap();   // qubit 2 → I (identity)
+///
+/// assert_eq!(p.to_string(), "+XY_");
+/// ```
 pub enum PauliValue {
-    /// A numeric Pauli code (0=I, 1=X, 2=Y, 3=Z).
+    /// A numeric Pauli code using the XZ encoding: `0` = I (identity),
+    /// `1` = X, `2` = Y, `3` = Z. Values outside `0..=3` will produce
+    /// an error when passed to [`PauliString::set`].
     Code(u8),
-    /// A character Pauli symbol (`'I'`, `'X'`, `'Y'`, `'Z'`, `'_'`).
+    /// A character Pauli symbol. Accepted characters are `'I'`, `'_'`
+    /// (both meaning identity), `'X'`, `'Y'`, and `'Z'`. Any other
+    /// character will produce an error when passed to [`PauliString::set`].
     Symbol(char),
 }
 
 /// The unit complex phase carried by a [`PauliString`].
 ///
-/// One of the four values `+1`, `+i`, `-1`, or `-i`.
+/// A Pauli string's global phase is always one of the four unit complex
+/// numbers `{+1, +i, −1, −i}`. This enum represents that phase factor and
+/// provides conversions to [`crate::Complex32`] for use in matrix
+/// computations.
+///
+/// In the Stim model, every [`PauliString`] stores its phase as the
+/// combination of a real sign (`±1`) and an imaginary flag. The four
+/// resulting possibilities are exactly the four variants of `PauliPhase`.
+///
+/// When the phase is real (`+1` or `−1`), the Pauli string is Hermitian
+/// (i.e., it equals its own conjugate transpose). Imaginary phases (`+i`
+/// or `−i`) arise from products of non-commuting Paulis — for example,
+/// `X · Y = iZ`.
+///
+/// # Relationship to `PauliString` methods
+///
+/// - [`PauliString::phase`] returns this enum.
+/// - [`PauliString::complex_phase`] returns the equivalent
+///   [`crate::Complex32`] value.
+/// - [`PauliString::has_imaginary_phase`] is a convenience shortcut for
+///   [`PauliPhase::is_imaginary`].
+///
+/// # Examples
+///
+/// ```
+/// use stim::{PauliPhase, PauliString};
+///
+/// let p = PauliString::from_text("-iXYZ").unwrap();
+/// assert_eq!(p.phase(), PauliPhase::NegativeImaginary);
+/// assert!(p.has_imaginary_phase());
+///
+/// let q = PauliString::from_text("+X").unwrap();
+/// assert_eq!(q.phase(), PauliPhase::Positive);
+/// assert!(!q.has_imaginary_phase());
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauliPhase {
-    /// The phase `+1`.
+    /// The phase `+1`. The Pauli string is Hermitian with positive sign.
     Positive,
-    /// The phase `+i`.
+    /// The phase `+i`. The Pauli string is non-Hermitian.
     PositiveImaginary,
-    /// The phase `-1`.
+    /// The phase `-1`. The Pauli string is Hermitian with negative sign.
     Negative,
-    /// The phase `-i`.
+    /// The phase `-i`. The Pauli string is non-Hermitian.
     NegativeImaginary,
 }
 
 impl PauliPhase {
     /// Returns the phase as a complex number.
+    ///
+    /// Converts this `PauliPhase` variant into its corresponding unit complex
+    /// value as a [`crate::Complex32`]:
+    ///
+    /// | Variant                | Complex value |
+    /// |------------------------|---------------|
+    /// | `Positive`             | `1 + 0i`      |
+    /// | `PositiveImaginary`    | `0 + 1i`      |
+    /// | `Negative`             | `-1 + 0i`     |
+    /// | `NegativeImaginary`    | `0 - 1i`      |
+    ///
+    /// This is useful when you need the numeric phase factor for matrix
+    /// arithmetic — for example, when constructing the unitary matrix of
+    /// a Pauli string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stim::PauliPhase;
+    ///
+    /// assert_eq!(
+    ///     PauliPhase::PositiveImaginary.as_complex32(),
+    ///     stim::Complex32::new(0.0, 1.0),
+    /// );
+    /// assert_eq!(
+    ///     PauliPhase::Negative.as_complex32(),
+    ///     stim::Complex32::new(-1.0, 0.0),
+    /// );
+    /// ```
     #[must_use]
     pub fn as_complex32(self) -> crate::Complex32 {
         match self {
@@ -42,6 +136,26 @@ impl PauliPhase {
     }
 
     /// Returns whether the phase is imaginary (`±i`).
+    ///
+    /// A Pauli string with an imaginary phase is non-Hermitian, meaning it
+    /// does not equal its own conjugate transpose. Imaginary phases arise
+    /// naturally when multiplying non-commuting Pauli operators (e.g.,
+    /// `X · Y = iZ`).
+    ///
+    /// Returns `true` for [`PauliPhase::PositiveImaginary`] and
+    /// [`PauliPhase::NegativeImaginary`]; `false` for [`PauliPhase::Positive`]
+    /// and [`PauliPhase::Negative`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stim::PauliPhase;
+    ///
+    /// assert!(PauliPhase::PositiveImaginary.is_imaginary());
+    /// assert!(PauliPhase::NegativeImaginary.is_imaginary());
+    /// assert!(!PauliPhase::Positive.is_imaginary());
+    /// assert!(!PauliPhase::Negative.is_imaginary());
+    /// ```
     #[must_use]
     pub fn is_imaginary(self) -> bool {
         matches!(self, Self::PositiveImaginary | Self::NegativeImaginary)
@@ -60,20 +174,61 @@ impl From<char> for PauliValue {
     }
 }
 
-/// Operations accepted by [`PauliString::after`] and [`PauliString::before`].
+/// The type of Clifford operation used to conjugate a [`PauliString`].
 ///
-/// Describes a Clifford operation that can conjugate a Pauli string forward
-/// or backward in time.
+/// In the stabilizer formalism, Clifford operations act on Pauli strings by
+/// *conjugation*: given a Clifford unitary *U* and a Pauli string *P*, the
+/// conjugated Pauli string is *U · P · U†*. This is the central operation
+/// that makes Pauli tracking and stabilizer simulation efficient — rather
+/// than manipulating exponentially large state vectors, Clifford operations
+/// simply map Pauli strings to other Pauli strings.
+///
+/// `PauliStringConjugation` enumerates the three sources from which a
+/// Clifford conjugation can be performed:
+///
+/// - **Circuit**: Apply every instruction in a [`crate::Circuit`] (the
+///   circuit must be entirely Clifford — no noise or measurements).
+/// - **Instruction**: Apply a single [`crate::CircuitInstruction`].
+/// - **Tableau**: Apply a [`crate::Tableau`] to specific target qubits.
+///
+/// You rarely need to construct this enum yourself. It implements
+/// [`From`] conversions for each variant, so you can pass a `&Circuit`,
+/// `&CircuitInstruction`, or `(&Tableau, &[usize])` directly to
+/// [`PauliString::after`] and [`PauliString::before`].
+///
+/// # Forward vs. backward conjugation
+///
+/// - [`PauliString::after`] performs *forward* (Heisenberg-picture)
+///   conjugation: "what does this Pauli string become *after* the
+///   operation is applied?"
+/// - [`PauliString::before`] performs *backward* conjugation: "what
+///   Pauli string *before* the operation is equivalent to this one
+///   after?"
+///
+/// # Examples
+///
+/// ```
+/// let p = stim::PauliString::from_text("_XYZ").unwrap();
+/// let cz = stim::Tableau::from_named_gate("CZ").unwrap();
+///
+/// // Pass a (&Tableau, &[usize]) tuple — it converts automatically.
+/// let result = p.after((&cz, &[0, 1][..])).unwrap();
+/// assert_eq!(result, stim::PauliString::from_text("+ZXYZ").unwrap());
+/// ```
 pub enum PauliStringConjugation<'a> {
-    /// Conjugate through an entire circuit.
+    /// Conjugate through an entire Clifford circuit. The circuit must not
+    /// contain noise channels or measurements.
     Circuit(&'a crate::Circuit),
-    /// Conjugate through a single instruction.
+    /// Conjugate through a single Clifford instruction (e.g., a gate
+    /// applied to specific qubits).
     Instruction(&'a crate::CircuitInstruction),
-    /// Conjugate through a tableau applied to specific target qubits.
+    /// Conjugate through a Clifford tableau applied to an explicit set of
+    /// target qubit indices.
     Tableau {
         /// The Clifford tableau to conjugate through.
         tableau: &'a crate::Tableau,
-        /// The qubit indices the tableau acts on.
+        /// The qubit indices the tableau acts on, in order. The length
+        /// must match the number of qubits in the tableau.
         targets: &'a [usize],
     },
 }
@@ -100,7 +255,93 @@ impl<'a> From<(&'a crate::Tableau, &'a [usize])> for PauliStringConjugation<'a> 
 }
 
 #[derive(Clone, PartialEq, Eq)]
-/// A Pauli string with an optional complex phase.
+/// A signed tensor product of Pauli operators (e.g., `+X ⊗ Y ⊗ Z` or `-iX ⊗ I ⊗ Z`).
+///
+/// A `PauliString` represents a collection of single-qubit Pauli operators
+/// (I, X, Y, Z) applied to a sequence of qubits, together with a global phase
+/// factor drawn from the set `{+1, +i, −1, −i}`. Pauli strings are fundamental
+/// objects in the **stabilizer formalism** of quantum error correction: every
+/// stabilizer code is defined by a group of commuting Pauli strings (the
+/// *stabilizer generators*), and the errors that the code can detect and
+/// correct are also described as Pauli strings.
+///
+/// # Representation
+///
+/// Internally, each qubit's Pauli operator is encoded using two bits (the "XZ
+/// encoding"):
+///
+/// | Pauli | X bit | Z bit |
+/// |-------|-------|-------|
+/// | I     | 0     | 0     |
+/// | X     | 1     | 0     |
+/// | Y     | 1     | 1     |
+/// | Z     | 0     | 1     |
+///
+/// This encoding is efficient and naturally captures the algebraic structure
+/// of the Pauli group. The global phase is stored as a real sign (`±1`)
+/// combined with an imaginary flag, yielding the four unit complex phases
+/// represented by [`PauliPhase`].
+///
+/// # Text notation
+///
+/// Pauli strings can be created from a human-readable text format. A text
+/// representation begins with an optional sign prefix (`+`, `-`, `i`, `+i`,
+/// or `-i`) followed by a sequence of Pauli characters (`I`, `_`, `X`, `Y`,
+/// `Z`), where `_` is an alias for `I` (identity). For example:
+///
+/// - `"+XYZ"` — a 3-qubit Pauli string with phase `+1`
+/// - `"-iX_Z"` — a 3-qubit Pauli string with phase `−i`
+/// - `"XXXX"` — phase defaults to `+1` when omitted
+///
+/// # Key operations
+///
+/// - **Creation**: [`PauliString::new`] (identity), [`PauliString::from_text`]
+///   (parse from string), [`PauliString::random`] (uniformly random),
+///   [`PauliString::from_ndarray`] / [`PauliString::from_ndarray_bit_packed`]
+///   (from X/Z indicator arrays), [`PauliString::from_unitary_matrix`]
+///   (infer from a unitary matrix).
+/// - **Indexing**: [`PauliString::get`] and [`PauliString::set`] read and
+///   write individual Pauli entries using numeric codes or character symbols.
+///   [`PauliString::slice`] extracts sub-strings with Python-style slice
+///   semantics.
+/// - **Algebra**: The `+` operator computes tensor products (concatenation
+///   with sign multiplication). The unary `-` operator negates the phase.
+///   The `*` operator with a `u64` repeats the string (tensor power) with
+///   appropriate phase arithmetic.
+/// - **Conjugation**: [`PauliString::after`] and [`PauliString::before`]
+///   conjugate the Pauli string through Clifford operations (circuits,
+///   instructions, or tableaux), which is the core operation of Pauli
+///   tracking in stabilizer simulation.
+/// - **Queries**: [`PauliString::weight`] counts non-identity terms,
+///   [`PauliString::commutes`] checks commutativity with another Pauli
+///   string, and [`PauliString::pauli_indices`] finds positions of
+///   specified Pauli types.
+/// - **Conversion**: [`PauliString::to_unitary_matrix`] builds the full
+///   unitary matrix, [`PauliString::to_tableau`] wraps the Pauli string
+///   as a Clifford tableau, and [`PauliString::to_ndarray`] /
+///   [`PauliString::to_ndarray_bit_packed`] export to X/Z bit arrays.
+///
+/// # Examples
+///
+/// ```
+/// use stim::PauliString;
+///
+/// // Create from text and inspect properties
+/// let p = PauliString::from_text("-XYZ").unwrap();
+/// assert_eq!(p.num_qubits(), 3);
+/// assert_eq!(p.weight(), 3);
+/// assert_eq!(p.phase(), stim::PauliPhase::Negative);
+///
+/// // Tensor product via the + operator
+/// let a = PauliString::from_text("X").unwrap();
+/// let b = PauliString::from_text("YZ").unwrap();
+/// assert_eq!((a + b).to_string(), "+XYZ");
+///
+/// // Identity Pauli string
+/// let id = PauliString::new(5);
+/// assert_eq!(id.to_string(), "+_____");
+/// assert_eq!(id.weight(), 0);
+/// ```
 pub struct PauliString {
     pub(crate) inner: stim_cxx::PauliString,
     pub(crate) imag: bool,

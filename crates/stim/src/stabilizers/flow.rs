@@ -2,14 +2,75 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Mul;
 use std::str::FromStr;
 
+/// A stabilizer flow relating an input Pauli frame to an output Pauli frame,
+/// optionally mediated by measurement records and observable indices.
+///
+/// Stabilizer circuits implement, and can be defined by, how they turn input
+/// stabilizers into output stabilizers mediated by measurements. These
+/// relationships are called stabilizer flows: if a circuit has flow `P -> Q`,
+/// then it maps the instantaneous stabilizer `P` at the start of the circuit to
+/// the instantaneous stabilizer `Q` at the end.
+///
+/// Flows can include measurement record lookbacks (`rec[-k]`) and observable
+/// indices (`obs[k]`), XOR-ed with the output Pauli string. This allows
+/// expressing preparation, measurement, and check flows:
+///
+/// - `P -> Q` means the circuit transforms `P` into `Q`.
+/// - `1 -> P` means the circuit prepares `P`.
+/// - `P -> 1` means the circuit measures `P` (output is purely classical).
+/// - `1 -> 1` means the circuit contains a check (e.g. a `DETECTOR`).
+///
+/// Flows are used to verify that circuits preserve stabilizer properties. For
+/// example, a `Flow` can be passed to `stim::Circuit::has_flow` to check that
+/// a circuit implements the flow.
+///
+/// The flow text format uses `->` to separate input from output, and `xor` to
+/// combine the output Pauli string with measurement records and observable
+/// references. Identical terms cancel: XOR-ing a measurement twice removes it,
+/// and multiplying two identical Pauli terms yields identity.
+///
+/// # References
+///
+/// Stim's gate documentation includes the stabilizer flows of each gate.
+/// Appendix A of <https://arxiv.org/abs/2302.02192> describes how flows are
+/// defined and provides a circuit construction for experimentally verifying
+/// their presence.
+///
+/// # Examples
+///
+/// ```
+/// use stim::Flow;
+///
+/// // A CNOT gate has the flow X__ -> X_X (X on control propagates to target).
+/// let flow = Flow::from_text("__X__ -> __X_X").unwrap();
+/// assert_eq!(flow.to_string(), "__X__ -> __X_X");
+///
+/// // Flows involving measurements use `xor rec[-k]` syntax.
+/// let flow = Flow::from_text("X -> rec[-1]").unwrap();
+/// assert_eq!(flow.measurements_copy(), vec![-1]);
+///
+/// // Flows involving observables use `xor obs[k]` syntax.
+/// let flow = Flow::from_text("X -> Y xor obs[3]").unwrap();
+/// assert_eq!(flow.included_observables_copy(), vec![3]);
+/// ```
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A stabilizer flow relating an input Pauli frame, output frame, and classical data.
 pub struct Flow {
     text: String,
 }
 
 impl Flow {
-    /// Creates a flow from canonicalizable Stim flow text.
+    /// Creates a flow by parsing and canonicalizing Stim flow shorthand text.
+    ///
+    /// This is a convenience alias for [`Flow::from_text`]. The input string
+    /// is parsed according to Stim's flow shorthand format, where `->` separates
+    /// the input Pauli string from the output, and `xor` joins measurement
+    /// records or observable indices. The text is canonicalized: qubit-indexed
+    /// Pauli terms like `X2` are expanded to explicit underscore-padded strings,
+    /// and duplicate terms cancel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `text` is not valid Stim flow shorthand.
     ///
     /// # Examples
     ///
@@ -21,13 +82,35 @@ impl Flow {
         Self::from_text(text)
     }
 
-    /// Parses and canonicalizes flow text.
+    /// Parses and canonicalizes Stim flow shorthand text.
+    ///
+    /// The flow text format uses `->` to separate the input Pauli string from the
+    /// output side, and `xor` to combine the output Pauli string with measurement
+    /// record lookbacks (`rec[-k]`) and observable references (`obs[k]`).
+    ///
+    /// Canonicalization normalizes the representation: qubit-indexed terms like
+    /// `X2` become underscore-padded explicit strings like `__X`, Pauli products
+    /// are combined, and duplicate `xor` terms cancel (since XOR is
+    /// self-inverse). For example, `xor rec[-2] xor rec[-2]` disappears, and
+    /// `Y2*Y2` becomes identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `text` is not valid Stim flow shorthand.
     ///
     /// # Examples
     ///
     /// ```
     /// let flow = stim::Flow::from_text("X2 -> -Y2*Z4 xor rec[-1]").unwrap();
     /// assert_eq!(flow.to_string(), "__X -> -__Y_Z xor rec[-1]");
+    ///
+    /// // Identity output "1" is elided when measurements are present.
+    /// let flow = stim::Flow::from_text("Z -> 1 xor rec[-1]").unwrap();
+    /// assert_eq!(flow.to_string(), "Z -> rec[-1]");
+    ///
+    /// // Duplicate terms cancel.
+    /// let flow = stim::Flow::from_text("X2 -> Y2*Y2 xor rec[-2] xor rec[-2]").unwrap();
+    /// assert_eq!(flow.to_string(), "__X -> ___");
     /// ```
     pub fn from_text(text: &str) -> crate::Result<Self> {
         stim_cxx::canonicalize_flow_text(text)
@@ -35,13 +118,25 @@ impl Flow {
             .map_err(crate::StimError::from)
     }
 
-    /// Returns a copy of the flow's input Pauli string.
+    /// Returns a copy of the flow's input Pauli string (the stabilizer before
+    /// the circuit acts).
+    ///
+    /// The input Pauli string is the left-hand side of the `->` arrow in the
+    /// flow text. A flow like `X -> Y` has input `+X`. A preparation flow like
+    /// `1 -> Z` has an empty (zero-qubit) input Pauli string representing the
+    /// identity.
+    ///
+    /// Each call returns a fresh, independent [`crate::PauliString`].
     ///
     /// # Examples
     ///
     /// ```
     /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
     /// assert_eq!(flow.input_copy(), stim::PauliString::from_text("X").unwrap());
+    ///
+    /// // Preparation flows have an empty input.
+    /// let flow = stim::Flow::from_text("1 -> X xor rec[-1] xor obs[2]").unwrap();
+    /// assert_eq!(flow.input_copy(), stim::PauliString::new(0));
     /// ```
     #[must_use]
     pub fn input_copy(&self) -> crate::PauliString {
@@ -49,21 +144,87 @@ impl Flow {
         input
     }
 
-    /// Returns a copy of the flow's output Pauli string.
+    /// Returns a copy of the flow's output Pauli string (the stabilizer after
+    /// the circuit acts).
+    ///
+    /// The output Pauli string is the Pauli term on the right-hand side of the
+    /// `->` arrow, excluding any `rec[...]` or `obs[...]` terms joined by `xor`.
+    /// A measurement flow like `Z -> rec[-1]` has an empty (zero-qubit) output
+    /// Pauli string, because the output is purely classical.
+    ///
+    /// Each call returns a fresh, independent [`crate::PauliString`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
+    /// assert_eq!(flow.output_copy(), stim::PauliString::from_text("Y").unwrap());
+    ///
+    /// // Measurement-only flows have an empty output.
+    /// let flow = stim::Flow::from_text("X -> rec[-1]").unwrap();
+    /// assert_eq!(flow.output_copy(), stim::PauliString::new(0));
+    /// ```
     #[must_use]
     pub fn output_copy(&self) -> crate::PauliString {
         let (_, output, _, _) = parse_flow_text(&self.text);
         output
     }
 
-    /// Returns the flow's referenced measurement record lookbacks.
+    /// Returns the flow's referenced measurement record lookbacks as a list
+    /// of signed indices.
+    ///
+    /// Measurement indices follow the convention where negative values are
+    /// lookbacks relative to the end of the measurement record: `-1` is the
+    /// most recent measurement, `-2` is the one before that, etc. Positive
+    /// values index from the start of the circuit's measurement record.
+    ///
+    /// Each call returns a fresh [`Vec`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let flow = stim::Flow::from_text("X -> rec[-1]").unwrap();
+    /// assert_eq!(flow.measurements_copy(), vec![-1]);
+    ///
+    /// // Multiple measurement records are listed in order.
+    /// let flow = stim::Flow::from_text("X -> rec[-2] xor rec[-1]").unwrap();
+    /// assert_eq!(flow.measurements_copy(), vec![-2, -1]);
+    ///
+    /// // A flow with no measurements returns an empty list.
+    /// let flow = stim::Flow::from_text("X -> Y").unwrap();
+    /// assert!(flow.measurements_copy().is_empty());
+    /// ```
     #[must_use]
     pub fn measurements_copy(&self) -> Vec<i32> {
         let (_, _, measurements, _) = parse_flow_text(&self.text);
         measurements
     }
 
-    /// Returns the observables included by the flow.
+    /// Returns the observable indices included by this flow.
+    ///
+    /// When an observable is included in a flow, the flow implicitly incorporates
+    /// all measurements and Pauli terms from `OBSERVABLE_INCLUDE` instructions
+    /// targeting that observable index. For example, the flow `X5 -> obs[3]` says
+    /// "at the start of the circuit, observable 3 should be an X term on qubit 5;
+    /// by the end of the circuit it will be measured, and the `OBSERVABLE_INCLUDE(3)`
+    /// instructions in the circuit explain how."
+    ///
+    /// Each call returns a fresh [`Vec`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
+    /// assert_eq!(flow.included_observables_copy(), vec![3]);
+    ///
+    /// // Duplicate observable references cancel (XOR is self-inverse).
+    /// let flow = stim::Flow::from_text("X -> Y xor obs[3] xor obs[3] xor obs[3]").unwrap();
+    /// assert_eq!(flow.included_observables_copy(), vec![3]);
+    ///
+    /// // A flow with no observables returns an empty list.
+    /// let flow = stim::Flow::from_text("X -> Y").unwrap();
+    /// assert!(flow.included_observables_copy().is_empty());
+    /// ```
     #[must_use]
     pub fn included_observables_copy(&self) -> Vec<u64> {
         let (_, _, _, observables) = parse_flow_text(&self.text);
@@ -91,6 +252,38 @@ impl fmt::Debug for Flow {
     }
 }
 
+/// Computes the product of two stabilizer flows.
+///
+/// Multiplying flows composes their input Pauli strings and output Pauli
+/// strings independently via the Pauli group product, and XOR-combines their
+/// measurement records and observable indices. This corresponds to the fact
+/// that if a circuit has flows `P1 -> Q1` and `P2 -> Q2`, it also has flow
+/// `P1*P2 -> Q1*Q2` (with any mediating measurements XOR-ed together).
+///
+/// # Panics
+///
+/// Panics if the inputs anti-commute, because the product would be
+/// anti-Hermitian. For example, `1 -> X` times `1 -> Y` fails because
+/// it would yield `1 -> iZ`.
+///
+/// # Examples
+///
+/// ```
+/// use stim::Flow;
+///
+/// // Pauli products: X * Z = Y (up to phase).
+/// let xy = Flow::from_text("X -> X").unwrap() * Flow::from_text("Z -> Z").unwrap();
+/// assert_eq!(xy, Flow::from_text("Y -> Y").unwrap());
+///
+/// // Anti-commuting outputs acquire a sign flip.
+/// let yy = Flow::from_text("1 -> XX").unwrap() * Flow::from_text("1 -> ZZ").unwrap();
+/// assert_eq!(yy, Flow::from_text("1 -> -YY").unwrap());
+///
+/// // Measurement records are XOR-combined.
+/// let combined = Flow::from_text("X -> rec[-1]").unwrap()
+///     * Flow::from_text("X -> rec[-2]").unwrap();
+/// assert_eq!(combined, Flow::from_text("_ -> rec[-2] xor rec[-1]").unwrap());
+/// ```
 impl Mul for Flow {
     type Output = Self;
 

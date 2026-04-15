@@ -4,6 +4,42 @@ use std::hash::{Hash, Hasher};
 
 use crate::GateTargetWithCoords;
 
+/// Describes a measurement that was flipped by an error mechanism.
+///
+/// When an error in a Stim circuit flips a measurement outcome (e.g.
+/// from an `M(p)` instruction), this struct records which measurement
+/// was affected and what observable it corresponds to.
+///
+/// - **`record_index`** -- the 0-based index of the flipped measurement
+///   in the global measurement record. For example, the fifth
+///   measurement in a circuit has `record_index == 4`. This is `None`
+///   when the measurement index is not applicable.
+/// - **`observable`** -- the Pauli observable that the measurement
+///   implements, as a list of [`GateTargetWithCoords`]. For example,
+///   an `MX 5` measurement will have the observable `X5`, while a bare
+///   `M 10` measurement has the observable `Z10`.
+///
+/// Instances are typically found inside [`CircuitErrorLocation`] rather
+/// than constructed directly.
+///
+/// # Examples
+///
+/// ```
+/// use stim::{FlippedMeasurement, GateTargetWithCoords};
+///
+/// let flipped = FlippedMeasurement::new(
+///     Some(5),
+///     vec![GateTargetWithCoords::new(
+///         stim::target_z(10u32, false).expect("valid target"),
+///         vec![],
+///     )],
+/// );
+///
+/// assert_eq!(flipped.record_index(), Some(5));
+/// assert_eq!(flipped.observable().len(), 1);
+/// ```
+///
+/// [`CircuitErrorLocation`]: crate::CircuitErrorLocation
 #[derive(Clone, PartialEq)]
 pub struct FlippedMeasurement {
     record_index: Option<u64>,
@@ -11,6 +47,17 @@ pub struct FlippedMeasurement {
 }
 
 impl FlippedMeasurement {
+    /// Creates a new `FlippedMeasurement`.
+    ///
+    /// # Arguments
+    ///
+    /// - `record_index` -- the 0-based index of the measurement in the
+    ///   global measurement record, or `None` if not applicable.
+    /// - `observable` -- the Pauli observable of the measurement,
+    ///   represented as a sequence of
+    ///   [`GateTargetWithCoords`](crate::GateTargetWithCoords). For a
+    ///   simple `M 10` instruction this would be `[target_z(10)]`; for
+    ///   `MX 5` it would be `[target_x(5)]`.
     #[must_use]
     pub fn new(
         record_index: Option<u64>,
@@ -22,11 +69,25 @@ impl FlippedMeasurement {
         }
     }
 
+    /// Returns the measurement record index of the flipped measurement.
+    ///
+    /// This is the 0-based position of the measurement in the global
+    /// measurement record. For example, the fifth measurement in a
+    /// circuit has a record index of 4. Returns `None` when the
+    /// measurement index is not applicable.
     #[must_use]
     pub fn record_index(&self) -> Option<u64> {
         self.record_index
     }
 
+    /// Returns the observable of the flipped measurement.
+    ///
+    /// This describes the Pauli basis in which the measurement was
+    /// performed, as a list of [`GateTargetWithCoords`]. For example,
+    /// an `MX 5` measurement has the observable `X5`, while a bare
+    /// `M 10` measurement has the observable `Z10`. The coordinate
+    /// data attached to each target comes from `QUBIT_COORDS`
+    /// instructions in the circuit.
     #[must_use]
     pub fn observable(&self) -> &[GateTargetWithCoords] {
         &self.observable

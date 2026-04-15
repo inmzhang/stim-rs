@@ -10,12 +10,47 @@ const SEPARATOR_SYGIL: u64 = u64::MAX;
 
 /// An instruction target from a detector error model (`.dem`) file.
 ///
-/// A `DemTarget` is one of three things:
-/// - A **relative detector id** (`D0`, `D1`, ...) referencing a detector.
-/// - A **logical observable id** (`L0`, `L1`, ...) referencing an observable.
-/// - A **separator** (`^`) used to delimit groups of targets within an instruction.
+/// A `DemTarget` represents one of the three fundamental target types that can
+/// appear in a detector error model instruction. Every target in a DEM
+/// instruction is exactly one of:
 ///
-/// Targets are lightweight `Copy` values that can be compared, hashed, and sorted.
+/// - **Relative detector id** (`D0`, `D1`, …) — references a detector by its
+///   index relative to the current detector offset. In a `.dem` file these are
+///   written as `D<index>`. For example, `D5` refers to the detector whose index
+///   is 5 greater than the current detector offset (which is 0 at the top level,
+///   but shifts inside `repeat` blocks). Detector indices must be in the range
+///   `0..2^62 - 1`.
+///
+/// - **Logical observable id** (`L0`, `L1`, …) — references a logical
+///   observable that tracks frame changes across the circuit. In a `.dem` file
+///   these are written as `L<index>`. For example, in `error(0.25) D0 L1` the
+///   `L1` identifies observable 1. Observable indices must be in the range
+///   `0..0xFFFF_FFFF`.
+///
+/// - **Separator** (`^`) — delimits groups of targets within a single DEM
+///   instruction. Separators are used to specify *suggested decompositions* of a
+///   multi-detector error into simpler components. For example,
+///   `error(0.25) D1 D2 ^ D3 D4` suggests decomposing the error into the pair
+///   `{D1, D2}` and the pair `{D3, D4}`.
+///
+/// `DemTarget` is a lightweight `Copy` value (backed by a single `u64`) that
+/// implements `Eq`, `Ord`, `Hash`, `Display`, and `Debug`, making it cheap to
+/// store in collections and easy to inspect.
+///
+/// # Construction
+///
+/// Targets can be constructed via:
+/// - [`DemTarget::relative_detector_id`] / [`target_relative_detector_id`]
+/// - [`DemTarget::logical_observable_id`] / [`target_logical_observable_id`]
+/// - [`DemTarget::separator`] / [`target_separator`]
+/// - [`DemTarget::from_text`] (parses `"D5"`, `"L2"`, `"^"`)
+/// - [`DemTarget::new`] (from any `Into<DemTarget>` value)
+///
+/// # Classification
+///
+/// Once constructed, use the `is_*` predicates to determine which variant a
+/// target is, and [`val`](Self::val) or [`raw_id`](Self::raw_id) to extract
+/// the numeric index.
 ///
 /// # Examples
 ///
@@ -40,8 +75,29 @@ pub struct DemTarget {
 /// A DEM target paired with coordinate metadata.
 ///
 /// Wraps a [`DemTarget`] together with an optional vector of floating-point
-/// coordinates describing its spatial position. Coordinates are primarily
-/// used for visualization and matching graph construction.
+/// coordinates describing its spatial position. This is the type returned by
+/// APIs that resolve detector indices to their physical or logical coordinates
+/// — for example, when a circuit attaches coordinate arguments to its
+/// `DETECTOR` instructions.
+///
+/// When the enclosed target is a relative detector id, it is guaranteed to be
+/// *absolute* (i.e., relative to detector offset 0), so you can use it directly
+/// as a global index without further adjustment.
+///
+/// Having the coordinates readily available alongside the target is especially
+/// helpful when debugging a problem in a circuit: instead of manually looking up
+/// the coordinates of a detector index to understand where an error lives in the
+/// physical layout, you can inspect the `coords` field directly. Coordinates are
+/// also used by visualization tools and matching-graph construction routines.
+///
+/// The coordinate vector may be empty if no coordinate metadata was attached to
+/// the detector in the original circuit. The number and meaning of coordinates
+/// is user-defined, but conventionally they represent spatial positions (e.g.,
+/// `[x, y]` or `[x, y, t]` for space-time coordinates).
+///
+/// `DemTargetWithCoords` implements `Eq`, `Ord`, `Hash`, `Display`, and `Debug`
+/// (floating-point coordinates are compared bitwise for ordering and hashing
+/// purposes).
 ///
 /// # Examples
 ///
@@ -61,7 +117,11 @@ pub struct DemTargetWithCoords {
 impl DemTarget {
     /// Creates a `DemTarget` from any type that converts into one.
     ///
-    /// This is a convenience wrapper around `Into<DemTarget>`.
+    /// This is a convenience wrapper around `Into<DemTarget>` that allows you to
+    /// pass a pre-existing `DemTarget` (or any future type that implements
+    /// `Into<DemTarget>`) and receive a `DemTarget` back. This is primarily
+    /// useful in generic contexts where you want to accept multiple input types
+    /// without requiring the caller to manually convert.
     #[must_use]
     pub fn new(value: impl Into<Self>) -> Self {
         value.into()
@@ -69,8 +129,19 @@ impl DemTarget {
 
     /// Parses a `DemTarget` from its textual representation.
     ///
-    /// Accepted formats are `D<id>` for relative detector ids, `L<id>` for
-    /// logical observable ids, and `^` for the separator.
+    /// This method recognizes the three canonical DEM target text formats:
+    ///
+    /// - `D<id>` — parsed as a relative detector id via
+    ///   [`DemTarget::relative_detector_id`].
+    /// - `L<id>` — parsed as a logical observable id via
+    ///   [`DemTarget::logical_observable_id`].
+    /// - `^` — parsed as the separator via [`DemTarget::separator`].
+    ///
+    /// The `<id>` portion must be a valid non-negative integer that fits within
+    /// the range allowed for that target kind.
+    ///
+    /// This method is also available via the [`FromStr`] trait, so you can use
+    /// `"D7".parse::<DemTarget>()` interchangeably with `DemTarget::from_text("D7")`.
     ///
     /// # Errors
     ///
@@ -109,6 +180,16 @@ impl DemTarget {
 
     /// Creates a logical observable target (`L<id>`).
     ///
+    /// Returns a `DemTarget` representing a logical observable — a frame-change
+    /// observable tracked across the circuit. In a DEM file, observable targets
+    /// are written as `L<id>`. For example, in the DEM instruction
+    /// `error(0.25) D0 L1`, the `L1` identifies observable index 1, meaning that
+    /// the error mechanism flips the frame of logical observable 1 with
+    /// probability 0.25.
+    ///
+    /// Observable indices are stored in 32 bits, so `id` must be at most
+    /// `0xFFFF_FFFF` (4,294,967,295).
+    ///
     /// # Errors
     ///
     /// Returns an error if `id` exceeds `0xFFFF_FFFF`.
@@ -132,6 +213,16 @@ impl DemTarget {
 
     /// Creates a relative detector target (`D<id>`).
     ///
+    /// Returns a `DemTarget` representing a detector. In a DEM file, detector
+    /// targets are written as `D<id>`, where `<id>` is the detector's index
+    /// relative to the current detector offset. At the top level the offset is 0,
+    /// so `D5` refers to detector 5 globally. Inside a `repeat` block the offset
+    /// accumulates with each iteration, making the same `D5` refer to a different
+    /// global detector on each pass.
+    ///
+    /// The maximum supported detector index is `2^62 - 1`
+    /// (4,611,686,018,427,387,903).
+    ///
     /// # Errors
     ///
     /// Returns an error if `id` exceeds the maximum supported detector index
@@ -154,7 +245,19 @@ impl DemTarget {
 
     /// Returns the separator target (`^`).
     ///
-    /// Separators delimit groups of targets within a single DEM instruction.
+    /// Separators delimit groups of targets within a single DEM instruction. They
+    /// are used to express *suggested decompositions* of a multi-detector error
+    /// into simpler components. For example, the DEM instruction:
+    ///
+    /// ```text
+    /// error(0.25) D1 D2 ^ D3 D4
+    /// ```
+    ///
+    /// describes a single error mechanism that flips detectors `{D1, D2, D3, D4}`
+    /// with probability 0.25, and *suggests* that it can be decomposed into two
+    /// independent pieces `{D1, D2}` and `{D3, D4}` separated by the `^`.
+    ///
+    /// There is exactly one separator value; it carries no numeric index.
     ///
     /// # Examples
     ///
@@ -171,18 +274,36 @@ impl DemTarget {
     }
 
     /// Returns `true` if this target is a logical observable id (`L<id>`).
+    ///
+    /// In a detector error model file, observable targets are prefixed by `L`.
+    /// For example, in `error(0.25) D0 L1` the `L1` is an observable target, so
+    /// calling `is_logical_observable_id()` on it returns `true`.
+    ///
+    /// Returns `false` for relative detector ids and for the separator.
     #[must_use]
     pub fn is_logical_observable_id(self) -> bool {
         self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) != 0
     }
 
     /// Returns `true` if this target is the separator (`^`).
+    ///
+    /// Separators separate the components of a suggested decomposition within an
+    /// error. For example, the `^` in `error(0.25) D1 D2 ^ D3 D4` is the
+    /// separator. Calling `is_separator()` on the `^` target returns `true`.
+    ///
+    /// Returns `false` for relative detector ids and logical observable ids.
     #[must_use]
     pub fn is_separator(self) -> bool {
         self.data == SEPARATOR_SYGIL
     }
 
     /// Returns `true` if this target is a relative detector id (`D<id>`).
+    ///
+    /// In a detector error model file, detectors are prefixed by `D`. For
+    /// example, in `error(0.25) D0 L1` the `D0` is a relative detector target,
+    /// so calling `is_relative_detector_id()` on it returns `true`.
+    ///
+    /// Returns `false` for logical observable ids and for the separator.
     #[must_use]
     pub fn is_relative_detector_id(self) -> bool {
         self.data != SEPARATOR_SYGIL && (self.data & OBSERVABLE_BIT) == 0
@@ -191,16 +312,29 @@ impl DemTarget {
     /// Returns the numeric id with the observable/detector classification bit
     /// stripped.
     ///
-    /// For detector targets this equals the detector index. For observable
-    /// targets this equals the observable index. For separators the return
-    /// value is not meaningful; prefer [`val`](Self::val) when you need a
-    /// checked id.
+    /// For detector targets this equals the detector index (`D5` → 5). For
+    /// observable targets this equals the observable index (`L3` → 3). For the
+    /// separator the return value is a large sentinel that is not meaningful as
+    /// an index — prefer [`val`](Self::val) when you need a checked id that
+    /// rejects separators.
+    ///
+    /// Unlike [`val`](Self::val), this method never fails, which makes it useful
+    /// in contexts where you have already classified the target with one of the
+    /// `is_*` predicates and want a cheap, infallible extraction.
     #[must_use]
     pub fn raw_id(self) -> u64 {
         self.data & !OBSERVABLE_BIT
     }
 
     /// Returns the numeric id of this target, failing for separators.
+    ///
+    /// For a relative detector id (`D5`), returns `5`. For a logical observable
+    /// id (`L3`), returns `3`. Separators do not carry an integer value, so
+    /// calling `val()` on one returns an error.
+    ///
+    /// This is the checked counterpart to [`raw_id`](Self::raw_id). Use `val()`
+    /// when you are not certain of the target's kind and want to detect
+    /// separators as errors rather than receiving a meaningless sentinel.
     ///
     /// # Errors
     ///
@@ -226,9 +360,23 @@ impl DemTarget {
     /// Adds `offset` to this target's detector index, if it is a relative
     /// detector id. Observable and separator targets are left unchanged.
     ///
+    /// This is the primary mechanism for translating detector indices when
+    /// flattening `repeat` blocks or composing detector error models. When a
+    /// DEM repeat block is unrolled, each iteration shifts the relative detector
+    /// ids in its body by a cumulative offset so that they map to the correct
+    /// global detectors.
+    ///
+    /// The `offset` is a signed integer, allowing both forward and backward
+    /// shifts. A negative offset is useful when rewriting instructions to
+    /// reference earlier detectors.
+    ///
+    /// If this target is a logical observable id or a separator, the method is a
+    /// no-op and always succeeds.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the shift overflows or produces a negative value.
+    /// Returns an error if the shift overflows `i64` arithmetic or produces a
+    /// negative detector index (negative detector ids are not representable).
     ///
     /// # Examples
     ///
@@ -292,18 +440,37 @@ impl fmt::Debug for DemTarget {
 
 impl DemTargetWithCoords {
     /// Creates a new target-with-coordinates pairing.
+    ///
+    /// Bundles the given [`DemTarget`] together with a vector of floating-point
+    /// coordinates. If the target has no associated coordinate metadata, pass an
+    /// empty `Vec` — the coordinates will simply be omitted from the `Display`
+    /// output.
     #[must_use]
     pub fn new(dem_target: DemTarget, coords: Vec<f64>) -> Self {
         Self { dem_target, coords }
     }
 
     /// Returns the underlying [`DemTarget`].
+    ///
+    /// If the target is a relative detector id, it is guaranteed to be absolute
+    /// (i.e., relative to detector offset 0), so you can use the returned value
+    /// as a global detector index directly.
     #[must_use]
     pub fn dem_target(&self) -> DemTarget {
         self.dem_target
     }
 
     /// Returns the coordinate metadata as a slice.
+    ///
+    /// The coordinates are the floating-point values that were attached to this
+    /// target when it was created — typically originating from the `DETECTOR`
+    /// instruction's coordinate arguments in the source circuit. The number of
+    /// coordinates and their semantic meaning are user-defined, but by convention
+    /// they represent spatial (and optionally temporal) positions, e.g.
+    /// `[x, y]` or `[x, y, t]`.
+    ///
+    /// Returns an empty slice if no coordinate metadata was associated with the
+    /// target.
     #[must_use]
     pub fn coords(&self) -> &[f64] {
         &self.coords
@@ -363,11 +530,16 @@ impl fmt::Debug for DemTargetWithCoords {
 
 /// Creates a [`DemTarget`] for a relative detector id (`D<index>`).
 ///
-/// This is a convenience wrapper around [`DemTarget::relative_detector_id`].
+/// This is a convenience free-function wrapper around
+/// [`DemTarget::relative_detector_id`]. It is provided so that callers can write
+/// `stim::target_relative_detector_id(5)` without importing `DemTarget` by
+/// name, mirroring the `stim.target_relative_detector_id()` function in the
+/// Python API.
 ///
 /// # Errors
 ///
-/// Returns an error if `index` exceeds the maximum supported detector index.
+/// Returns an error if `index` exceeds the maximum supported detector index
+/// (2^62 - 1).
 ///
 /// # Examples
 ///
@@ -382,11 +554,15 @@ pub fn target_relative_detector_id(index: u64) -> Result<DemTarget> {
 
 /// Creates a [`DemTarget`] for a logical observable id (`L<index>`).
 ///
-/// This is a convenience wrapper around [`DemTarget::logical_observable_id`].
+/// This is a convenience free-function wrapper around
+/// [`DemTarget::logical_observable_id`]. It is provided so that callers can
+/// write `stim::target_logical_observable_id(2)` without importing `DemTarget`
+/// by name, mirroring the `stim.target_logical_observable_id()` function in the
+/// Python API.
 ///
 /// # Errors
 ///
-/// Returns an error if `index` exceeds `0xFFFF_FFFF`.
+/// Returns an error if `index` exceeds `0xFFFF_FFFF` (4,294,967,295).
 ///
 /// # Examples
 ///
@@ -401,7 +577,10 @@ pub fn target_logical_observable_id(index: u64) -> Result<DemTarget> {
 
 /// Returns the separator [`DemTarget`] (`^`).
 ///
-/// This is a convenience wrapper around [`DemTarget::separator`].
+/// This is a convenience free-function wrapper around
+/// [`DemTarget::separator`]. It is provided so that callers can write
+/// `stim::target_separator()` without importing `DemTarget` by name, mirroring
+/// the `stim.target_separator()` function in the Python API.
 ///
 /// # Examples
 ///

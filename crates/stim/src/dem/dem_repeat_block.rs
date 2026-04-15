@@ -5,8 +5,15 @@ use crate::{DetectorErrorModel, Result, StimError};
 
 /// A repeat block from a detector error model.
 ///
-/// Represents a `repeat N { ... }` construct where a sub-model is repeated
-/// `N` times. The repetition count must be at least 1.
+/// Represents a `repeat N { ... }` construct in a
+/// [`DetectorErrorModel`], where a sub-model (the body) is repeated
+/// `N` times. Repeat blocks are commonly used to express the periodic
+/// structure of error-correction rounds: the body typically contains
+/// `error` instructions and a `shift_detectors` instruction that
+/// advances detector indices by a fixed stride each iteration.
+///
+/// The repetition count must be at least 1; attempting to create a
+/// block with `repeat_count == 0` returns an error.
 ///
 /// # Examples
 ///
@@ -18,6 +25,9 @@ use crate::{DetectorErrorModel, Result, StimError};
 /// assert_eq!(block.repeat_count(), 100);
 /// assert_eq!(block.r#type(), "repeat");
 /// assert_eq!(block.body_copy(), body);
+///
+/// // Display renders the block in DEM text format.
+/// assert!(block.to_string().starts_with("repeat 100 {"));
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct DemRepeatBlock {
@@ -28,9 +38,13 @@ pub struct DemRepeatBlock {
 impl DemRepeatBlock {
     /// Creates a new repeat block with the given count and body.
     ///
+    /// The body is cloned into the new block. Subsequent mutations to
+    /// the original `DetectorErrorModel` will not affect the block.
+    ///
     /// # Errors
     ///
-    /// Returns an error if `repeat_count` is zero.
+    /// Returns an error if `repeat_count` is zero, because repeating a
+    /// block zero times has no meaning in a detector error model.
     ///
     /// # Examples
     ///
@@ -38,6 +52,9 @@ impl DemRepeatBlock {
     /// let body: stim::DetectorErrorModel = "error(0.125) D0".parse().expect("valid");
     /// let block = stim::DemRepeatBlock::new(5, &body).expect("valid repeat");
     /// assert_eq!(block.repeat_count(), 5);
+    ///
+    /// // Zero repetitions are rejected.
+    /// assert!(stim::DemRepeatBlock::new(0, &body).is_err());
     /// ```
     pub fn new(repeat_count: u64, block: &DetectorErrorModel) -> Result<Self> {
         if repeat_count == 0 {
@@ -49,19 +66,29 @@ impl DemRepeatBlock {
         })
     }
 
-    /// Returns the number of times the body is repeated.
+    /// Returns the number of times the body is supposed to execute.
     #[must_use]
     pub fn repeat_count(&self) -> u64 {
         self.repeat_count
     }
 
     /// Returns an independent copy of the repeated body model.
+    ///
+    /// The result is a freshly cloned [`DetectorErrorModel`]; editing it
+    /// will not change the block's body or future copies. This
+    /// copy-on-access design makes it clear that the repeat block is
+    /// immutable after construction.
     #[must_use]
     pub fn body_copy(&self) -> DetectorErrorModel {
         self.block.clone()
     }
 
     /// Returns the type name of this block, always `"repeat"`.
+    ///
+    /// This is a duck-typing convenience method. It exists so that code
+    /// that doesn't know whether it has a
+    /// [`DemInstruction`](crate::DemInstruction) or a `DemRepeatBlock`
+    /// can check the type field without doing a pattern match first.
     #[must_use]
     pub fn r#type(&self) -> &str {
         "repeat"

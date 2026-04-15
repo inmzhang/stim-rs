@@ -3,17 +3,50 @@ use std::hash::{Hash, Hasher};
 
 pub use crate::GateTargetWithCoords;
 
-/// The resolved targets from a specific instruction at a specific location
-/// inside a circuit.
+/// Describes a range of targets within a circuit instruction that were
+/// involved in a specific error.
 ///
 /// When Stim explains a circuit error, it needs to identify not just which
 /// instruction caused the error, but which subset of that instruction's
-/// targets were involved. This struct captures the gate name, its arguments,
-/// the relevant target range, and the fully resolved targets (with
-/// coordinates) within that range.
+/// targets were involved. A single instruction like `X_ERROR(0.25) 0 1 2 3`
+/// may have many targets, but a given error only affects a sub-range of
+/// them. This struct captures:
 ///
-/// Instances are typically found inside [`CircuitErrorLocation`] rather than
-/// constructed directly.
+/// - **`gate`** -- the canonical gate name (e.g. `"X_ERROR"`, `"MPP"`,
+///   `"DEPOLARIZE1"`).
+/// - **`tag`** -- the instruction's `[...]` tag annotation, or `""` if
+///   untagged.
+/// - **`args`** -- the instruction's numeric arguments (e.g. the error
+///   probability `0.25`).
+/// - **`target_range_start`** / **`target_range_end`** -- the half-open
+///   range `[start, end)` of target indices within the instruction that
+///   participated in the error.
+/// - **`targets_in_range`** -- the fully resolved targets (with qubit
+///   coordinate data from `QUBIT_COORDS`) in the selected range.
+///
+/// Instances are typically found inside [`CircuitErrorLocation`] rather
+/// than constructed directly.
+///
+/// # Examples
+///
+/// ```
+/// use stim::{CircuitTargetsInsideInstruction, GateTarget, GateTargetWithCoords};
+///
+/// let inside = CircuitTargetsInsideInstruction::new(
+///     "X_ERROR",
+///     "",
+///     vec![0.25],
+///     0,
+///     1,
+///     vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+/// );
+///
+/// assert_eq!(inside.gate(), "X_ERROR");
+/// assert_eq!(inside.args(), &[0.25]);
+/// assert_eq!(inside.target_range_start(), 0);
+/// assert_eq!(inside.target_range_end(), 1);
+/// assert_eq!(inside.targets_in_range().len(), 1);
+/// ```
 ///
 /// [`CircuitErrorLocation`]: crate::CircuitErrorLocation
 #[derive(Clone, PartialEq)]
@@ -29,12 +62,17 @@ pub struct CircuitTargetsInsideInstruction {
 impl CircuitTargetsInsideInstruction {
     /// Creates a new resolved-targets descriptor.
     ///
-    /// - `gate` / `tag` / `args`: identify the instruction.
-    /// - `target_range_start` / `target_range_end`: the half-open range
+    /// # Arguments
+    ///
+    /// - `gate` -- the canonical gate name (e.g. `"X_ERROR"`).
+    /// - `tag` -- the instruction's `[...]` annotation, or `""`.
+    /// - `args` -- the instruction's numeric arguments (e.g. error
+    ///   probability).
+    /// - `target_range_start` / `target_range_end` -- the half-open range
     ///   `[start, end)` of target indices within the instruction that
     ///   participated in the error.
-    /// - `targets_in_range`: the resolved targets (with coordinates) in the
-    ///   selected range.
+    /// - `targets_in_range` -- the resolved targets (with coordinate data)
+    ///   in the selected range.
     #[must_use]
     pub fn new(
         gate: impl Into<String>,
@@ -54,40 +92,72 @@ impl CircuitTargetsInsideInstruction {
         }
     }
 
-    /// Returns the canonical gate name (e.g. `"X_ERROR"`, `"MPP"`).
+    /// Returns the name of the gate or instruction that was being executed
+    /// (e.g. `"X_ERROR"`, `"DEPOLARIZE1"`, `"MPP"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use stim::*;
+    /// let inside = CircuitTargetsInsideInstruction::new(
+    ///     "Y_ERROR", "", vec![0.125], 0, 1,
+    ///     vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+    /// );
+    /// assert_eq!(inside.gate(), "Y_ERROR");
+    /// ```
     #[must_use]
     pub fn gate(&self) -> &str {
         &self.gate
     }
 
     /// Returns the instruction's tag string, or `""` if untagged.
+    ///
+    /// Tags are the `[...]` annotation appearing after the instruction
+    /// type name, e.g. `X_ERROR[look-at-me-imma-tag](0.25) 0 1`.
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
-    /// Returns the gate's numeric arguments (e.g. error probability).
+    /// Returns the gate's parenthesized numeric arguments (e.g. the error
+    /// probability for noise gates, or detector coordinates for a
+    /// `DETECTOR` instruction).
     #[must_use]
     pub fn args(&self) -> &[f64] {
         &self.args
     }
 
-    /// Returns the start of the half-open target index range `[start, end)`
-    /// within the instruction.
+    /// Returns the inclusive start of the half-open target index range
+    /// `[start, end)` within the instruction.
+    ///
+    /// Together with [`target_range_end`](Self::target_range_end), this
+    /// identifies which of the instruction's potentially many targets
+    /// were involved in the error.
     #[must_use]
     pub fn target_range_start(&self) -> usize {
         self.target_range_start
     }
 
-    /// Returns the end of the half-open target index range `[start, end)`
-    /// within the instruction.
+    /// Returns the exclusive end of the half-open target index range
+    /// `[start, end)` within the instruction.
+    ///
+    /// Together with [`target_range_start`](Self::target_range_start),
+    /// this identifies which of the instruction's potentially many
+    /// targets were involved in the error.
     #[must_use]
     pub fn target_range_end(&self) -> usize {
         self.target_range_end
     }
 
-    /// Returns the resolved targets (with coordinates) that fall within
-    /// the selected range.
+    /// Returns the resolved targets (with coordinate data) that fall
+    /// within the selected range.
+    ///
+    /// Each element is a [`GateTargetWithCoords`] that pairs the gate
+    /// target (qubit index, Pauli target, measurement record target,
+    /// combiner, etc.) with any coordinate data from `QUBIT_COORDS`
+    /// instructions in the circuit. This is helpful for debugging
+    /// because you can see the physical location of qubits without
+    /// manually looking up coordinate data.
     #[must_use]
     pub fn targets_in_range(&self) -> &[GateTargetWithCoords] {
         &self.targets_in_range

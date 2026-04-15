@@ -21,13 +21,71 @@ use crate::{
     Tableau,
 };
 
-/// A Stim circuit.
+/// A mutable stabilizer circuit.
+///
+/// The `Circuit` struct is arguably the most important type in the entire Stim
+/// library. It is the interface through which you describe a noisy quantum
+/// computation to Stim, in order to perform fast bulk sampling or fast error
+/// analysis.
+///
+/// A circuit is a sequence of operations (gates, noise channels, measurements,
+/// resets, annotations) applied to qubits. Circuits can contain `REPEAT` blocks
+/// to compactly represent repetitive structure, such as the rounds of a quantum
+/// error correction code. They support standard arithmetic: two circuits can be
+/// concatenated with `+`, and a circuit can be repeated with `*`.
+///
+/// # Typical workflow
+///
+/// Suppose you want to use a matching-based decoder on a new quantum error
+/// correction construction. Stim can help, but the very first step is to create
+/// a `Circuit` implementing the construction. Once you have the circuit you can
+/// then use:
+///
+/// - [`Circuit::detector_error_model`] to create an object that can be used to
+///   configure the decoder,
+/// - [`Circuit::compile_detector_sampler`] to produce detection-event samples
+///   for the decoder to solve, or
+/// - [`Circuit::shortest_graphlike_error`] to check for mistakes in the
+///   implementation of the code.
+///
+/// # Parsing and display
+///
+/// Circuits are parsed from and displayed as Stim program text via the
+/// [`FromStr`] and [`Display`] trait implementations. The file format is
+/// documented in the [Stim repository](https://github.com/quantumlib/Stim/blob/main/doc/file_format_stim_circuit.md).
+///
+/// # Examples
+///
+/// ```
+/// use std::str::FromStr;
+///
+/// // Build a circuit imperatively.
+/// let mut circuit = stim::Circuit::new();
+/// circuit.append("X", &[0], &[]).unwrap();
+/// circuit.append("M", &[0], &[]).unwrap();
+/// let mut sampler = circuit.compile_sampler(false);
+/// assert_eq!(sampler.sample(1), ndarray::array![[true]]);
+///
+/// // Or parse one from Stim program text.
+/// let circuit = stim::Circuit::from_str(
+///     "H 0\nCNOT 0 1\nM 0 1\nDETECTOR rec[-1] rec[-2]"
+/// ).unwrap();
+/// let mut sampler = circuit.compile_detector_sampler();
+/// assert_eq!(sampler.sample(1), ndarray::array![[false]]);
+/// ```
 pub struct Circuit {
     pub(crate) inner: stim_cxx::Circuit,
 }
 
 impl Circuit {
-    /// Creates an empty circuit.
+    /// Creates a new, empty circuit containing no operations and referencing
+    /// zero qubits.
+    ///
+    /// This is the starting point for building a circuit imperatively. You can
+    /// add operations using [`Circuit::append`],
+    /// [`Circuit::append_from_stim_program_text`], or the `+=` operator.
+    /// Alternatively, you can parse a circuit from a string with
+    /// `"H 0\nM 0".parse::<stim::Circuit>()`.
     ///
     /// # Examples
     ///
@@ -35,6 +93,7 @@ impl Circuit {
     /// let circuit = stim::Circuit::new();
     /// assert!(circuit.is_empty());
     /// assert_eq!(circuit.len(), 0);
+    /// assert_eq!(circuit.num_qubits(), 0);
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -43,13 +102,46 @@ impl Circuit {
         }
     }
 
-    /// Returns the number of qubits referenced by the circuit.
+    /// Returns the number of qubits used when simulating the circuit.
+    ///
+    /// This is always one more than the largest qubit index referenced by any
+    /// operation in the circuit. For example, a circuit that only applies gates
+    /// to qubits 0 and 100 will report `num_qubits() == 101`, because qubit
+    /// indices 0 through 100 must all be allocated during simulation even
+    /// though most of them are idle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "X 0\nM 0 1".parse().unwrap();
+    /// assert_eq!(circuit.num_qubits(), 2);
+    ///
+    /// let circuit: stim::Circuit = "H 100".parse().unwrap();
+    /// assert_eq!(circuit.num_qubits(), 101);
+    /// ```
     #[must_use]
     pub fn num_qubits(&self) -> usize {
         self.inner.num_qubits()
     }
 
     /// Derives the detector error model of the circuit using default options.
+    ///
+    /// A detector error model (DEM) describes the error processes in the circuit
+    /// from the perspective of detectors and logical observables. It lists error
+    /// mechanisms with their probabilities and the detection events they produce.
+    /// This is the primary object consumed by matching-based decoders such as
+    /// PyMatching.
+    ///
+    /// This convenience method calls [`Circuit::detector_error_model_with_options`]
+    /// with all options set to their defaults (no decomposition, no loop
+    /// flattening, no gauge detectors, no disjoint error approximation).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit contains features that prevent a valid
+    /// detector error model from being derived, such as non-deterministic
+    /// detectors (gauge detectors) or disjoint error mechanisms that cannot be
+    /// represented as independent errors.
     ///
     /// # Examples
     ///
@@ -63,6 +155,43 @@ impl Circuit {
     }
 
     /// Derives the detector error model using explicit options.
+    ///
+    /// This is the fully-configurable variant of [`Circuit::detector_error_model`].
+    /// It provides fine-grained control over how composite errors are decomposed,
+    /// whether loops are flattened, and how gauge detectors and disjoint errors
+    /// are handled.
+    ///
+    /// # Arguments
+    ///
+    /// * `decompose_errors` - When `true`, composite error mechanisms (such as
+    ///   depolarization) are decomposed into simpler graphlike errors separated by
+    ///   `stim::target_separator()`. Decomposition fails if large errors cannot be
+    ///   split into components affecting at most two detectors.
+    /// * `flatten_loops` - When `true`, the output will not contain any `repeat`
+    ///   blocks. When `false`, the analysis watches for periodic steady states in
+    ///   loops and emits compact `repeat` blocks, which is much more efficient for
+    ///   circuits with many rounds.
+    /// * `allow_gauge_detectors` - When `true`, non-deterministic detectors are
+    ///   treated as gauge degrees of freedom and removed via Gaussian elimination
+    ///   rather than causing an error.
+    /// * `approximate_disjoint_errors` - When greater than `0.0`, disjoint error
+    ///   components with probability at or below this threshold are approximated
+    ///   as independent errors. Set to `0.0` (the default) to reject any
+    ///   circuits that produce disjoint errors.
+    /// * `ignore_decomposition_failures` - When `true`, errors that fail to
+    ///   decompose into graphlike parts are silently inserted undecomposed rather
+    ///   than aborting the conversion. Only relevant when `decompose_errors` is
+    ///   `true`.
+    /// * `block_decomposition_from_introducing_remnant_edges` - When `true`,
+    ///   decomposing `A B C D` into `A B ^ C D` requires both `A B` and `C D` to
+    ///   already appear elsewhere in the model. Remnant edges can reduce the
+    ///   effective code distance. Only relevant when `decompose_errors` is `true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit contains gauge detectors (and
+    /// `allow_gauge_detectors` is `false`), if decomposition is requested but
+    /// fails, or if disjoint errors exceed the approximation threshold.
     pub fn detector_error_model_with_options(
         &self,
         decompose_errors: bool,
@@ -85,7 +214,38 @@ impl Circuit {
             .map_err(StimError::from)
     }
 
-    /// Returns a circuit containing the detectors that are missing from the original.
+    /// Returns a circuit containing detector declarations for deterministic
+    /// measurement degrees of freedom that are not already covered by the
+    /// circuit's existing `DETECTOR` and `OBSERVABLE_INCLUDE` annotations.
+    ///
+    /// This method is primarily useful for debugging missing detectors. It
+    /// identifies generators for the uncovered degrees of freedom by simulating
+    /// the circuit with a stabilizer tableau and checking which measurement
+    /// parities are determined but not yet declared as detectors or observables.
+    ///
+    /// The returned circuit can be appended to the original circuit to obtain a
+    /// circuit with no missing detectors.
+    ///
+    /// **Caveat:** the returned detectors are not guaranteed to be stable across
+    /// Stim versions, nor are they optimized to form a low-weight or matchable
+    /// basis. It is not recommended to use this method to automatically generate
+    /// the detector annotations for a circuit; it is better used as a diagnostic
+    /// tool to discover what you forgot to annotate.
+    ///
+    /// # Arguments
+    ///
+    /// * `unknown_input` - When `false` (the default), qubits are assumed to
+    ///   start in the |0⟩ state, so initial Z-basis measurements are determined.
+    ///   When `true`, qubits start in an unknown random state, meaning initial
+    ///   measurements are random unless correlated with prior resets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "R 0\nM 0".parse().unwrap();
+    /// let missing = circuit.missing_detectors(false);
+    /// assert_eq!(missing.to_string(), "DETECTOR rec[-1]");
+    /// ```
     #[must_use]
     pub fn missing_detectors(&self, unknown_input: bool) -> Self {
         Self {
@@ -93,7 +253,27 @@ impl Circuit {
         }
     }
 
-    /// Converts the circuit into a tableau when the requested instruction classes are allowed.
+    /// Converts the circuit into an equivalent stabilizer tableau.
+    ///
+    /// A [`Tableau`] represents the Clifford unitary implemented by the circuit
+    /// as a mapping from input Pauli operators to output Pauli operators. This
+    /// conversion is only valid for circuits that consist entirely of Clifford
+    /// gates. Noise, measurements, and resets will cause the conversion to fail
+    /// unless the corresponding `ignore_*` flags are set.
+    ///
+    /// # Arguments
+    ///
+    /// * `ignore_noise` - When `true`, noise operations (e.g. `DEPOLARIZE1`,
+    ///   `X_ERROR`) are skipped as if they were not present.
+    /// * `ignore_measurement` - When `true`, measurement operations are skipped.
+    /// * `ignore_reset` - When `true`, reset operations are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit contains noise operations (and
+    /// `ignore_noise` is `false`), measurement operations (and
+    /// `ignore_measurement` is `false`), or reset operations (and
+    /// `ignore_reset` is `false`).
     ///
     /// # Examples
     ///
@@ -114,21 +294,82 @@ impl Circuit {
             .map_err(StimError::from)
     }
 
-    /// Returns whether the circuit has the given flow.
+    /// Determines whether the circuit implements the given stabilizer flow.
+    ///
+    /// A circuit has a stabilizer flow `P -> Q` if it maps the instantaneous
+    /// stabilizer `P` at the start of the circuit to the instantaneous stabilizer
+    /// `Q` at the end of the circuit. The flow may be mediated by certain
+    /// measurements. For example, a lattice surgery CNOT involves `MXX` and `MZZ`
+    /// measurements, and the CNOT flows implemented by the circuit reference
+    /// these measurements.
+    ///
+    /// Interpretation of flow notation:
+    /// - `P -> Q` means the circuit transforms `P` into `Q`.
+    /// - `1 -> P` means the circuit prepares `P`.
+    /// - `P -> 1` means the circuit measures `P`.
+    /// - `1 -> 1` means the circuit contains a deterministic check (like a
+    ///   `DETECTOR`).
+    ///
+    /// This method ignores any noise in the circuit.
+    ///
+    /// When `unsigned` is `false`, the signs of the Pauli strings must match
+    /// exactly. When `true`, only the Pauli terms are compared and signs are
+    /// permitted to be inverted (i.e., the circuit need only be correct up to
+    /// Pauli gates).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the flow string cannot be parsed or if there is
+    /// an internal simulation failure.
+    ///
+    /// # Caveats
+    ///
+    /// The `unsigned=false` check is implemented using 256 randomized tests.
+    /// Each test has a 50% chance of a false positive and 0% chance of a false
+    /// negative, giving a total false positive probability of 2^-256.
     pub fn has_flow(&self, flow: &Flow, unsigned: bool) -> Result<bool> {
         self.inner
             .has_flow(&flow.to_string(), unsigned)
             .map_err(StimError::from)
     }
 
-    /// Returns whether the circuit has all of the given flows.
+    /// Determines whether the circuit implements *all* of the given stabilizer
+    /// flows.
+    ///
+    /// This is semantically equivalent to
+    /// `flows.iter().all(|f| circuit.has_flow(f, unsigned))` but significantly
+    /// faster, because the circuit only needs to be iterated once internally
+    /// rather than once per flow.
+    ///
+    /// This method ignores any noise in the circuit.
+    ///
+    /// See [`Circuit::has_flow`] for a detailed description of stabilizer flows,
+    /// the `unsigned` flag, and caveats around false positive rates.
     pub fn has_all_flows(&self, flows: &[Flow], unsigned: bool) -> Result<bool> {
         self.inner
             .has_all_flows(flows.iter().map(ToString::to_string).collect(), unsigned)
             .map_err(StimError::from)
     }
 
-    /// Returns the circuit's generated flows.
+    /// Computes a set of stabilizer flow generators for the circuit.
+    ///
+    /// Every stabilizer flow that the circuit implements is a product of some
+    /// subset of the returned generators. Conversely, every returned flow is
+    /// guaranteed to be a flow of the circuit. This is useful for understanding
+    /// the complete set of stabilizer transformations a circuit performs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the internal flow computation or parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "H 0".parse().unwrap();
+    /// let generators = circuit.flow_generators().unwrap();
+    /// // H maps X -> Z and Z -> X.
+    /// assert_eq!(generators.len(), 2);
+    /// ```
     pub fn flow_generators(&self) -> Result<Vec<Flow>> {
         self.inner
             .flow_generators()
@@ -137,7 +378,36 @@ impl Circuit {
             .collect()
     }
 
-    /// Solves which measurements satisfy the requested flows.
+    /// Finds measurement sets that explain the starts and ends of the given
+    /// flows, ignoring sign.
+    ///
+    /// For each flow in the input, this method finds a set of measurement
+    /// indices such that the circuit has the flow
+    /// `input -> output xor rec[solution_indices]` (unsigned). If no such
+    /// solution exists for a given flow, the corresponding entry in the result
+    /// is `None`.
+    ///
+    /// **Caution:** the solutions returned by this method are not guaranteed to
+    /// be minimal. The method applies simple heuristics that attempt to reduce
+    /// the size, but these heuristics are imperfect. The recommended use case
+    /// is on small circuit fragments (e.g. a single error correction round)
+    /// where there is ideally exactly one solution per flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a flow has an empty input and empty output (the
+    /// vacuous case), as a safety check for calling code. Also returns an
+    /// error on internal simulation failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "M 2".parse().unwrap();
+    /// let solutions = circuit.solve_flow_measurements(
+    ///     &["Z2 -> 1".parse().unwrap()],
+    /// ).unwrap();
+    /// assert_eq!(solutions, vec![Some(vec![0])]);
+    /// ```
     pub fn solve_flow_measurements(&self, flows: &[Flow]) -> Result<Vec<Option<Vec<i32>>>> {
         self.inner
             .solve_flow_measurements(flows.iter().map(ToString::to_string).collect())
@@ -147,7 +417,37 @@ impl Circuit {
             .collect()
     }
 
-    /// Returns the flow-reversed circuit and reversed flows.
+    /// Time-reverses the circuit while preserving error correction structure.
+    ///
+    /// Returns a new circuit that has the same internal detecting regions as the
+    /// original, as well as the same internal-to-external flows given in the
+    /// `flows` argument, except they are all time-reversed. For example, passing
+    /// a fault-tolerant preparation circuit (`1 -> Z`) produces a fault-tolerant
+    /// *measurement* circuit (`Z -> 1`). Passing a fault-tolerant C_XYZ circuit
+    /// (`X->Y`, `Y->Z`, `Z->X`) produces a C_ZYX circuit (`X->Z`, `Y->X`,
+    /// `Z->Y`).
+    ///
+    /// The method turns time-reversed resets into measurements, and attempts to
+    /// turn time-reversed measurements into resets. A measurement time-reverses
+    /// into a reset when annotated detectors/observables or given flows have
+    /// detecting regions with sensitivity just before the measurement but none
+    /// with sensitivity after it.
+    ///
+    /// **Note:** the sign of detecting regions and stabilizer flows is *not*
+    /// guaranteed to be preserved.
+    ///
+    /// # Arguments
+    ///
+    /// * `flows` - The external flows you care about. An error is raised if the
+    ///   circuit does not have all of these flows (unsigned).
+    /// * `dont_turn_measurements_into_resets` - When `true`, measurements
+    ///   time-reverse into measurements even when nothing is sensitive to the
+    ///   measured qubit afterward. This preserves all flows (up to sign/feedback).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit does not implement all of the given flows,
+    /// or if parsing/simulation fails internally.
     pub fn time_reversed_for_flows(
         &self,
         flows: &[Flow],
@@ -169,59 +469,164 @@ impl Circuit {
     }
 
     /// Returns the number of top-level operations in the circuit.
+    ///
+    /// Top-level operations include individual gate instructions and `REPEAT`
+    /// blocks. Instructions nested inside a `REPEAT` block count as a single
+    /// top-level item (the block itself).
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns whether the circuit has no top-level operations.
+    ///
+    /// An empty circuit is equivalent to the identity operation on zero qubits.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    /// Returns the number of measurement results produced by the circuit.
+    /// Returns the total number of measurement results produced when the
+    /// circuit is executed, accounting for measurements inside `REPEAT` blocks
+    /// (each iteration contributes its measurements).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "M 0\nREPEAT 100 {\n    M 0 1\n}".parse().unwrap();
+    /// assert_eq!(circuit.num_measurements(), 201);
+    /// ```
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.inner.num_measurements()
     }
 
-    /// Counts determined measurements in the circuit.
+    /// Counts the number of predictable (determined) measurements in the circuit.
+    ///
+    /// This method ignores any noise in the circuit and works by performing a
+    /// stabilizer tableau simulation. Before each measurement, it checks whether
+    /// the measurement's expectation is non-zero. A measurement is "determined"
+    /// if its result can be predicted using other measurements that have already
+    /// been performed, assuming noiseless execution.
+    ///
+    /// When multiple measurements occur at the same time, reordering their
+    /// resolution can change *which* specific measurements are determined but
+    /// will not change *how many* are determined in total.
+    ///
+    /// This quantity is useful because it relates to how many detectors and
+    /// observables a circuit should declare. If
+    /// `num_detectors + num_observables < count_determined_measurements()`,
+    /// this is a warning sign that some detector declarations are missing.
+    ///
+    /// # Arguments
+    ///
+    /// * `unknown_input` - When `false`, qubits start in the |0⟩ state, so
+    ///   initial Z-basis measurements are determined. When `true`, qubits start
+    ///   in unknown random states.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "R 0\nM 0".parse().unwrap();
+    /// assert_eq!(circuit.count_determined_measurements(false), 1);
+    ///
+    /// let circuit: stim::Circuit = "R 0\nH 0\nM 0".parse().unwrap();
+    /// assert_eq!(circuit.count_determined_measurements(false), 0);
+    /// ```
     #[must_use]
     pub fn count_determined_measurements(&self, unknown_input: bool) -> u64 {
         self.inner.count_determined_measurements(unknown_input)
     }
 
-    /// Returns the number of detectors in the circuit.
+    /// Returns the total number of detector bits produced when sampling the
+    /// circuit's detectors, accounting for detectors inside `REPEAT` blocks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit =
+    ///     "M 0\nDETECTOR rec[-1]\nREPEAT 100 {\n    M 0 1 2\n    DETECTOR rec[-1]\n    DETECTOR rec[-2]\n}".parse().unwrap();
+    /// assert_eq!(circuit.num_detectors(), 201);
+    /// ```
     #[must_use]
     pub fn num_detectors(&self) -> u64 {
         self.inner.num_detectors()
     }
 
-    /// Returns the number of observables in the circuit.
+    /// Returns the number of logical observables defined by the circuit.
+    ///
+    /// This is one more than the largest index that appears as an argument to
+    /// an `OBSERVABLE_INCLUDE` instruction. If no `OBSERVABLE_INCLUDE`
+    /// instructions are present, returns 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit =
+    ///     "M 0\nOBSERVABLE_INCLUDE(2) rec[-1]\nOBSERVABLE_INCLUDE(5) rec[-1]".parse().unwrap();
+    /// assert_eq!(circuit.num_observables(), 6);
+    /// ```
     #[must_use]
     pub fn num_observables(&self) -> u64 {
         self.inner.num_observables()
     }
 
-    /// Returns the number of ticks in the circuit.
+    /// Returns the number of `TICK` instructions executed when running the
+    /// circuit. `TICK`s inside `REPEAT` blocks are counted once per iteration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit =
+    ///     "H 0\nTICK\nREPEAT 100 {\n    CX 0 1\n    TICK\n}".parse().unwrap();
+    /// assert_eq!(circuit.num_ticks(), 101);
+    /// ```
     #[must_use]
     pub fn num_ticks(&self) -> u64 {
         self.inner.num_ticks()
     }
 
-    /// Returns the number of sweep bits referenced by the circuit.
+    /// Returns the number of sweep bits needed to completely configure the
+    /// circuit. This is one more than the largest sweep bit index referenced
+    /// by a `sweep` target in the circuit (e.g. `CX sweep[5] 0` makes this 6).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "CZ sweep[5] 0\nCX sweep[2] 0".parse().unwrap();
+    /// assert_eq!(circuit.num_sweep_bits(), 6);
+    /// ```
     #[must_use]
     pub fn num_sweep_bits(&self) -> usize {
         self.inner.num_sweep_bits()
     }
 
-    /// Clears all operations from the circuit.
+    /// Removes all operations from the circuit, resetting it to an empty state
+    /// equivalent to [`Circuit::new`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut circuit: stim::Circuit = "X 0\nM 0".parse().unwrap();
+    /// circuit.clear();
+    /// assert_eq!(circuit, stim::Circuit::new());
+    /// ```
     pub fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Appends Stim program text onto the circuit.
+    /// Appends operations described by Stim program text onto the end of the
+    /// circuit.
+    ///
+    /// The text is parsed as a complete Stim program fragment, meaning it may
+    /// contain multiple instructions, comments, and `REPEAT` blocks. This is a
+    /// convenient way to add several operations at once without calling
+    /// [`Circuit::append`] for each one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the text contains syntax errors or references
+    /// unknown gate names.
     ///
     /// # Examples
     ///
@@ -236,7 +641,18 @@ impl Circuit {
             .map_err(StimError::from)
     }
 
-    /// Appends a gate applied to qubit targets.
+    /// Appends an operation into the circuit, specified by gate name, qubit
+    /// targets (as raw indices), and gate arguments (the parenthesized
+    /// parameters like probabilities or observable indices).
+    ///
+    /// Each target is a plain qubit index (`u32`). For richer targets such as
+    /// measurement record targets, Pauli targets, or inverted targets, use
+    /// [`Circuit::append_gate_targets`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the gate name is unrecognized, or if the number of
+    /// targets or arguments is invalid for the gate.
     ///
     /// # Examples
     ///
@@ -244,6 +660,9 @@ impl Circuit {
     /// let mut circuit = stim::Circuit::new();
     /// circuit.append("X", &[0, 2], &[]).unwrap();
     /// assert_eq!(circuit.to_string(), "X 0 2");
+    ///
+    /// circuit.append("X_ERROR", &[0], &[0.125]).unwrap();
+    /// assert_eq!(circuit.to_string(), "X 0 2\nX_ERROR(0.125) 0");
     /// ```
     pub fn append(&mut self, gate_name: &str, targets: &[u32], args: &[f64]) -> Result<()> {
         self.inner
@@ -251,7 +670,19 @@ impl Circuit {
             .map_err(StimError::from)
     }
 
-    /// Appends a gate using rich [`GateTarget`] values.
+    /// Appends an operation into the circuit using rich [`GateTarget`] values.
+    ///
+    /// Unlike [`Circuit::append`] which only accepts plain qubit indices, this
+    /// method accepts the full range of target types supported by Stim,
+    /// including Pauli targets (`target_x`, `target_y`, `target_z`),
+    /// measurement record targets, sweep bit targets, and inverted targets.
+    /// This is necessary for gates like `CORRELATED_ERROR`, `DETECTOR`, and
+    /// `MPP` which require these specialized target types.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the gate name is unrecognized, or if the targets
+    /// or arguments are invalid for the gate.
     ///
     /// # Examples
     ///
@@ -282,7 +713,18 @@ impl Circuit {
             .map_err(StimError::from)
     }
 
-    /// Compares two circuits using an absolute tolerance on numeric arguments.
+    /// Checks whether two circuits are approximately equal, allowing slight
+    /// perturbations of instruction arguments such as probabilities.
+    ///
+    /// Two circuits are approximately equal if they are equal up to an absolute
+    /// tolerance `atol` on each numeric argument. For example,
+    /// `X_ERROR(0.100) 0` is approximately equal to `X_ERROR(0.099) 0` within
+    /// an absolute tolerance of `0.002`. All other details of the circuits
+    /// (the ordering of instructions, the gate names, and the targets) must be
+    /// exactly the same.
+    ///
+    /// This is useful for comparing circuits that were generated by slightly
+    /// different noise models or floating-point rounding paths.
     ///
     /// # Examples
     ///
@@ -297,7 +739,16 @@ impl Circuit {
         self.inner.approx_equals(&other.inner, atol)
     }
 
-    /// Returns the circuit with noise processes removed.
+    /// Returns a copy of the circuit with all noise processes removed.
+    ///
+    /// Pure noise instructions such as `X_ERROR`, `DEPOLARIZE1`, `DEPOLARIZE2`,
+    /// and `CORRELATED_ERROR` are dropped entirely. Noisy measurement
+    /// instructions like `M(0.001)` have their noise parameter removed,
+    /// becoming noiseless `M` instructions.
+    ///
+    /// This is useful for obtaining a noiseless reference version of a noisy
+    /// circuit, e.g. to compute a reference sample or to verify that the ideal
+    /// circuit implements the correct logical operation.
     ///
     /// # Examples
     ///
@@ -312,7 +763,25 @@ impl Circuit {
         }
     }
 
-    /// Returns the circuit with feedback inlined.
+    /// Returns a copy of the circuit with feedback operations removed and
+    /// detector/observable annotations rewritten to preserve their meaning.
+    ///
+    /// When a feedback operation (e.g. `CX rec[-1] 0`) affects the expected
+    /// parity of a detector or observable, the measurement controlling that
+    /// feedback is implicitly part of the measurement set defining the detector
+    /// or observable. This method removes all feedback but avoids changing the
+    /// meaning of detectors/observables by turning those implicit measurement
+    /// dependencies into explicit ones.
+    ///
+    /// This guarantees that the detector error model derived from the original
+    /// circuit and the transformed circuit will be equivalent (modulo
+    /// floating-point rounding). Specifically:
+    ///
+    /// ```text
+    /// dem1 = circuit.flattened().detector_error_model()
+    /// dem2 = circuit.with_inlined_feedback().flattened().detector_error_model()
+    /// assert dem1 ≈ dem2
+    /// ```
     #[must_use]
     pub fn with_inlined_feedback(&self) -> Self {
         Self {
@@ -320,7 +789,11 @@ impl Circuit {
         }
     }
 
-    /// Returns the circuit with instruction tags removed.
+    /// Returns a copy of the circuit with all instruction tags removed.
+    ///
+    /// Tags are optional strings attached to instructions (e.g.
+    /// `X[my-tag] 0`). This method strips them, leaving the instructions
+    /// otherwise unchanged (including any noise parameters).
     #[must_use]
     pub fn without_tags(&self) -> Self {
         Self {
@@ -328,7 +801,16 @@ impl Circuit {
         }
     }
 
-    /// Returns the circuit with repeat blocks inlined.
+    /// Returns an equivalent circuit with all `REPEAT` blocks unrolled and
+    /// all `SHIFT_COORDS` instructions inlined.
+    ///
+    /// The result contains the same instructions in the same order, but with
+    /// loops flattened into repeated instructions and all coordinate shifts
+    /// applied directly to `DETECTOR` and `QUBIT_COORDS` annotations.
+    ///
+    /// **Warning:** for circuits with many rounds, flattening can produce an
+    /// extremely large circuit. Use this only when you need a flat instruction
+    /// sequence (e.g. for analysis tools that don't support loops).
     ///
     /// # Examples
     ///
@@ -343,7 +825,17 @@ impl Circuit {
         }
     }
 
-    /// Returns the flattened operations as top-level instructions.
+    /// Returns the flattened operations of the circuit as a list of
+    /// [`CircuitInstruction`] values.
+    ///
+    /// This is like [`Circuit::flattened`], but returns individual instruction
+    /// objects rather than a new circuit. This is useful when you need to
+    /// iterate over every instruction that would be executed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any instruction text fails to parse (should not
+    /// happen for well-formed circuits).
     pub fn flattened_operations(&self) -> Result<Vec<CircuitInstruction>> {
         self.inner
             .flattened_operation_texts()
@@ -352,7 +844,33 @@ impl Circuit {
             .collect()
     }
 
-    /// Returns the circuit decomposed into simpler operations.
+    /// Returns an equivalent circuit with gates decomposed into (mostly) the
+    /// {H, S, CX, M, R} gate set.
+    ///
+    /// The intent of this method is to simplify the circuit to use fewer gate
+    /// types so it is easier for other tools to consume. Currently the method
+    /// performs the following simplifications:
+    ///
+    /// - Single-qubit Cliffords are decomposed into {H, S}.
+    /// - Multi-qubit Cliffords are decomposed into {H, S, CX}.
+    /// - Single-qubit dissipative gates are decomposed into {H, S, M, R}.
+    /// - Multi-qubit dissipative gates are decomposed into {H, S, CX, M, R}.
+    ///
+    /// The following types of gate are currently **not** simplified (but may be
+    /// in the future):
+    ///
+    /// - Noise instructions (like `X_ERROR`, `DEPOLARIZE2`, `E`).
+    /// - Annotations (like `TICK`, `DETECTOR`, `SHIFT_COORDS`).
+    /// - The `MPAD` instruction.
+    /// - `REPEAT` blocks are not flattened.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "SWAP 0 1".parse().unwrap();
+    /// let decomposed = circuit.decomposed();
+    /// assert_eq!(decomposed.to_string(), "CX 0 1 1 0 0 1");
+    /// ```
     #[must_use]
     pub fn decomposed(&self) -> Self {
         Self {
@@ -360,7 +878,15 @@ impl Circuit {
         }
     }
 
-    /// Returns the inverse circuit when one exists.
+    /// Returns the inverse of the circuit, when one exists.
+    ///
+    /// The inverse circuit undoes the unitary implemented by the original. This
+    /// is only possible when the circuit consists entirely of reversible gates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit contains irreversible operations such as
+    /// measurements, resets, or noise channels.
     pub fn inverse(&self) -> Result<Self> {
         self.inner
             .inverse()
@@ -369,6 +895,20 @@ impl Circuit {
     }
 
     /// Converts the circuit into OpenQASM text.
+    ///
+    /// The `open_qasm_version` should be `2` or `3`. Version 3 supports
+    /// operations on classical bits, feedback, subroutines, and detector/
+    /// observable annotations. Version 2 requires inlining non-standard
+    /// dissipative gates and drops detectors/observables.
+    ///
+    /// When `skip_dets_and_obs` is `true`, the output omits detector and
+    /// observable registers, avoiding the need for an internal circuit
+    /// simulation. When `false`, those registers are computed and included.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the circuit uses features that cannot be represented
+    /// in the requested OpenQASM version.
     pub fn to_qasm(&self, open_qasm_version: i32, skip_dets_and_obs: bool) -> Result<String> {
         self.inner
             .to_qasm(open_qasm_version, skip_dets_and_obs)
@@ -376,11 +916,30 @@ impl Circuit {
     }
 
     /// Converts the circuit into a Quirk URL.
+    ///
+    /// [Quirk](https://algassert.com/quirk) is an open-source drag-and-drop
+    /// circuit editor supporting up to 16 qubits. It does not support noise,
+    /// feedback, or detectors, so those operations are silently dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the conversion fails internally.
     pub fn to_quirk_url(&self) -> Result<String> {
         self.inner.to_quirk_url().map_err(StimError::from)
     }
 
-    /// Converts the circuit into a Crumble URL.
+    /// Converts the circuit into a [Crumble](https://algassert.com/crumble) URL.
+    ///
+    /// Crumble is a tool for editing stabilizer circuits and visualizing their
+    /// stabilizer flows. Opening the returned URL in a web browser will load
+    /// the circuit into Crumble's interactive editor.
+    ///
+    /// When `skip_detectors` is `true`, detector annotations are omitted from
+    /// the URL, reducing visual clutter and improving Crumble's performance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the conversion fails internally.
     pub fn to_crumble_url(&self, skip_detectors: bool) -> Result<String> {
         self.inner
             .to_crumble_url(skip_detectors)
@@ -388,6 +947,34 @@ impl Circuit {
     }
 
     /// Renders a circuit diagram of the requested type.
+    ///
+    /// Many diagram types are supported:
+    ///
+    /// - `"timeline-text"` (default): An ASCII diagram of operations over time,
+    ///   including measurement record indices and detector annotations.
+    /// - `"timeline-svg"`: An SVG image of operations over time.
+    /// - `"timeline-3d"`: A 3D GLTF model of operations over time.
+    /// - `"detslice-text"`: An ASCII diagram of detector stabilizers at a given
+    ///   tick.
+    /// - `"detslice-svg"`: An SVG image of detector stabilizers using the Pauli
+    ///   color convention XYZ = RGB.
+    /// - `"matchgraph-svg"`: An SVG image of the matching graph extracted from
+    ///   the circuit's detector error model.
+    /// - `"matchgraph-3d"`: A 3D GLTF model of the matching graph.
+    /// - `"timeslice-svg"`: An SVG image of operations between two ticks, laid
+    ///   out in 2D.
+    /// - `"detslice-with-ops-svg"`: A combination of `timeslice-svg` and
+    ///   `detslice-svg` overlaid.
+    /// - `"interactive"` / `"interactive-html"`: An HTML page containing
+    ///   Crumble initialized with the circuit.
+    ///
+    /// Variants ending in `"-html"` wrap the SVG/3D content in a resizable
+    /// HTML iframe.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the diagram type is unrecognized or the circuit
+    /// contains features incompatible with the requested diagram.
     ///
     /// # Examples
     ///

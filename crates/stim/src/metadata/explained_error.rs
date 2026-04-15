@@ -3,6 +3,66 @@ use std::hash::{Hash, Hasher};
 
 use crate::{CircuitErrorLocation, DemTargetWithCoords};
 
+/// Describes a single error mechanism from a Stim circuit, pairing the
+/// detectors and observables it affects with the location(s) where it
+/// occurs in the circuit.
+///
+/// When you call methods like
+/// [`Circuit::shortest_graphlike_error`](crate::Circuit::shortest_graphlike_error),
+/// Stim returns a list of `ExplainedError` values. Each one represents
+/// one fault mechanism that was needed to produce the logical error,
+/// containing:
+///
+/// - **`dem_error_terms`** -- the detectors and logical observables
+///   flipped by this error, each annotated with coordinate data (a
+///   list of [`DemTargetWithCoords`](crate::DemTargetWithCoords)).
+/// - **`circuit_error_locations`** -- the physical location(s) in the
+///   circuit where this error can occur, as
+///   [`CircuitErrorLocation`] values.
+///
+/// If `circuit_error_locations` is empty, it means there was a DEM
+/// error that was decomposed into parts where one of the parts is
+/// impossible to produce from a single circuit error on its own.
+///
+/// If the list contains a single entry, it may be because only a
+/// single representative circuit error was requested (as opposed to
+/// all possible errors that produce the same syndrome).
+///
+/// # Examples
+///
+/// ```
+/// use stim::{
+///     CircuitErrorLocation, CircuitErrorLocationStackFrame,
+///     CircuitTargetsInsideInstruction, DemTargetWithCoords,
+///     ExplainedError, GateTarget, GateTargetWithCoords,
+/// };
+///
+/// let explained = ExplainedError::new(
+///     vec![DemTargetWithCoords::new(
+///         stim::target_logical_observable_id(0).expect("valid id"),
+///         vec![],
+///     )],
+///     vec![CircuitErrorLocation::new(
+///         1,
+///         vec![GateTargetWithCoords::new(
+///             stim::target_y(0u32, false).expect("valid target"),
+///             vec![],
+///         )],
+///         None,
+///         CircuitTargetsInsideInstruction::new(
+///             "Y_ERROR", "", vec![0.125], 0, 1,
+///             vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+///         ),
+///         vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
+///         "",
+///     )],
+/// );
+///
+/// assert_eq!(explained.dem_error_terms().len(), 1);
+/// assert_eq!(explained.circuit_error_locations().len(), 1);
+/// ```
+///
+/// [`CircuitErrorLocation`]: crate::CircuitErrorLocation
 #[derive(Clone, PartialEq)]
 pub struct ExplainedError {
     dem_error_terms: Vec<DemTargetWithCoords>,
@@ -10,6 +70,17 @@ pub struct ExplainedError {
 }
 
 impl ExplainedError {
+    /// Creates a new `ExplainedError` from its constituent parts.
+    ///
+    /// # Arguments
+    ///
+    /// - `dem_error_terms` -- the detectors and logical observables
+    ///   flipped by this error mechanism, each paired with coordinate
+    ///   data.
+    /// - `circuit_error_locations` -- the physical circuit location(s)
+    ///   where this error can occur. May be empty if the error was
+    ///   decomposed into parts that cannot individually be produced by
+    ///   a single circuit error.
     #[must_use]
     pub fn new(
         dem_error_terms: impl IntoIterator<Item = DemTargetWithCoords>,
@@ -21,11 +92,31 @@ impl ExplainedError {
         }
     }
 
+    /// Returns the detectors and observables flipped by this error
+    /// mechanism.
+    ///
+    /// Each element is a [`DemTargetWithCoords`](crate::DemTargetWithCoords)
+    /// pairing a detector (`D5`) or logical observable (`L0`) with its
+    /// coordinate data from `DETECTOR` or other coordinate-assigning
+    /// instructions.
     #[must_use]
     pub fn dem_error_terms(&self) -> &[DemTargetWithCoords] {
         &self.dem_error_terms
     }
 
+    /// Returns the locations of circuit errors that produce the symptoms
+    /// described by [`dem_error_terms`](Self::dem_error_terms).
+    ///
+    /// Each element is a [`CircuitErrorLocation`] that identifies a
+    /// specific instruction, target range, and nesting position within
+    /// the circuit.
+    ///
+    /// If this slice is empty, it means the DEM error was decomposed
+    /// into parts where one part is impossible to produce from a single
+    /// circuit error on its own. If it contains a single entry, it may
+    /// be because only a single representative was requested.
+    ///
+    /// [`CircuitErrorLocation`]: crate::CircuitErrorLocation
     #[must_use]
     pub fn circuit_error_locations(&self) -> &[CircuitErrorLocation] {
         &self.circuit_error_locations

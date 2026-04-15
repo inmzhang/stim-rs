@@ -3,23 +3,53 @@ use crate::{DemTarget, Result, target_logical_observable_id, target_relative_det
 /// A filter that selects which detecting regions to return from a circuit
 /// analysis.
 ///
-/// When querying a circuit for its detecting regions, you often want only a
-/// subset — for example, only detectors, only observables, a specific target,
-/// or detectors whose coordinates match a given prefix. This enum encodes
-/// those filtering strategies.
+/// When querying a circuit for its detecting regions (via methods like
+/// `Circuit::detecting_regions`), you often want only a subset of the
+/// results rather than every detector and observable in the entire
+/// circuit. This enum encodes the available filtering strategies:
+///
+/// - [`AllDetectors`](Self::AllDetectors) -- include every detector.
+/// - [`AllObservables`](Self::AllObservables) -- include every logical
+///   observable.
+/// - [`Target`](Self::Target) -- include a single specific
+///   [`DemTarget`](crate::DemTarget) (one detector or one observable).
+/// - [`DetectorCoordinatePrefix`](Self::DetectorCoordinatePrefix) --
+///   include only detectors whose coordinate vector starts with a given
+///   prefix. This is useful for spatially filtering detectors in a
+///   layout where coordinates encode physical qubit positions.
+///
+/// # Examples
+///
+/// ```
+/// use stim::DetectingRegionFilter;
+///
+/// // Select all detectors in the circuit.
+/// let filter = DetectingRegionFilter::AllDetectors;
+///
+/// // Select only detectors whose first two coordinates are (1.0, 2.0).
+/// let spatial = DetectingRegionFilter::DetectorCoordinatePrefix(vec![1.0, 2.0]);
+///
+/// // Select a single specific target.
+/// let target = stim::target_relative_detector_id(3).expect("valid id");
+/// let single = DetectingRegionFilter::Target(target);
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum DetectingRegionFilter {
     /// Match all detectors in the circuit.
     AllDetectors,
     /// Match all logical observables in the circuit.
     AllObservables,
-    /// Match a single specific [`DemTarget`] (detector or observable).
+    /// Match a single specific [`DemTarget`](crate::DemTarget) (either a
+    /// detector or a logical observable).
     Target(DemTarget),
-    /// Match detectors whose coordinate vector starts with the given prefix.
+    /// Match detectors whose coordinate vector starts with the given
+    /// floating-point prefix.
     ///
     /// For example, a prefix of `[1.0, 2.0]` matches any detector whose
-    /// first two coordinates are `1.0` and `2.0`, regardless of subsequent
-    /// coordinate values.
+    /// first two coordinates are `1.0` and `2.0`, regardless of how many
+    /// additional coordinate values follow. This is especially useful in
+    /// surface-code-like layouts where coordinates encode spatial
+    /// positions and you want to filter detectors by region.
     DetectorCoordinatePrefix(Vec<f64>),
 }
 

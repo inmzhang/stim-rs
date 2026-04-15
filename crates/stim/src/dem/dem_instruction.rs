@@ -3,10 +3,20 @@ use std::str::FromStr;
 
 use crate::{DemTarget, DetectorErrorModel, Result, StimError};
 
-/// A target used inside a DEM instruction.
+/// A target used inside a detector error model (DEM) instruction.
 ///
-/// This is either a [`DemTarget`] (a detector, observable, or separator) or a
-/// raw integer offset used by instructions like `shift_detectors`.
+/// DEM instructions refer to detectors, logical observables, separators,
+/// or raw integer offsets. This enum wraps those two categories:
+///
+/// - [`DemTarget`](Self::DemTarget) -- a detector (`D5`), logical
+///   observable (`L2`), or separator (`^`), represented as a
+///   [`crate::DemTarget`].
+/// - [`RelativeOffset`](Self::RelativeOffset) -- a raw integer offset
+///   used by instructions like `shift_detectors`.
+///
+/// Values of either variant can be created via the `From` conversions
+/// from [`DemTarget`](crate::DemTarget), [`u64`], [`u32`], or
+/// [`usize`].
 ///
 /// # Examples
 ///
@@ -24,12 +34,18 @@ use crate::{DemTarget, DetectorErrorModel, Result, StimError};
 pub enum DemInstructionTarget {
     /// A detector, observable, or separator target.
     DemTarget(DemTarget),
-    /// A raw integer offset, used by `shift_detectors` and similar instructions.
+    /// A raw integer offset, used by `shift_detectors` and similar
+    /// instructions that take plain numeric arguments rather than
+    /// detector/observable references.
     RelativeOffset(u64),
 }
 
 impl DemInstructionTarget {
     /// Returns `true` if this target is a [`DemTarget`] separator (`^`).
+    ///
+    /// Separator targets delimit groups within an `error` instruction's
+    /// target list, indicating a suggested decomposition of a
+    /// multi-component error into independent parts.
     #[must_use]
     pub fn is_separator(self) -> bool {
         matches!(self, Self::DemTarget(target) if target.is_separator())
@@ -78,26 +94,51 @@ impl fmt::Debug for DemInstructionTarget {
     }
 }
 
-/// An instruction from a detector error model.
+/// An instruction from a detector error model (DEM).
 ///
-/// A `DemInstruction` has four components:
-/// - A **type** string identifying the instruction kind (e.g. `"error"`,
-///   `"detector"`, `"logical_observable"`, `"shift_detectors"`).
-/// - An optional **tag** (the `[...]` annotation after the type name).
-/// - A list of floating-point **arguments** (the `(...)` parenthesized values).
-/// - A list of **targets** ([`DemInstructionTarget`] values).
+/// A detector error model is Stim's compact representation of the
+/// error-propagation structure of a quantum error-correction circuit.
+/// Each instruction in a DEM has four components:
 ///
-/// Instructions can be constructed programmatically via [`new`](Self::new) or
-/// parsed from DEM text via [`from_dem_text`](Self::from_dem_text) /
-/// [`str::parse`].
+/// - A **type** string identifying the instruction kind. The most common
+///   types are `"error"` (a fault mechanism), `"detector"` (declares a
+///   detector), `"logical_observable"` (declares an observable), and
+///   `"shift_detectors"` (offsets detector indices).
+/// - An optional **tag** -- the `[...]` annotation after the type name,
+///   e.g. `error[my-tag](0.125) D0`. Tags are arbitrary strings that
+///   Stim propagates but otherwise ignores.
+/// - A list of floating-point **arguments** -- the `(...)` parenthesized
+///   values, e.g. the error probability `0.125` in `error(0.125) D0`.
+/// - A list of **targets** ([`DemInstructionTarget`] values) -- the
+///   detectors, observables, separators, or raw offsets that the
+///   instruction references.
+///
+/// Instructions can be constructed programmatically via
+/// [`new`](Self::new), parsed from DEM text via
+/// [`from_dem_text`](Self::from_dem_text), or converted from a string
+/// using `str::parse` (the [`FromStr`](std::str::FromStr)
+/// implementation).
 ///
 /// # Examples
 ///
 /// ```
+/// // Parse from DEM text.
 /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid DEM line");
 /// assert_eq!(inst.r#type(), "error");
 /// assert_eq!(inst.args_copy(), vec![0.125]);
 /// assert_eq!(inst.targets_copy().len(), 2);
+///
+/// // Construct programmatically.
+/// let inst = stim::DemInstruction::new(
+///     "error",
+///     [0.125],
+///     [
+///         stim::target_relative_detector_id(5).expect("valid id"),
+///         stim::target_logical_observable_id(2).expect("valid id"),
+///     ],
+///     "",
+/// ).expect("valid instruction");
+/// assert_eq!(inst.to_string(), "error(0.125) D5 L2");
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct DemInstruction {
@@ -190,7 +231,13 @@ impl DemInstruction {
         Self::new(instruction_type, args, targets, tag)
     }
 
-    /// Returns the instruction type name (e.g. `"error"`, `"detector"`).
+    /// Returns the instruction type name (e.g. `"error"`, `"detector"`,
+    /// `"logical_observable"`, `"shift_detectors"`).
+    ///
+    /// This is a duck-typing convenience method. It exists so that code
+    /// that doesn't know whether it has a `DemInstruction` or a
+    /// [`DemRepeatBlock`](crate::DemRepeatBlock) can check the type
+    /// field without doing a pattern match first.
     #[must_use]
     pub fn r#type(&self) -> &str {
         &self.instruction_type
@@ -199,13 +246,33 @@ impl DemInstruction {
     /// Returns the instruction's tag, or an empty string if untagged.
     ///
     /// Tags are the `[...]` annotation appearing after the instruction type
-    /// name, e.g. `error[my-tag](0.125) D0`.
+    /// name, e.g. `error[my-tag](0.125) D0`. They are arbitrary strings
+    /// that Stim propagates across transformations but otherwise ignores,
+    /// allowing user code to attach metadata to specific instructions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let tagged: stim::DemInstruction = "error[my-tag](0.125) D0"
+    ///     .parse().expect("valid");
+    /// assert_eq!(tagged.tag(), "my-tag");
+    ///
+    /// let untagged: stim::DemInstruction = "error(0.125) D0"
+    ///     .parse().expect("valid");
+    /// assert_eq!(untagged.tag(), "");
+    /// ```
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
     /// Returns a copy of the instruction's parenthesized arguments.
+    ///
+    /// For `error` instructions this is typically a single-element list
+    /// containing the error probability. For `detector` instructions it
+    /// contains the detector's coordinate data. For `shift_detectors`
+    /// it contains the coordinate offsets. The result is a freshly
+    /// allocated copy; editing it will not change the instruction.
     ///
     /// # Examples
     ///
@@ -220,6 +287,9 @@ impl DemInstruction {
 
     /// Returns a copy of the instruction's target list.
     ///
+    /// The result is a freshly allocated copy; editing it will not
+    /// change the instruction's targets or future copies.
+    ///
     /// # Examples
     ///
     /// ```
@@ -231,10 +301,16 @@ impl DemInstruction {
         self.targets.clone()
     }
 
-    /// Splits the target list into groups delimited by separator targets (`^`).
+    /// Splits the target list into groups delimited by separator targets
+    /// (`^`).
     ///
-    /// Separator targets themselves are not included in the returned groups.
-    /// If the instruction has no targets, a single empty group is returned.
+    /// When a detector error model `error` instruction contains a
+    /// suggested decomposition of a multi-component error, its targets
+    /// contain separators (`^`). This method splits the targets into
+    /// groups based on the separators, similar to how `str::split`
+    /// works. Separator targets themselves are not included in the
+    /// returned groups. If the instruction has no targets, a single
+    /// empty group is returned.
     ///
     /// # Examples
     ///

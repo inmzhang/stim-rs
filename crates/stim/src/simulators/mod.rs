@@ -8,42 +8,217 @@ use crate::{Result, StimError};
 use ndarray::{Array2, ArrayView2};
 
 /// Fast repeated measurement sampling from a compiled Stim circuit.
+///
+/// An analyzed stabilizer circuit whose measurements can be sampled quickly.
+/// The sampler uses a noiseless reference sample, collected from the circuit
+/// using Stim's Tableau simulator during initialization, as a baseline for
+/// deriving more samples using an error-propagation simulator.
+///
+/// This is the Rust equivalent of Python's `stim.CompiledMeasurementSampler`.
+/// Obtain one via [`Circuit::compile_sampler`](crate::Circuit::compile_sampler)
+/// or construct directly with [`MeasurementSampler::new`].
+///
+/// # Examples
+///
+/// ```
+/// let circuit: stim::Circuit = "X 0\nM 0 1".parse().unwrap();
+/// let mut sampler = circuit.compile_sampler(false);
+/// let results = sampler.sample(4);
+/// assert_eq!(results.ncols(), 2);
+/// assert_eq!(results.nrows(), 4);
+/// // Qubit 0 was flipped by X, qubit 1 was not.
+/// assert!(results[[0, 0]]);
+/// assert!(!results[[0, 1]]);
+/// ```
 pub struct MeasurementSampler {
     pub(crate) inner: stim_cxx::MeasurementSampler,
 }
 
 /// Fast repeated detector-event sampling from a compiled Stim circuit.
+///
+/// An analyzed stabilizer circuit whose detection events can be sampled quickly.
+/// Detection events are defined by `DETECTOR` instructions in the circuit and
+/// indicate parity checks that have been violated. Observable flips, defined by
+/// `OBSERVABLE_INCLUDE` instructions, can also be sampled alongside or
+/// separately from detectors.
+///
+/// This is the Rust equivalent of Python's `stim.CompiledDetectorSampler`.
+/// Obtain one via
+/// [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler)
+/// or construct directly with [`DetectorSampler::new`].
+///
+/// # Examples
+///
+/// ```
+/// let circuit: stim::Circuit = "\
+///     H 0
+///     CNOT 0 1
+///     DEPOLARIZE2(0.01) 0 1
+///     M 0 1
+///     DETECTOR rec[-1] rec[-2]
+/// ".parse().unwrap();
+/// let mut sampler = circuit.compile_detector_sampler();
+/// let events = sampler.sample(100);
+/// assert_eq!(events.ncols(), 1);
+/// ```
 pub struct DetectorSampler {
     pub(crate) inner: stim_cxx::DetectorSampler,
 }
 
 /// Fast repeated sampling from a compiled detector error model.
+///
+/// A helper for efficiently sampling from a [`DetectorErrorModel`](crate::DetectorErrorModel).
+/// Each sample produces three pieces of data: which detectors fired,
+/// which observables were flipped, and (optionally) which error mechanisms
+/// were activated. Previously recorded error data can also be replayed to
+/// reproduce deterministic outcomes.
+///
+/// This is the Rust equivalent of Python's `stim.CompiledDemSampler`.
+/// Obtain one via
+/// [`DetectorErrorModel::compile_sampler`](crate::DetectorErrorModel::compile_sampler)
+/// or
+/// [`DetectorErrorModel::compile_sampler_with_seed`](crate::DetectorErrorModel::compile_sampler_with_seed).
+///
+/// # Examples
+///
+/// ```
+/// let dem: stim::DetectorErrorModel =
+///     "error(0) D0\nerror(1) D1 D2 L0".parse().unwrap();
+/// let mut sampler = dem.compile_sampler_with_seed(7);
+/// let (detectors, observables, errors) = sampler.sample(2);
+/// assert_eq!(detectors.ncols(), 3);  // D0, D1, D2
+/// assert_eq!(observables.ncols(), 1); // L0
+/// assert_eq!(errors.ncols(), 2);      // two error mechanisms
+/// ```
 pub struct DemSampler {
     pub(crate) inner: stim_cxx::DemSampler,
 }
 
 /// Converts batched measurements into detector events using a compiled circuit.
+///
+/// A tool for quickly converting raw measurement results from an analyzed
+/// stabilizer circuit into detection events (and optionally observable flips).
+/// The converter uses a noiseless reference sample, collected from the circuit
+/// during initialization, as the baseline for determining expected detector
+/// values.
+///
+/// Supports both in-memory conversion (packed or unpacked boolean arrays)
+/// and file-to-file conversion through [`convert_file`](Self::convert_file).
+/// Sweep bits for `sweep[k]` controls in the circuit can also be provided.
+///
+/// This is the Rust equivalent of Python's
+/// `stim.CompiledMeasurementsToDetectionEventsConverter`.
+/// Obtain one via
+/// [`Circuit::compile_m2d_converter`](crate::Circuit::compile_m2d_converter)
+/// or construct directly with [`MeasurementsToDetectionEventsConverter::new`].
+///
+/// # Examples
+///
+/// ```
+/// let circuit: stim::Circuit = "\
+///     X 0
+///     M 0 1
+///     DETECTOR rec[-1]
+///     DETECTOR rec[-2]
+///     OBSERVABLE_INCLUDE(0) rec[-2]
+/// ".parse().unwrap();
+/// let mut converter = circuit.compile_m2d_converter(false);
+///
+/// let result = converter.convert(
+///     ndarray::array![[true, false], [false, false]].view(),
+///     None,
+///     true,
+///     false,
+/// ).unwrap();
+/// // Returns detection events and observable flips separately.
+/// assert!(matches!(result,
+///     stim::ConvertedMeasurements::DetectionEventsAndObservables(_, _)));
+/// ```
 pub struct MeasurementsToDetectionEventsConverter {
     pub(crate) inner: stim_cxx::MeasurementsToDetectionEventsConverter,
 }
 
-/// A stabilizer simulator backed by tableaus.
+/// A stabilizer circuit simulator backed by an inverse stabilizer tableau.
+///
+/// An interactive Clifford-circuit simulator that tracks an inverse stabilizer
+/// tableau. It supports gate-by-gate execution, mid-circuit measurements,
+/// resets, and noise channels. Each operation updates the internal tableau
+/// representation, giving exact stabilizer simulation with O(n^2) cost for
+/// collapsing operations and O(n) for unitary gates, where n is the qubit
+/// count.
+///
+/// This is the Rust equivalent of Python's `stim.TableauSimulator`.
+///
+/// # Interactive usage
+///
+/// Gates can be applied one at a time via dedicated methods (e.g. [`h`](Self::h),
+/// [`cx`](Self::cx), [`s`](Self::s)), or an entire [`Circuit`](crate::Circuit)
+/// can be fed in at once via [`do_circuit`](Self::do_circuit). Measurements
+/// are destructive and append to an internal measurement record accessible
+/// through [`current_measurement_record`](Self::current_measurement_record).
+///
+/// # Examples
+///
+/// ```
+/// let mut sim = stim::TableauSimulator::new();
+/// sim.h(&[0]).unwrap();
+/// sim.cx(&[0, 1]).unwrap();
+/// // The two qubits are now entangled in a Bell state.
+/// let a = sim.measure(0);
+/// let b = sim.measure(1);
+/// assert_eq!(a, b);
+/// ```
 pub struct TableauSimulator {
     pub(crate) inner: stim_cxx::TableauSimulator,
 }
 
 /// A batched simulator that tracks Pauli flips and classical flip records.
+///
+/// Instead of tracking the actual quantum state, this simulator tracks
+/// *whether things are flipped*, which is significantly cheaper: O(1) work
+/// per gate, compared to O(n) for unitary operations and O(n^2) for
+/// collapsing operations in the tableau simulator, where n is the qubit count.
+///
+/// The flip simulator processes many instances in parallel (the "batch").
+/// For best performance, use a batch size that is a multiple of 256, because
+/// internally the instance states are striped across SIMD words with one bit
+/// per instance. Even a batch size of 1 does roughly the same work as 256.
+///
+/// This is the Rust equivalent of Python's `stim.FlipSimulator`.
+///
+/// # Examples
+///
+/// ```
+/// let mut sim = stim::FlipSimulator::new(256, false, 3, 0);
+/// let circuit: stim::Circuit = "\
+///     X_ERROR(0.1) 0 1 2
+///     M 0 1 2
+///     DETECTOR rec[-1] rec[-2]
+/// ".parse().unwrap();
+/// sim.do_circuit(&circuit);
+/// assert_eq!(sim.num_measurements(), 3);
+/// assert_eq!(sim.num_detectors(), 1);
+/// ```
 pub struct FlipSimulator {
     pub(crate) inner: stim_cxx::FlipSimulator,
 }
 
-/// Alias for [`MeasurementSampler`] to match the Python `compile_sampler()` naming.
+/// Alias for [`MeasurementSampler`] matching the Python naming convention
+/// `stim.CompiledMeasurementSampler`, typically obtained via
+/// [`Circuit::compile_sampler`](crate::Circuit::compile_sampler).
 pub type CompiledMeasurementSampler = MeasurementSampler;
-/// Alias for [`DetectorSampler`] to match the Python `compile_detector_sampler()` naming.
+/// Alias for [`DetectorSampler`] matching the Python naming convention
+/// `stim.CompiledDetectorSampler`, typically obtained via
+/// [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler).
 pub type CompiledDetectorSampler = DetectorSampler;
-/// Alias for [`DemSampler`] to match the Python `compile_sampler()` naming on detector error models.
+/// Alias for [`DemSampler`] matching the Python naming convention
+/// `stim.CompiledDemSampler`, typically obtained via
+/// [`DetectorErrorModel::compile_sampler`](crate::DetectorErrorModel::compile_sampler).
 pub type CompiledDemSampler = DemSampler;
-/// Alias for [`MeasurementsToDetectionEventsConverter`] to match the Python naming.
+/// Alias for [`MeasurementsToDetectionEventsConverter`] matching the Python
+/// naming convention `stim.CompiledMeasurementsToDetectionEventsConverter`,
+/// typically obtained via
+/// [`Circuit::compile_m2d_converter`](crate::Circuit::compile_m2d_converter).
 pub type CompiledMeasurementsToDetectionEventsConverter = MeasurementsToDetectionEventsConverter;
 type UnpackedBitMatrix = Array2<bool>;
 type PackedObservablePair = (Vec<u8>, Vec<u8>);
@@ -52,15 +227,40 @@ type PackedDemBatch = (Vec<u8>, Vec<u8>, Vec<u8>);
 type UnpackedDemBatch = (UnpackedBitMatrix, UnpackedBitMatrix, UnpackedBitMatrix);
 
 /// The result of converting measurements into detector data.
+///
+/// Returned by [`MeasurementsToDetectionEventsConverter::convert`]. The variant
+/// depends on whether `separate_observables` was set to `true` during
+/// conversion.
+///
+/// When observables are separated, the detection-event matrix and the
+/// observable-flip matrix are returned as two distinct arrays. Otherwise
+/// a single matrix is returned (which may or may not have observable bits
+/// appended, depending on the `append_observables` flag).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConvertedMeasurements {
-    /// Detector events only.
+    /// Detector events only (or with observables appended if requested).
+    ///
+    /// The contained [`Array2<bool>`] has shape `(num_shots, num_detectors)` when
+    /// `append_observables` is false, or
+    /// `(num_shots, num_detectors + num_observables)` when it is true.
     DetectionEvents(Array2<bool>),
     /// Detector events plus a separate observable-flip matrix.
+    ///
+    /// The first [`Array2<bool>`] has shape `(num_shots, num_detectors)`.
+    /// The second has shape `(num_shots, num_observables)`.
     DetectionEventsAndObservables(Array2<bool>, Array2<bool>),
 }
 
 /// A 2D boolean table, either unpacked or bit-packed by row.
+///
+/// Used by the [`FlipSimulator`] to return measurement, detector, and
+/// observable flip records. The representation depends on the `bit_packed`
+/// flag passed to the extraction method.
+///
+/// When unpacked ([`BoolMatrix`](Self::BoolMatrix)), each cell is a single
+/// `bool`. When packed ([`PackedMatrix`](Self::PackedMatrix)), bits are packed
+/// into `u8` bytes in little-endian order within each row, matching Stim's
+/// `b8` data layout.
 ///
 /// # Examples
 ///
@@ -80,6 +280,11 @@ pub enum BitTable {
 }
 
 /// A Rust-friendly export of the full [`FlipSimulator`] state.
+///
+/// Returned by [`FlipSimulator::to_ndarray`]. Contains five [`BitTable`]
+/// matrices representing the X-basis flips, Z-basis flips, measurement flip
+/// records, detector flip records, and observable flip records. Each matrix
+/// has one row per batch instance.
 ///
 /// # Examples
 ///
@@ -105,7 +310,27 @@ pub struct FlipSimulatorArrays {
 }
 
 impl MeasurementSampler {
-    /// Creates a seeded measurement sampler from a circuit.
+    /// Creates a measurement sampler for the given circuit.
+    ///
+    /// The sampler uses a noiseless reference sample, collected from the circuit
+    /// using Stim's Tableau simulator during initialization, as a baseline for
+    /// deriving more samples using an error-propagation simulator.
+    ///
+    /// # Arguments
+    ///
+    /// * `circuit` - The stabilizer circuit to sample measurements from.
+    /// * `skip_reference_sample` - When `true`, the reference sample is set to
+    ///   all zeros instead of being collected from the circuit. This means
+    ///   returned results represent whether each measurement was *flipped*,
+    ///   rather than actual measurement outcomes. Useful when you only care
+    ///   about error propagation or when you know the all-zero result is a valid
+    ///   noiseless outcome. Computing the reference sample is the most expensive
+    ///   part of initialization, so skipping it is an effective optimization.
+    /// * `seed` - Deterministically seeds the random number generator. Making
+    ///   the exact same series of calls on the same machine with the same Stim
+    ///   version will produce the same results. Results are *not* guaranteed to
+    ///   be consistent across Stim versions, SIMD widths, or varying shot
+    ///   counts.
     ///
     /// # Examples
     ///
@@ -119,22 +344,31 @@ impl MeasurementSampler {
         circuit.compile_sampler_with_seed(skip_reference_sample, seed)
     }
 
-    /// Returns the number of measurement bits produced by the sampler.
+    /// Returns the number of measurement bits produced per shot.
+    ///
+    /// This equals the total number of `M` (and similar measurement)
+    /// operations in the compiled circuit.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.inner.num_measurements()
     }
 
-    /// Samples packed measurement data.
+    /// Samples measurement data in bit-packed form.
     ///
-    /// The returned bytes are little-endian within each byte, matching Stim's
-    /// `b8` data layout.
+    /// Returns a flat `Vec<u8>` where each shot occupies
+    /// `ceil(num_measurements / 8)` bytes. Within each byte, bits are packed
+    /// in little-endian order, matching Stim's `b8` data layout: the bit for
+    /// measurement `m` in shot `s` is at
+    /// `result[s * row_bytes + m / 8] >> (m % 8) & 1`.
     #[must_use]
     pub fn sample_bit_packed(&mut self, shots: u64) -> Vec<u8> {
         self.inner.sample_bit_packed(shots)
     }
 
-    /// Samples unpacked measurement data.
+    /// Samples a batch of measurement results as an unpacked boolean matrix.
+    ///
+    /// Returns an `Array2<bool>` with shape `(shots, num_measurements)`.
+    /// The bit for measurement `m` in shot `s` is at `result[[s, m]]`.
     ///
     /// # Examples
     ///
@@ -150,7 +384,23 @@ impl MeasurementSampler {
         unpack_rows_array(&packed, num_measurements)
     }
 
-    /// Writes sampled measurement data to a file.
+    /// Samples measurements from the circuit and writes them directly to a file.
+    ///
+    /// This is more memory-efficient than calling [`sample`](Self::sample) and
+    /// then writing the result, because the data is streamed to disk without
+    /// ever being fully materialized in memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `shots` - The number of times to sample every measurement.
+    /// * `filepath` - The file path to write results to.
+    /// * `format_name` - The output format. Valid values are `"01"`, `"b8"`,
+    ///   `"r8"`, `"ptb64"`, `"hits"`, and `"dets"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the file path is not valid
+    /// UTF-8 or the file cannot be written.
     ///
     /// # Examples
     ///
@@ -179,7 +429,10 @@ impl MeasurementSampler {
 }
 
 impl TableauSimulator {
-    /// Creates a tableau simulator with a deterministic default seed.
+    /// Creates a tableau simulator with a deterministic default seed of 0.
+    ///
+    /// The simulator starts with zero qubits tracked. Qubits are automatically
+    /// allocated as gates reference them.
     ///
     /// # Examples
     ///
@@ -194,6 +447,11 @@ impl TableauSimulator {
     }
 
     /// Creates a tableau simulator with an explicit RNG seed.
+    ///
+    /// Using the same seed on the same machine with the same Stim version
+    /// produces identical simulation results. Results are *not* guaranteed
+    /// to be consistent across Stim versions, SIMD widths, or different
+    /// orderings of operations.
     #[must_use]
     pub fn with_seed(seed: u64) -> Self {
         Self {
@@ -201,24 +459,36 @@ impl TableauSimulator {
         }
     }
 
-    /// Returns an owned copy of the simulator.
+    /// Returns an owned copy of the simulator, including its full tableau
+    /// state and measurement record. The copy's PRNG is reseeded, so
+    /// subsequent random outcomes will differ from the original.
     #[must_use]
     pub fn copy(&self) -> Self {
         self.clone()
     }
 
     /// Returns the number of qubits currently tracked by the simulator.
+    ///
+    /// The simulator automatically grows to accommodate qubits referenced
+    /// by gates. This count reflects the current high-water mark.
     #[must_use]
     pub fn num_qubits(&self) -> usize {
         self.inner.num_qubits()
     }
 
     /// Resizes the simulator's qubit count.
+    ///
+    /// If the new count is larger, new qubits are initialized in the `|0>`
+    /// state. If smaller, qubits beyond the new limit are discarded.
     pub fn set_num_qubits(&mut self, new_num_qubits: usize) {
         self.inner.set_num_qubits(new_num_qubits);
     }
 
-    /// Returns the simulator's current inverse tableau.
+    /// Returns a copy of the simulator's current inverse stabilizer tableau.
+    ///
+    /// The internal state of a `TableauSimulator` is an *inverse* tableau.
+    /// To get the forward tableau (whose Z outputs are the stabilizers of
+    /// the current state), call `.inverse(false)` on the result.
     ///
     /// # Examples
     ///
@@ -241,18 +511,31 @@ impl TableauSimulator {
         }
     }
 
-    /// Replaces the simulator state with an inverse tableau.
+    /// Replaces the simulator state with the given inverse tableau.
+    ///
+    /// This directly sets the internal representation. To set the state
+    /// from stabilizers, use [`set_state_from_stabilizers`](Self::set_state_from_stabilizers)
+    /// instead.
     pub fn set_inverse_tableau(&mut self, tableau: &crate::Tableau) {
         self.inner.set_inverse_tableau(&tableau.inner);
     }
 
-    /// Returns the current measurement record.
+    /// Returns a copy of the record of all measurements performed so far.
+    ///
+    /// Each entry corresponds to one measurement, in the order they were
+    /// executed. The record grows each time [`measure`](Self::measure),
+    /// [`measure_many`](Self::measure_many), or a circuit containing `M`
+    /// instructions is applied.
     #[must_use]
     pub fn current_measurement_record(&self) -> Vec<bool> {
         self.inner.current_measurement_record()
     }
 
-    /// Applies a circuit to the simulator state.
+    /// Applies every instruction in a circuit to the simulator state.
+    ///
+    /// The circuit's gates, measurements, resets, noise channels, and
+    /// annotations are all processed in order. Measurements append to the
+    /// internal measurement record.
     ///
     /// # Examples
     ///
@@ -266,7 +549,11 @@ impl TableauSimulator {
         self.inner.do_circuit(&circuit.inner);
     }
 
-    /// Applies a Pauli string operation to the simulator.
+    /// Applies a Pauli string as a Pauli product gate to the simulator.
+    ///
+    /// Each qubit in the string has the corresponding Pauli (X, Y, or Z)
+    /// applied. Identity positions (`I` / `_`) are skipped. The sign of
+    /// the Pauli string controls the global phase.
     ///
     /// # Examples
     ///
@@ -279,12 +566,25 @@ impl TableauSimulator {
         self.inner.do_pauli_string(&pauli_string.inner);
     }
 
-    /// Applies a tableau on the specified targets.
+    /// Applies an arbitrary Clifford operation (given as a [`Tableau`](crate::Tableau))
+    /// to the specified target qubits.
+    ///
+    /// The `targets` slice maps the tableau's qubit indices to simulator
+    /// qubit indices. For example, with a 2-qubit tableau and
+    /// `targets = &[5, 3]`, the tableau's qubit 0 acts on simulator
+    /// qubit 5 and its qubit 1 acts on simulator qubit 3.
     pub fn do_tableau(&mut self, tableau: &crate::Tableau, targets: &[usize]) {
         self.inner.do_tableau(&tableau.inner, targets);
     }
 
-    /// Applies a circuit-like operation accepted by `TableauSimulatorOperation`.
+    /// Applies a circuit-like operation to the simulator.
+    ///
+    /// Accepts anything that converts into a `TableauSimulatorOperation`:
+    /// a [`Circuit`](crate::Circuit), a [`PauliString`](crate::PauliString),
+    /// a [`CircuitInstruction`](crate::CircuitInstruction), or a
+    /// [`CircuitRepeatBlock`](crate::CircuitRepeatBlock).
+    ///
+    /// This is the Rust equivalent of Python's `TableauSimulator.do()`.
     pub fn r#do<'a>(
         &mut self,
         operation: impl Into<TableauSimulatorOperation<'a>>,
@@ -317,7 +617,13 @@ impl TableauSimulator {
         }
     }
 
-    /// Returns the Bloch-axis eigenstate currently prepared on a qubit.
+    /// Returns the single-qubit Bloch vector as a one-qubit [`PauliString`](crate::PauliString).
+    ///
+    /// If the qubit is in a computational basis eigenstate, the result is
+    /// `+Z` or `-Z`. If it is in an X or Y eigenstate, the result is `+X`,
+    /// `-X`, `+Y`, or `-Y` respectively. If the qubit is entangled with
+    /// other qubits (not a single-qubit eigenstate), the result is `+_`
+    /// (the identity Pauli string).
     ///
     /// # Examples
     ///
@@ -337,22 +643,37 @@ impl TableauSimulator {
         }
     }
 
-    /// Returns the X-axis Bloch sign of a qubit (`-1`, `0`, or `+1`).
+    /// Returns the X-axis expectation value of a qubit: `-1`, `0`, or `+1`.
+    ///
+    /// Returns `+1` if the qubit is in the `|+>` state, `-1` if in `|->`,
+    /// and `0` if the X observable is not determined (e.g. in `|0>` or
+    /// entangled).
     pub fn peek_x(&mut self, target: usize) -> i32 {
         self.inner.peek_x(target)
     }
 
-    /// Returns the Y-axis Bloch sign of a qubit (`-1`, `0`, or `+1`).
+    /// Returns the Y-axis expectation value of a qubit: `-1`, `0`, or `+1`.
+    ///
+    /// Returns `+1` if the qubit is in the `|+i>` state, `-1` if in `|-i>`,
+    /// and `0` if the Y observable is not determined.
     pub fn peek_y(&mut self, target: usize) -> i32 {
         self.inner.peek_y(target)
     }
 
-    /// Returns the Z-axis Bloch sign of a qubit (`-1`, `0`, or `+1`).
+    /// Returns the Z-axis expectation value of a qubit: `-1`, `0`, or `+1`.
+    ///
+    /// Returns `+1` if the qubit is in the `|0>` state, `-1` if in `|1>`,
+    /// and `0` if the Z observable is not determined.
     pub fn peek_z(&mut self, target: usize) -> i32 {
         self.inner.peek_z(target)
     }
 
-    /// Measures a qubit in the Z basis and returns the result.
+    /// Destructively measures a single qubit in the Z basis and returns the result.
+    ///
+    /// The result is appended to the internal measurement record. If the
+    /// qubit is in a definite Z eigenstate, the result is deterministic.
+    /// If not, the outcome is random (controlled by the simulator's PRNG
+    /// seed) and the qubit collapses to the measured eigenstate.
     ///
     /// # Examples
     ///
@@ -367,7 +688,10 @@ impl TableauSimulator {
         self.inner.measure(target)
     }
 
-    /// Measures several qubits in the Z basis.
+    /// Destructively measures several qubits in the Z basis and returns the results.
+    ///
+    /// Equivalent to calling [`measure`](Self::measure) on each target in
+    /// order. All results are also appended to the measurement record.
     ///
     /// # Examples
     ///
@@ -381,7 +705,15 @@ impl TableauSimulator {
         self.inner.measure_many(targets)
     }
 
-    /// Returns the canonical stabilizers of the current state.
+    /// Returns a standardized list of the simulator's current stabilizer generators.
+    ///
+    /// Two simulators have the same canonical stabilizers if and only if
+    /// their current quantum states are equal (and they track the same
+    /// number of qubits).
+    ///
+    /// The canonical form is computed by Gaussian elimination on the Z
+    /// outputs of the forward tableau, considering generators in the order
+    /// X0, Z0, X1, Z1, etc.
     ///
     /// # Examples
     ///
@@ -403,7 +735,15 @@ impl TableauSimulator {
             .collect()
     }
 
-    /// Returns the expectation of an observable (`-1`, `0`, or `+1`).
+    /// Returns the expectation value of a Pauli observable: `-1`, `0`, or `+1`.
+    ///
+    /// Returns `+1` if the observable is a stabilizer, `-1` if its negation
+    /// is a stabilizer, and `0` if the observable anticommutes with at
+    /// least one stabilizer (i.e., its expectation is not determined).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the observable is invalid.
     pub fn peek_observable_expectation(
         &self,
         observable: &crate::PauliString,
@@ -413,7 +753,16 @@ impl TableauSimulator {
             .map_err(StimError::from)
     }
 
-    /// Measures an observable, optionally with classical flip noise.
+    /// Measures a multi-qubit Pauli observable, optionally with classical flip noise.
+    ///
+    /// The measurement result is `true` if the observable's eigenvalue is
+    /// `-1`, and `false` if it is `+1`. When `flip_probability > 0`, the
+    /// result is randomly flipped with that probability (modeling readout
+    /// noise). The result is also appended to the measurement record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the observable is invalid.
     pub fn measure_observable(
         &mut self,
         observable: &crate::PauliString,
@@ -424,7 +773,16 @@ impl TableauSimulator {
             .map_err(StimError::from)
     }
 
-    /// Postselects the simulator state on an observable outcome.
+    /// Postselects the simulator state on a multi-qubit Pauli observable outcome.
+    ///
+    /// Forces the observable to have the eigenvalue corresponding to
+    /// `desired_value` (`false` for `+1`, `true` for `-1`). If the current
+    /// state is incompatible with the desired outcome, the operation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the postselection is
+    /// impossible (the state has zero overlap with the desired eigenspace).
     pub fn postselect_observable(
         &mut self,
         observable: &crate::PauliString,
@@ -436,6 +794,14 @@ impl TableauSimulator {
     }
 
     /// Postselects qubits in the X basis.
+    ///
+    /// Forces each target qubit into the `|+>` state (if `desired_value` is
+    /// `false`) or the `|->` state (if `true`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the postselection is
+    /// impossible for any target.
     pub fn postselect_x(&mut self, targets: &[usize], desired_value: bool) -> crate::Result<()> {
         self.inner
             .postselect_x(targets, desired_value)
@@ -443,6 +809,14 @@ impl TableauSimulator {
     }
 
     /// Postselects qubits in the Y basis.
+    ///
+    /// Forces each target qubit into the `|+i>` state (if `desired_value` is
+    /// `false`) or the `|-i>` state (if `true`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the postselection is
+    /// impossible for any target.
     pub fn postselect_y(&mut self, targets: &[usize], desired_value: bool) -> crate::Result<()> {
         self.inner
             .postselect_y(targets, desired_value)
@@ -450,13 +824,28 @@ impl TableauSimulator {
     }
 
     /// Postselects qubits in the Z basis.
+    ///
+    /// Forces each target qubit into the `|0>` state (if `desired_value` is
+    /// `false`) or the `|1>` state (if `true`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the postselection is
+    /// impossible for any target.
     pub fn postselect_z(&mut self, targets: &[usize], desired_value: bool) -> crate::Result<()> {
         self.inner
             .postselect_z(targets, desired_value)
             .map_err(StimError::from)
     }
 
-    /// Measures a qubit and returns the optional kickback Pauli.
+    /// Measures a qubit in the Z basis and returns both the result and the
+    /// kickback Pauli string (if any).
+    ///
+    /// The "kickback" is a Pauli string that, when applied, would flip the
+    /// measurement result. It is `Some(...)` when the measurement outcome
+    /// is non-deterministic (i.e. the qubit is entangled), and `None` when
+    /// the outcome is deterministic. The measurement result is also appended
+    /// to the measurement record.
     ///
     /// # Examples
     ///
@@ -476,14 +865,35 @@ impl TableauSimulator {
         )
     }
 
-    /// Exports the stabilizer state as a state vector.
+    /// Exports the stabilizer state as a dense state vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `endian` - Either `"little"` or `"big"`, controlling the mapping
+    ///   between qubit indices and state-vector indices.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the endian string is
+    /// invalid.
     pub fn state_vector(&self, endian: &str) -> crate::Result<Vec<crate::Complex32>> {
         self.current_inverse_tableau()
             .inverse(false)
             .to_state_vector(endian)
     }
 
-    /// Sets the state from stabilizer generators.
+    /// Sets the simulator state from a list of stabilizer generators.
+    ///
+    /// The stabilizers must be independent (unless `allow_redundant` is
+    /// `true`) and must fully constrain the state (unless
+    /// `allow_underconstrained` is `true`, in which case unconstrained
+    /// degrees of freedom default to `|0>`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the stabilizers are
+    /// anticommuting, or if constraints on redundancy / underconstraint
+    /// are violated.
     pub fn set_state_from_stabilizers(
         &mut self,
         stabilizers: &[crate::PauliString],
@@ -496,7 +906,20 @@ impl TableauSimulator {
         Ok(())
     }
 
-    /// Sets the state from a stabilizer state vector.
+    /// Sets the simulator state from a dense state vector.
+    ///
+    /// The state vector must represent a valid stabilizer state (i.e., it
+    /// must be reachable from `|0...0>` by Clifford gates).
+    ///
+    /// # Arguments
+    ///
+    /// * `state_vector` - The amplitudes of the state.
+    /// * `endian` - Either `"little"` or `"big"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the vector is not a
+    /// valid stabilizer state or the endian string is invalid.
     pub fn set_state_from_state_vector(
         &mut self,
         state_vector: &[crate::Complex32],
@@ -523,202 +946,220 @@ impl TableauSimulator {
         Ok(())
     }
 
-    /// Applies `H` to the given targets.
+    /// Applies the Hadamard gate (`H`, also known as `H_XZ`) to the given targets.
+    ///
+    /// Swaps the X and Z axes of each target qubit: `|0> -> |+>`, `|1> -> |->`.
     pub fn h(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("H", targets, &[])
     }
 
-    /// Applies `H_XY` to the given targets.
+    /// Applies the `H_XY` gate, which swaps the X and Y axes.
     pub fn h_xy(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("H_XY", targets, &[])
     }
 
-    /// Applies `H_XZ` to the given targets.
+    /// Applies the `H_XZ` gate (same as `H`) to the given targets.
     pub fn h_xz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("H", targets, &[])
     }
 
-    /// Applies `H_YZ` to the given targets.
+    /// Applies the `H_YZ` gate, which swaps the Y and Z axes.
     pub fn h_yz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("H_YZ", targets, &[])
     }
 
-    /// Applies `C_XYZ` to the given targets.
+    /// Applies the `C_XYZ` gate (X -> Y -> Z -> X axis rotation) to the given targets.
     pub fn c_xyz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("C_XYZ", targets, &[])
     }
 
-    /// Applies `C_ZYX` to the given targets.
+    /// Applies the `C_ZYX` gate (Z -> Y -> X -> Z axis rotation) to the given targets.
     pub fn c_zyx(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("C_ZYX", targets, &[])
     }
 
-    /// Applies `X` to the given targets.
+    /// Applies the Pauli X gate (bit flip) to the given targets.
     pub fn x(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("X", targets, &[])
     }
 
-    /// Applies `Y` to the given targets.
+    /// Applies the Pauli Y gate to the given targets.
     pub fn y(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("Y", targets, &[])
     }
 
-    /// Applies `Z` to the given targets.
+    /// Applies the Pauli Z gate (phase flip) to the given targets.
     pub fn z(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("Z", targets, &[])
     }
 
-    /// Applies `S` to the given targets.
+    /// Applies the S gate (sqrt(Z), quarter-turn around Z) to the given targets.
     pub fn s(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("S", targets, &[])
     }
 
-    /// Applies `S_DAG` to the given targets.
+    /// Applies the S^dag gate (inverse of S) to the given targets.
     pub fn s_dag(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("S_DAG", targets, &[])
     }
 
-    /// Applies `SQRT_X` to the given targets.
+    /// Applies the sqrt(X) gate (quarter-turn around X) to the given targets.
     pub fn sqrt_x(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("SQRT_X", targets, &[])
     }
 
-    /// Applies `SQRT_X_DAG` to the given targets.
+    /// Applies the inverse sqrt(X) gate to the given targets.
     pub fn sqrt_x_dag(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("SQRT_X_DAG", targets, &[])
     }
 
-    /// Applies `SQRT_Y` to the given targets.
+    /// Applies the sqrt(Y) gate (quarter-turn around Y) to the given targets.
     pub fn sqrt_y(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("SQRT_Y", targets, &[])
     }
 
-    /// Applies `SQRT_Y_DAG` to the given targets.
+    /// Applies the inverse sqrt(Y) gate to the given targets.
     pub fn sqrt_y_dag(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("SQRT_Y_DAG", targets, &[])
     }
 
-    /// Applies `R` to the given targets.
+    /// Resets the given qubits to the `|0>` state (Z-basis reset, Stim's `R` gate).
     pub fn reset(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("R", targets, &[])
     }
 
-    /// Applies `RX` to the given targets.
+    /// Resets the given qubits to the `|+>` state (X-basis reset, Stim's `RX` gate).
     pub fn reset_x(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("RX", targets, &[])
     }
 
-    /// Applies `RY` to the given targets.
+    /// Resets the given qubits to the `|+i>` state (Y-basis reset, Stim's `RY` gate).
     pub fn reset_y(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("RY", targets, &[])
     }
 
-    /// Applies `RZ`/`R` to the given targets.
+    /// Resets the given qubits to the `|0>` state (Z-basis reset, alias for [`reset`](Self::reset)).
     pub fn reset_z(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("R", targets, &[])
     }
 
-    /// Applies `CX` to the given targets.
+    /// Applies the CX (CNOT) gate to pairs of targets.
+    ///
+    /// Targets are consumed in pairs: `targets[0]` controls `targets[1]`,
+    /// `targets[2]` controls `targets[3]`, etc. The slice length must be even.
     pub fn cx(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("CX", targets, &[])
     }
 
-    /// Applies `CX` to the given targets.
+    /// Applies the CNOT gate. This is an alias for [`cx`](Self::cx).
     pub fn cnot(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.cx(targets)
     }
 
-    /// Applies `CY` to the given targets.
+    /// Applies the CY (controlled-Y) gate to pairs of targets.
     pub fn cy(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("CY", targets, &[])
     }
 
-    /// Applies `CZ` to the given targets.
+    /// Applies the CZ (controlled-Z) gate to pairs of targets.
     pub fn cz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("CZ", targets, &[])
     }
 
-    /// Applies `SWAP` to the given targets.
+    /// Applies the SWAP gate to pairs of targets.
     pub fn swap(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("SWAP", targets, &[])
     }
 
-    /// Applies `ISWAP` to the given targets.
+    /// Applies the ISWAP gate to pairs of targets.
     pub fn iswap(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("ISWAP", targets, &[])
     }
 
-    /// Applies `ISWAP_DAG` to the given targets.
+    /// Applies the inverse ISWAP gate to pairs of targets.
     pub fn iswap_dag(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("ISWAP_DAG", targets, &[])
     }
 
-    /// Applies `XCX` to the given targets.
+    /// Applies the XCX (X-controlled-X) gate to pairs of targets.
     pub fn xcx(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("XCX", targets, &[])
     }
 
-    /// Applies `XCY` to the given targets.
+    /// Applies the XCY (X-controlled-Y) gate to pairs of targets.
     pub fn xcy(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("XCY", targets, &[])
     }
 
-    /// Applies `XCZ` to the given targets.
+    /// Applies the XCZ (X-controlled-Z) gate to pairs of targets.
     pub fn xcz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("XCZ", targets, &[])
     }
 
-    /// Applies `YCX` to the given targets.
+    /// Applies the YCX (Y-controlled-X) gate to pairs of targets.
     pub fn ycx(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("YCX", targets, &[])
     }
 
-    /// Applies `YCY` to the given targets.
+    /// Applies the YCY (Y-controlled-Y) gate to pairs of targets.
     pub fn ycy(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("YCY", targets, &[])
     }
 
-    /// Applies `YCZ` to the given targets.
+    /// Applies the YCZ (Y-controlled-Z) gate to pairs of targets.
     pub fn ycz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("YCZ", targets, &[])
     }
 
-    /// Applies `ZCX` to the given targets.
+    /// Applies the ZCX (Z-controlled-X, equivalent to CX) gate to pairs of targets.
     pub fn zcx(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("ZCX", targets, &[])
     }
 
-    /// Applies `ZCY` to the given targets.
+    /// Applies the ZCY (Z-controlled-Y) gate to pairs of targets.
     pub fn zcy(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("ZCY", targets, &[])
     }
 
-    /// Applies `ZCZ` to the given targets.
+    /// Applies the ZCZ (Z-controlled-Z, equivalent to CZ) gate to pairs of targets.
     pub fn zcz(&mut self, targets: &[usize]) -> crate::Result<()> {
         self.apply_gate("ZCZ", targets, &[])
     }
 
-    /// Applies `X_ERROR(p)` to the given targets.
+    /// Applies an X error channel with probability `p` to the given targets.
+    ///
+    /// Each target qubit independently has an X gate applied with probability `p`.
     pub fn x_error(&mut self, targets: &[usize], p: f64) -> crate::Result<()> {
         self.apply_gate("X_ERROR", targets, &[p])
     }
 
-    /// Applies `Y_ERROR(p)` to the given targets.
+    /// Applies a Y error channel with probability `p` to the given targets.
+    ///
+    /// Each target qubit independently has a Y gate applied with probability `p`.
     pub fn y_error(&mut self, targets: &[usize], p: f64) -> crate::Result<()> {
         self.apply_gate("Y_ERROR", targets, &[p])
     }
 
-    /// Applies `Z_ERROR(p)` to the given targets.
+    /// Applies a Z error channel with probability `p` to the given targets.
+    ///
+    /// Each target qubit independently has a Z gate applied with probability `p`.
     pub fn z_error(&mut self, targets: &[usize], p: f64) -> crate::Result<()> {
         self.apply_gate("Z_ERROR", targets, &[p])
     }
 
-    /// Applies `DEPOLARIZE1(p)` to the given targets.
+    /// Applies a single-qubit depolarizing channel with probability `p`.
+    ///
+    /// Each target qubit independently has one of {X, Y, Z} applied, each
+    /// with probability `p/3`. The total error probability is `p`.
     pub fn depolarize1(&mut self, targets: &[usize], p: f64) -> crate::Result<()> {
         self.apply_gate("DEPOLARIZE1", targets, &[p])
     }
 
-    /// Applies `DEPOLARIZE2(p)` to the given targets.
+    /// Applies a two-qubit depolarizing channel with probability `p`.
+    ///
+    /// Each pair of target qubits independently has one of the 15
+    /// non-identity two-qubit Pauli operators applied, each with
+    /// probability `p/15`. Targets are consumed in pairs.
     pub fn depolarize2(&mut self, targets: &[usize], p: f64) -> crate::Result<()> {
         self.apply_gate("DEPOLARIZE2", targets, &[p])
     }
@@ -771,7 +1212,23 @@ fn decode_bit_table(data: stim_cxx::BitTableData) -> BitTable {
 }
 
 impl FlipSimulator {
-    /// Creates a flip simulator with the given batch size, qubit count, and seed.
+    /// Creates a new flip simulator.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_size` - The number of parallel instances to simulate. For best
+    ///   performance, use a multiple of 256 (the SIMD word width). Even with
+    ///   `batch_size = 1`, internally the same work is done as for 256 instances.
+    /// * `disable_stabilizer_randomization` - When `false` (the default), a Z
+    ///   error is added with 50% probability each time a stabilizer is introduced
+    ///   (e.g., at resets and measurements). This enforces the uncertainty
+    ///   principle and catches bugs where anticommuting stabilizers are measured.
+    ///   Set to `true` only when you specifically want to trace error propagation
+    ///   without the randomization noise.
+    /// * `num_qubits` - Initial number of qubits. The simulator will still
+    ///   auto-resize when gates reference qubits beyond this limit.
+    /// * `seed` - Deterministic PRNG seed. Same caveats about cross-version and
+    ///   cross-architecture consistency apply as for other Stim simulators.
     ///
     /// # Examples
     ///
@@ -797,48 +1254,64 @@ impl FlipSimulator {
         }
     }
 
-    /// Returns an owned copy of the flip simulator.
+    /// Returns an owned copy of the flip simulator, including its full state.
+    /// The copy's PRNG is reseeded.
     #[must_use]
     pub fn copy(&self) -> Self {
         self.clone()
     }
 
-    /// Returns the number of parallel instances tracked by the simulator.
+    /// Returns the number of parallel instances (shots) tracked by the simulator.
     #[must_use]
     pub fn batch_size(&self) -> usize {
         self.inner.batch_size()
     }
 
-    /// Returns the number of qubits tracked by the simulator.
+    /// Returns the number of qubits currently tracked by the simulator.
+    ///
+    /// Auto-grows when gates reference higher-indexed qubits.
     #[must_use]
     pub fn num_qubits(&self) -> usize {
         self.inner.num_qubits()
     }
 
-    /// Returns the number of recorded measurements.
+    /// Returns the number of measurement-flip records accumulated so far.
     #[must_use]
     pub fn num_measurements(&self) -> usize {
         self.inner.num_measurements()
     }
 
-    /// Returns the number of recorded detectors.
+    /// Returns the number of detector-flip records accumulated so far.
     #[must_use]
     pub fn num_detectors(&self) -> usize {
         self.inner.num_detectors()
     }
 
-    /// Returns the number of recorded observables.
+    /// Returns the number of observable-flip records accumulated so far.
     #[must_use]
     pub fn num_observables(&self) -> usize {
         self.inner.num_observables()
     }
 
-    /// Clears the simulator state and recorded outputs.
+    /// Clears all simulator state: qubit flips, and all recorded measurements,
+    /// detectors, and observables.
     pub fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Sets a Pauli flip for one `(qubit, batch-instance)` location.
+    /// Sets the Pauli flip on a specific `(qubit, batch-instance)` location.
+    ///
+    /// # Arguments
+    ///
+    /// * `pauli` - The Pauli to set: `'I'`/`'_'`/`0` for identity, `'X'`/`1`,
+    ///   `'Y'`/`2`, `'Z'`/`3`.
+    /// * `qubit_index` - The qubit to set the flip on.
+    /// * `instance_index` - Which batch instance to modify.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the Pauli value is invalid
+    /// or the indices are out of bounds.
     ///
     /// # Examples
     ///
@@ -878,7 +1351,14 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Returns the current Pauli flips for every batch instance.
+    /// Returns the current Pauli flip state for every batch instance.
+    ///
+    /// The returned vector has one [`PauliString`](crate::PauliString) per
+    /// batch instance, each with length equal to [`num_qubits`](Self::num_qubits).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on internal failures.
     ///
     /// # Examples
     ///
@@ -905,7 +1385,11 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Returns the current Pauli flip for a single batch instance.
+    /// Returns the current Pauli flip state for a single batch instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the index is out of bounds.
     pub fn peek_pauli_flip(&self, instance_index: isize) -> Result<crate::PauliString> {
         self.inner
             .peek_pauli_flip(instance_index as i64)
@@ -913,7 +1397,10 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Appends unpacked measurement-flip rows.
+    /// Appends unpacked measurement-flip rows to the simulator's measurement record.
+    ///
+    /// The array must have shape `(num_new_measurements, batch_size)`,
+    /// where each row represents one measurement across all batch instances.
     ///
     /// # Examples
     ///
@@ -941,7 +1428,10 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Appends bit-packed measurement-flip rows.
+    /// Appends bit-packed measurement-flip rows to the simulator's measurement record.
+    ///
+    /// The array must have shape `(num_new_measurements, ceil(batch_size / 8))`,
+    /// with bits packed in little-endian order within each byte.
     pub fn append_measurement_flips_bit_packed(
         &mut self,
         measurement_flip_data: ArrayView2<'_, u8>,
@@ -958,7 +1448,11 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Applies a circuit to the flip simulator.
+    /// Applies every instruction in a circuit to the flip simulator.
+    ///
+    /// This processes all gates, measurements, resets, noise channels,
+    /// detectors, and observable annotations in order. Measurement, detector,
+    /// and observable flip records are accumulated.
     ///
     /// # Examples
     ///
@@ -975,7 +1469,13 @@ impl FlipSimulator {
         self.inner.do_circuit(&circuit.inner);
     }
 
-    /// Applies a circuit-like operation accepted by `FlipSimulatorOperation`.
+    /// Applies a circuit-like operation to the flip simulator.
+    ///
+    /// Accepts anything that converts into a `FlipSimulatorOperation`:
+    /// a [`Circuit`](crate::Circuit), a [`CircuitInstruction`](crate::CircuitInstruction),
+    /// or a [`CircuitRepeatBlock`](crate::CircuitRepeatBlock).
+    ///
+    /// This is the Rust equivalent of Python's `FlipSimulator.do()`.
     pub fn r#do<'a>(&mut self, operation: impl Into<FlipSimulatorOperation<'a>>) -> Result<()> {
         match operation.into() {
             FlipSimulatorOperation::Circuit(circuit) => {
@@ -1002,6 +1502,10 @@ impl FlipSimulator {
     }
 
     /// Broadcasts Pauli errors through a boolean mask.
+    ///
+    /// For each `(qubit, batch_instance)` where `mask` is `true`, the
+    /// specified Pauli flip is applied with probability `p`. The mask must
+    /// have shape `(num_qubits, batch_size)`.
     ///
     /// # Examples
     ///
@@ -1053,7 +1557,10 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Generates Bernoulli samples, optionally bit-packed.
+    /// Generates independent Bernoulli samples, optionally bit-packed.
+    ///
+    /// Returns `num_samples` random bits, each `true` with probability `p`.
+    /// When `bit_packed` is true, the result has `ceil(num_samples / 8)` bytes.
     pub fn generate_bernoulli_samples(
         &mut self,
         num_samples: usize,
@@ -1065,22 +1572,35 @@ impl FlipSimulator {
             .map_err(StimError::from)
     }
 
-    /// Returns recorded measurement flips.
+    /// Returns the accumulated measurement-flip records as a `BitTable`.
+    ///
+    /// When `bit_packed` is `false`, returns a `BoolMatrix` with shape
+    /// `(num_measurements, batch_size)`. When `true`, returns a `PackedMatrix`
+    /// with shape `(num_measurements, ceil(batch_size / 8))`.
     pub fn get_measurement_flips(&self, bit_packed: bool) -> BitTable {
         decode_bit_table(self.inner.get_measurement_flips(bit_packed))
     }
 
-    /// Returns recorded detector flips.
+    /// Returns the accumulated detector-flip records as a `BitTable`.
+    ///
+    /// Shape conventions are the same as for
+    /// [`get_measurement_flips`](Self::get_measurement_flips).
     pub fn get_detector_flips(&self, bit_packed: bool) -> BitTable {
         decode_bit_table(self.inner.get_detector_flips(bit_packed))
     }
 
-    /// Returns recorded observable flips.
+    /// Returns the accumulated observable-flip records as a `BitTable`.
+    ///
+    /// Shape conventions are the same as for
+    /// [`get_measurement_flips`](Self::get_measurement_flips).
     pub fn get_observable_flips(&self, bit_packed: bool) -> BitTable {
         decode_bit_table(self.inner.get_observable_flips(bit_packed))
     }
 
-    /// Exports the simulator state into Rust-friendly matrix views.
+    /// Exports the full simulator state as a `FlipSimulatorArrays`.
+    ///
+    /// When `bit_packed` is `false`, all tables use `BoolMatrix` form.
+    /// When `true`, all tables use `PackedMatrix` form.
     ///
     /// # Examples
     ///
@@ -1172,7 +1692,12 @@ impl fmt::Debug for FlipSimulator {
     }
 }
 
-/// Operations accepted by `FlipSimulator::do`.
+/// Operations accepted by [`FlipSimulator::do`](FlipSimulator::do).
+///
+/// Implements `From` for [`Circuit`](crate::Circuit),
+/// [`CircuitInstruction`](crate::CircuitInstruction), and
+/// [`CircuitRepeatBlock`](crate::CircuitRepeatBlock), so those types can
+/// be passed directly to `FlipSimulator::do()`.
 pub enum FlipSimulatorOperation<'a> {
     /// Apply an entire circuit.
     Circuit(&'a crate::Circuit),
@@ -1200,7 +1725,13 @@ impl<'a> From<&'a crate::CircuitRepeatBlock> for FlipSimulatorOperation<'a> {
     }
 }
 
-/// Operations accepted by `TableauSimulator::do`.
+/// Operations accepted by [`TableauSimulator::do`](TableauSimulator::do).
+///
+/// Implements `From` for [`Circuit`](crate::Circuit),
+/// [`PauliString`](crate::PauliString),
+/// [`CircuitInstruction`](crate::CircuitInstruction), and
+/// [`CircuitRepeatBlock`](crate::CircuitRepeatBlock), so those types can
+/// be passed directly to `TableauSimulator::do()`.
 pub enum TableauSimulatorOperation<'a> {
     /// Apply an entire circuit.
     Circuit(&'a crate::Circuit),
@@ -1245,7 +1776,14 @@ impl fmt::Debug for MeasurementSampler {
 }
 
 impl DetectorSampler {
-    /// Creates a seeded detector sampler from a circuit.
+    /// Creates a detector sampler for the given circuit with an explicit PRNG seed.
+    ///
+    /// # Arguments
+    ///
+    /// * `circuit` - The stabilizer circuit to sample detector events from.
+    ///   Must contain `DETECTOR` instructions.
+    /// * `seed` - Deterministic PRNG seed. Same caveats about cross-version
+    ///   and cross-architecture consistency apply as for other Stim simulators.
     ///
     /// # Examples
     ///
@@ -1260,30 +1798,43 @@ impl DetectorSampler {
     }
 
     /// Returns the number of detector bits produced per shot.
+    ///
+    /// Equals the number of `DETECTOR` instructions in the circuit.
     #[must_use]
     pub fn num_detectors(&self) -> u64 {
         self.inner.num_detectors()
     }
 
     /// Returns the number of observable bits produced per shot.
+    ///
+    /// Equals the number of distinct `OBSERVABLE_INCLUDE` indices in the circuit.
     #[must_use]
     pub fn num_observables(&self) -> u64 {
         self.inner.num_observables()
     }
 
-    /// Samples packed detector-event data.
+    /// Samples detector-event data in bit-packed form.
+    ///
+    /// Returns a flat `Vec<u8>` where each shot occupies
+    /// `ceil(num_detectors / 8)` bytes with little-endian bit packing.
     #[must_use]
     pub fn sample_bit_packed(&mut self, shots: u64) -> Vec<u8> {
         self.inner.sample_bit_packed(shots)
     }
 
-    /// Samples packed observable-flip data.
+    /// Samples observable-flip data in bit-packed form.
+    ///
+    /// Returns a flat `Vec<u8>` where each shot occupies
+    /// `ceil(num_observables / 8)` bytes with little-endian bit packing.
     #[must_use]
     pub fn sample_observables_bit_packed(&mut self, shots: u64) -> Vec<u8> {
         self.inner.sample_observables_bit_packed(shots)
     }
 
-    /// Samples unpacked detector-event data.
+    /// Samples a batch of detector events as an unpacked boolean matrix.
+    ///
+    /// Returns an `Array2<bool>` with shape `(shots, num_detectors)`.
+    /// The bit for detector `d` in shot `s` is at `result[[s, d]]`.
     ///
     /// # Examples
     ///
@@ -1299,7 +1850,18 @@ impl DetectorSampler {
         unpack_rows_array(&packed, num_detectors)
     }
 
-    /// Writes detector-event samples to a file.
+    /// Writes detector-event samples directly to a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `shots` - Number of times to sample.
+    /// * `filepath` - File path to write results to.
+    /// * `format_name` - Output format (`"01"`, `"b8"`, `"r8"`, `"ptb64"`,
+    ///   `"hits"`, `"dets"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     ///
     /// # Examples
     ///
@@ -1326,7 +1888,11 @@ impl DetectorSampler {
             .map_err(StimError::from)
     }
 
-    /// Writes detector and observable samples into separate files.
+    /// Writes detector events and observable flips to two separate files.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     ///
     /// # Examples
     ///
@@ -1371,7 +1937,10 @@ impl DetectorSampler {
             .map_err(StimError::from)
     }
 
-    /// Samples packed detector and observable data separately.
+    /// Samples detector and observable data separately in bit-packed form.
+    ///
+    /// Returns `(detector_bytes, observable_bytes)` where each follows
+    /// the same little-endian packing convention.
     ///
     /// # Examples
     ///
@@ -1391,7 +1960,11 @@ impl DetectorSampler {
         )
     }
 
-    /// Samples unpacked detector and observable data separately.
+    /// Samples detector and observable data separately as unpacked boolean matrices.
+    ///
+    /// Returns `(detectors, observables)` where `detectors` has shape
+    /// `(shots, num_detectors)` and `observables` has shape
+    /// `(shots, num_observables)`.
     ///
     /// # Examples
     ///
@@ -1414,7 +1987,11 @@ impl DetectorSampler {
         )
     }
 
-    /// Samples with observables prepended before detector bits.
+    /// Samples detector events with observable flips prepended.
+    ///
+    /// Returns an `Array2<bool>` with shape
+    /// `(shots, num_observables + num_detectors)` where observable columns
+    /// come first, followed by detector columns.
     #[must_use]
     pub fn sample_prepend_observables(&mut self, shots: u64) -> Array2<bool> {
         let (dets, obs) = self.sample_separate_observables(shots);
@@ -1422,7 +1999,11 @@ impl DetectorSampler {
             .expect("observable/detector arrays should share shot dimension")
     }
 
-    /// Samples with observables appended after detector bits.
+    /// Samples detector events with observable flips appended.
+    ///
+    /// Returns an `Array2<bool>` with shape
+    /// `(shots, num_detectors + num_observables)` where detector columns
+    /// come first, followed by observable columns.
     #[must_use]
     pub fn sample_append_observables(&mut self, shots: u64) -> Array2<bool> {
         let (dets, obs) = self.sample_separate_observables(shots);
@@ -1441,25 +2022,35 @@ impl fmt::Debug for DetectorSampler {
 }
 
 impl DemSampler {
-    /// Returns the number of detectors produced per DEM sample.
+    /// Returns the number of detector bits produced per DEM sample.
+    ///
+    /// Equals the number of distinct detector indices referenced by the model.
     #[must_use]
     pub fn num_detectors(&self) -> u64 {
         self.inner.num_detectors()
     }
 
-    /// Returns the number of observables produced per DEM sample.
+    /// Returns the number of observable bits produced per DEM sample.
+    ///
+    /// Equals the number of distinct observable indices referenced by the model.
     #[must_use]
     pub fn num_observables(&self) -> u64 {
         self.inner.num_observables()
     }
 
-    /// Returns the number of error bits produced per DEM sample.
+    /// Returns the number of error mechanism bits produced per DEM sample.
+    ///
+    /// Equals the number of `error(...)` instructions in the model.
     #[must_use]
     pub fn num_errors(&self) -> u64 {
         self.inner.num_errors()
     }
 
-    /// Samples packed detector, observable, and error data.
+    /// Samples the DEM's error mechanisms and returns bit-packed results.
+    ///
+    /// Returns `(detector_bytes, observable_bytes, error_bytes)` in
+    /// little-endian packed form, where each shot occupies
+    /// `ceil(num_X / 8)` bytes for the corresponding quantity.
     ///
     /// # Examples
     ///
@@ -1477,7 +2068,11 @@ impl DemSampler {
         (batch.detectors, batch.observables, batch.errors)
     }
 
-    /// Samples unpacked detector, observable, and error data.
+    /// Samples the DEM's error mechanisms and returns unpacked boolean matrices.
+    ///
+    /// Returns `(detectors, observables, errors)` where each is an
+    /// `Array2<bool>` with shape `(shots, num_X)` for the corresponding
+    /// quantity.
     ///
     /// # Examples
     ///
@@ -1499,8 +2094,12 @@ impl DemSampler {
         )
     }
 
-    #[must_use]
-    /// Replays previously recorded packed errors.
+    /// Replays previously recorded bit-packed errors and returns bit-packed results.
+    ///
+    /// Instead of sampling errors randomly, the provided `recorded_errors`
+    /// data (e.g. from a previous call to [`sample_bit_packed`](Self::sample_bit_packed))
+    /// is replayed deterministically. This is useful for debugging or
+    /// analyzing specific error configurations.
     pub fn sample_bit_packed_replay(
         &mut self,
         recorded_errors: &[u8],
@@ -1510,7 +2109,9 @@ impl DemSampler {
         (batch.detectors, batch.observables, batch.errors)
     }
 
-    /// Replays previously recorded errors and returns unpacked results.
+    /// Replays previously recorded errors and returns unpacked boolean results.
+    ///
+    /// This is the unpacked equivalent of [`sample_bit_packed_replay`](Self::sample_bit_packed_replay).
     ///
     /// # Examples
     ///
@@ -1537,7 +2138,11 @@ impl DemSampler {
         )
     }
 
-    /// Writes detector and observable data to files.
+    /// Writes sampled detector and observable data to separate files.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     pub fn sample_write(
         &mut self,
         shots: u64,
@@ -1568,7 +2173,11 @@ impl DemSampler {
             .map_err(StimError::from)
     }
 
-    /// Writes detector, observable, and error data to files.
+    /// Writes sampled detector, observable, and error data to separate files.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     pub fn sample_write_with_errors(
         &mut self,
         shots: u64,
@@ -1605,7 +2214,11 @@ impl DemSampler {
             .map_err(StimError::from)
     }
 
-    /// Replays recorded errors from a file and writes outputs.
+    /// Replays recorded errors from a file and writes detector/observable outputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     pub fn sample_write_replay(
         &mut self,
         shots: u64,
@@ -1644,7 +2257,12 @@ impl DemSampler {
             .map_err(StimError::from)
     }
 
-    /// Replays recorded errors and also writes sampled error data.
+    /// Replays recorded errors from a file and writes all three outputs
+    /// (detectors, observables, and sampled errors) to separate files.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) on I/O or encoding failure.
     pub fn sample_write_replay_with_errors(
         &mut self,
         shots: u64,
@@ -1691,16 +2309,42 @@ impl DemSampler {
 }
 
 impl MeasurementsToDetectionEventsConverter {
-    /// Creates a compiled converter from a circuit.
+    /// Creates a compiled measurements-to-detection-events converter.
+    ///
+    /// The converter uses a noiseless reference sample, collected from the
+    /// circuit during initialization, as the baseline for determining
+    /// expected detector values.
+    ///
+    /// # Arguments
+    ///
+    /// * `circuit` - The circuit whose detector definitions drive the conversion.
+    /// * `skip_reference_sample` - When `true`, the reference sample is all
+    ///   zeros instead of being collected from the circuit. Only use this when
+    ///   the all-zero result is a valid noiseless outcome.
     #[must_use]
     pub fn new(circuit: &crate::Circuit, skip_reference_sample: bool) -> Self {
         circuit.compile_m2d_converter(skip_reference_sample)
     }
 
-    /// Converts measurement batches into detection-event batches.
+    /// Converts measurement data into detection events (and optionally observable flips).
     ///
-    /// When `separate_observables` is `true`, observable flips are returned as a
-    /// second matrix instead of being appended onto the detector-event rows.
+    /// This is the primary conversion entry point, combining the behavior of
+    /// several lower-level methods into a single call. The result variant
+    /// depends on `separate_observables`:
+    ///
+    /// * `false` -> [`ConvertedMeasurements::DetectionEvents`] (observables may be
+    ///   appended if `append_observables` is `true`).
+    /// * `true` -> [`ConvertedMeasurements::DetectionEventsAndObservables`] with
+    ///   detectors and observables as separate matrices.
+    ///
+    /// # Arguments
+    ///
+    /// * `measurements` - Boolean matrix of shape `(num_shots, num_measurements)`.
+    /// * `sweep_bits` - Optional boolean matrix of shape `(num_shots, num_sweep_bits)`.
+    ///   Used for `sweep[k]` controls in the circuit.
+    /// * `separate_observables` - When `true`, return observables as a separate array.
+    /// * `append_observables` - When `true` and `separate_observables` is `false`,
+    ///   observable bits are appended after detector bits in the output.
     ///
     /// # Examples
     ///
@@ -1749,7 +2393,15 @@ impl MeasurementsToDetectionEventsConverter {
         }
     }
 
-    /// Converts packed measurement data into packed detector-event data.
+    /// Converts bit-packed measurement data into bit-packed detector-event data.
+    ///
+    /// # Arguments
+    ///
+    /// * `measurements` - Bit-packed measurement bytes (little-endian, one row
+    ///   of `ceil(num_measurements / 8)` bytes per shot, concatenated).
+    /// * `shots` - Number of shots in the packed data.
+    /// * `append_observables` - When `true`, observable bits are appended after
+    ///   detector bits in the output.
     ///
     /// # Examples
     ///
@@ -1776,7 +2428,8 @@ impl MeasurementsToDetectionEventsConverter {
             .convert_measurements_bit_packed(measurements, shots, append_observables)
     }
 
-    /// Converts packed measurements plus packed sweep bits.
+    /// Converts bit-packed measurements plus bit-packed sweep bits into
+    /// bit-packed detector-event data.
     pub fn convert_measurements_and_sweep_bits_bit_packed(
         &mut self,
         measurements: &[u8],
@@ -1792,7 +2445,8 @@ impl MeasurementsToDetectionEventsConverter {
         )
     }
 
-    /// Converts packed measurements plus sweep bits, returning detectors and observables separately.
+    /// Converts bit-packed measurements plus sweep bits, returning bit-packed
+    /// detectors and observables as a separate `(detectors, observables)` pair.
     pub fn convert_measurements_and_sweep_bits_bit_packed_separate_observables(
         &mut self,
         measurements: &[u8],
@@ -1814,7 +2468,14 @@ impl MeasurementsToDetectionEventsConverter {
         )
     }
 
-    /// Converts unpacked measurements plus unpacked sweep bits.
+    /// Converts unpacked measurements plus unpacked sweep bits into
+    /// unpacked detector-event data.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the shot counts of
+    /// `measurements` and `sweep_bits` differ, or if the column widths
+    /// do not match expectations.
     pub fn convert_measurements_and_sweep_bits(
         &mut self,
         measurements: ArrayView2<'_, bool>,
@@ -1841,7 +2502,13 @@ impl MeasurementsToDetectionEventsConverter {
         Ok(unpack_rows_array(&converted, bit_len))
     }
 
-    /// Converts unpacked measurements plus sweep bits, returning detectors and observables separately.
+    /// Converts unpacked measurements plus sweep bits, returning unpacked
+    /// detectors and observables separately.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the shot counts of
+    /// `measurements` and `sweep_bits` differ.
     pub fn convert_measurements_and_sweep_bits_separate_observables(
         &mut self,
         measurements: ArrayView2<'_, bool>,
@@ -1867,7 +2534,8 @@ impl MeasurementsToDetectionEventsConverter {
         ))
     }
 
-    /// Converts packed measurements, returning packed detectors and observables separately.
+    /// Converts bit-packed measurements, returning bit-packed detectors and
+    /// observables as a separate `(detectors, observables)` pair.
     pub fn convert_measurements_bit_packed_separate_observables(
         &mut self,
         measurements: &[u8],
@@ -1880,7 +2548,12 @@ impl MeasurementsToDetectionEventsConverter {
         )
     }
 
-    /// Converts unpacked measurements into unpacked detector data.
+    /// Converts unpacked measurements into unpacked detector-event data.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the column width of
+    /// `measurements` does not match [`num_measurements`](Self::num_measurements).
     pub fn convert_measurements(
         &mut self,
         measurements: ArrayView2<'_, bool>,
@@ -1897,7 +2570,13 @@ impl MeasurementsToDetectionEventsConverter {
         Ok(unpack_rows_array(&converted, bit_len))
     }
 
-    /// Converts unpacked measurements, returning detectors and observables separately.
+    /// Converts unpacked measurements, returning unpacked detectors and
+    /// observables separately.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if the column width of
+    /// `measurements` does not match [`num_measurements`](Self::num_measurements).
     pub fn convert_measurements_separate_observables(
         &mut self,
         measurements: ArrayView2<'_, bool>,
@@ -1913,31 +2592,56 @@ impl MeasurementsToDetectionEventsConverter {
         ))
     }
 
-    /// Returns the number of measurement bits consumed by the converter.
+    /// Returns the number of measurement bits consumed per shot during conversion.
     #[must_use]
     pub fn num_measurements(&self) -> u64 {
         self.inner.num_measurements()
     }
 
-    /// Returns the number of detector bits produced by the converter.
+    /// Returns the number of detector bits produced per shot during conversion.
     #[must_use]
     pub fn num_detectors(&self) -> u64 {
         self.inner.num_detectors()
     }
 
-    /// Returns the number of observable bits produced by the converter.
+    /// Returns the number of observable bits produced per shot during conversion.
     #[must_use]
     pub fn num_observables(&self) -> u64 {
         self.inner.num_observables()
     }
 
-    /// Returns the number of sweep bits consumed by the converter.
+    /// Returns the number of sweep bits consumed per shot during conversion.
+    ///
+    /// Sweep bits correspond to `sweep[k]` controls in the circuit and can
+    /// vary from shot to shot.
     #[must_use]
     pub fn num_sweep_bits(&self) -> u64 {
         self.inner.num_sweep_bits()
     }
 
-    /// Converts measurement files into detection-event files.
+    /// Reads measurement data from a file and writes detection events to another file.
+    ///
+    /// This is the file-to-file equivalent of the in-memory
+    /// [`convert`](Self::convert) method. Supports optional sweep-bit input
+    /// and separate observable output.
+    ///
+    /// # Arguments
+    ///
+    /// * `measurements_filepath` - Path to the file containing measurement data.
+    /// * `measurements_format` - Format of the measurement file (`"01"`, `"b8"`, etc.).
+    /// * `sweep_bits_filepath` - Optional path to sweep-bit data.
+    /// * `sweep_bits_format` - Format of the sweep-bit file.
+    /// * `detection_events_filepath` - Where to write detection-event output.
+    /// * `detection_events_format` - Format for the detection-event output.
+    /// * `append_observables` - When `true`, observables are appended as
+    ///   additional detectors in the output.
+    /// * `obs_out_filepath` - Optional path for separate observable output.
+    /// * `obs_out_format` - Format for the observable output.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StimError`](crate::StimError) if any file path is not valid
+    /// UTF-8 or an I/O error occurs.
     ///
     /// # Examples
     ///

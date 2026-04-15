@@ -13,18 +13,71 @@ const TARGET_SWEEP_BIT: u32 = 1u32 << 26;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// A target operand used inside Stim circuit instructions.
+///
+/// Stim instructions act on *targets* that identify what the gate operates on. A
+/// `GateTarget` can represent any of the following target kinds:
+///
+/// - **Qubit target** — a plain qubit index such as `5`, created with
+///   [`GateTarget::new`] or [`GateTarget::qubit`]. Qubit targets can be optionally
+///   inverted with a `!` prefix (e.g. `!5`), which flips the measurement result.
+/// - **Pauli X / Y / Z target** — a qubit index tagged with a Pauli basis, such as
+///   `X3`, `Y7`, or `!Z2`. These are used by instructions that operate on
+///   Pauli-product targets, like `CORRELATED_ERROR` and `MPP`. Created with
+///   [`GateTarget::x`], [`GateTarget::y`], [`GateTarget::z`], [`target_x`],
+///   [`target_y`], [`target_z`], or [`target_pauli`].
+/// - **Measurement-record target** — a backward reference into the measurement record
+///   such as `rec[-1]` (the most recent measurement). Created with [`GateTarget::rec`]
+///   or [`target_rec`].
+/// - **Sweep-bit target** — an index into a per-shot configuration bitstring such as
+///   `sweep[4]`. Created with [`GateTarget::sweep_bit`] or [`target_sweep_bit`].
+/// - **Combiner** — the special `*` token that separates factors of a Pauli product
+///   inside `MPP` instructions (e.g. `MPP X0*Y1*Z2`). Created with
+///   [`GateTarget::combiner`] or [`target_combiner`].
+///
+/// `GateTarget` values are cheap to copy (they are a single `u32` internally) and
+/// support equality, ordering, and hashing. They can be parsed from Stim text syntax
+/// with [`GateTarget::from_target_str`] or via the [`FromStr`](std::str::FromStr)
+/// trait.
+///
+/// # Examples
+///
+/// ```
+/// // Qubit target
+/// let qubit = stim::GateTarget::new(5u32);
+/// assert!(qubit.is_qubit_target());
+///
+/// // Pauli target
+/// let pauli_x = stim::target_x(3u32, false).unwrap();
+/// assert!(pauli_x.is_x_target());
+///
+/// // Measurement-record target
+/// let record = stim::target_rec(-1).unwrap();
+/// assert!(record.is_measurement_record_target());
+///
+/// // Combiner
+/// let combiner = stim::target_combiner();
+/// assert!(combiner.is_combiner());
+/// ```
 pub struct GateTarget {
     data: u32,
 }
 
 impl GateTarget {
-    /// Creates a gate target from a qubit index or another target.
+    /// Creates a gate target from a qubit index, an existing `GateTarget`, or any
+    /// type that implements `Into<GateTarget>`.
+    ///
+    /// When given a `u32`, this creates a plain (non-inverted) qubit target. When
+    /// given an existing `GateTarget`, it simply returns a copy.
     ///
     /// # Examples
     ///
     /// ```
     /// let qubit = stim::GateTarget::new(5u32);
     /// assert_eq!(qubit.to_string(), "5");
+    ///
+    /// // Passing an existing GateTarget returns a copy.
+    /// let copy = stim::GateTarget::new(qubit);
+    /// assert_eq!(copy, qubit);
     /// ```
     #[must_use]
     pub fn new(value: impl Into<Self>) -> Self {
@@ -37,6 +90,18 @@ impl GateTarget {
     }
 
     /// Parses a gate target from Stim text syntax.
+    ///
+    /// Accepts all target forms used in Stim circuit files:
+    /// - Plain qubit: `"5"`, `"0"`
+    /// - Inverted qubit: `"!5"`
+    /// - Pauli targets: `"X3"`, `"Y7"`, `"Z2"`, `"!Z2"` (case-insensitive)
+    /// - Measurement records: `"rec[-4]"`
+    /// - Sweep bits: `"sweep[6]"`
+    /// - Combiner: `"*"`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `text` does not match any recognised target syntax.
     ///
     /// # Examples
     ///
@@ -91,7 +156,16 @@ impl GateTarget {
         Err(StimError::new(format!("unrecognized target: {text}")))
     }
 
-    /// Creates a qubit target, optionally inverted.
+    /// Creates a plain qubit target, optionally inverted.
+    ///
+    /// A qubit target identifies a qubit by its zero-based index. When `inverted` is
+    /// `true`, the target is prefixed with `!` in Stim syntax (e.g. `!5`), which
+    /// causes the measurement result for that qubit to be flipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `qubit` exceeds the maximum supported target value
+    /// (2²⁴ − 1 = 16,777,215).
     ///
     /// # Examples
     ///
@@ -106,7 +180,24 @@ impl GateTarget {
         })
     }
 
-    /// Creates an X target on a qubit.
+    /// Creates an X-basis Pauli target on a qubit.
+    ///
+    /// In Stim syntax this produces targets like `X3` or `!X3` (when inverted). Used
+    /// by instructions that take Pauli-product targets, such as `CORRELATED_ERROR` and
+    /// `MPP`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `qubit` exceeds the maximum supported target value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x3 = stim::GateTarget::x(3, false).unwrap();
+    /// assert!(x3.is_x_target());
+    /// assert_eq!(x3.pauli_type(), 'X');
+    /// assert_eq!(x3.to_string(), "X3");
+    /// ```
     pub fn x(qubit: u32, inverted: bool) -> Result<Self> {
         ensure_target_value_range(qubit)?;
         Ok(Self {
