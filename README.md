@@ -24,6 +24,11 @@ cargo add stim
 
 Issues and pull requests are very welcome, whether they relate to performance, ergonomics, or bugs.
 
+## License
+
+Licensed under Apache-2.0. The vendored upstream Stim sources under
+`crates/stim-cxx/vendor/stim` are also distributed under Apache-2.0.
+
 ### Updating the vendored Stim C++ source
 
 The upstream Stim C++ library is vendored as a git submodule at
