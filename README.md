@@ -12,6 +12,19 @@ It consists of two crates:
 
 The Rust API uses `ndarray` to provide an experience similar to working with NumPy in Python.
 
+## Rust-only features
+
+The `stim` crate also includes a small layer of Rust-native utilities that do not
+come from upstream Stim directly:
+
+* `stim::UniformDepolarizing` and `stim::Si1000`: ready-made pure-Rust noise models
+* `stim::Circuit::with_noise(...)`: a convenience method for applying those models
+  to an existing circuit
+
+This keeps the low-level bridge minimal while still allowing Rust-specific
+ergonomic features to grow independently when they can be implemented safely on
+top of the existing binding surface.
+
 ## Usage
 
 In most cases, users should depend only on the `stim` crate:

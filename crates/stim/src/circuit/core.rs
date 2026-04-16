@@ -17,8 +17,8 @@ use crate::common::parse::{decode_measurement_solution, parse_detector_coordinat
 use crate::common::slicing::{compute_slice_indices, normalize_index};
 use crate::{
     DemTarget, DetectorErrorModel, DetectorSampler, ExplainedError, Flow, GateTarget,
-    MeasurementSampler, MeasurementsToDetectionEventsConverter, PauliString, Result, StimError,
-    Tableau,
+    MeasurementSampler, MeasurementsToDetectionEventsConverter, NoiseModel, PauliString, Result,
+    StimError, Tableau,
 };
 
 /// A mutable stabilizer circuit.
@@ -761,6 +761,30 @@ impl Circuit {
         Self {
             inner: self.inner.without_noise(),
         }
+    }
+
+    /// Returns a noisy copy of the circuit using a Rust-side [`NoiseModel`].
+    ///
+    /// This is a convenience wrapper around [`NoiseModel::noisy_circuit`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the supplied noise model rejects this circuit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let circuit: stim::Circuit = "H 0\nTICK\nM 0".parse().unwrap();
+    /// let noisy = circuit
+    ///     .with_noise(stim::UniformDepolarizing::new(0.001).unwrap())
+    ///     .unwrap();
+    /// assert_eq!(
+    ///     noisy.to_string(),
+    ///     "H 0\nDEPOLARIZE1(0.001) 0\nTICK\nM(0.001) 0\nDEPOLARIZE1(0.001) 0"
+    /// );
+    /// ```
+    pub fn with_noise(&self, noise_model: impl NoiseModel) -> Result<Self> {
+        noise_model.noisy_circuit(self)
     }
 
     /// Returns a copy of the circuit with feedback operations removed and
@@ -1768,6 +1792,20 @@ mod api_tests {
         let noiseless = circuit.without_noise();
 
         assert_eq!(noiseless.to_string(), "CX 0 1\nM 0");
+    }
+
+    #[test]
+    fn with_noise_applies_rust_side_noise_models() {
+        let circuit = Circuit::from_str("H 0\nTICK\nM 0").expect("circuit should parse");
+
+        let noisy = circuit
+            .with_noise(crate::UniformDepolarizing::new(0.001).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            noisy.to_string(),
+            "H 0\nDEPOLARIZE1(0.001) 0\nTICK\nM(0.001) 0\nDEPOLARIZE1(0.001) 0"
+        );
     }
 
     #[test]

@@ -37,6 +37,11 @@
 //!   result formats (`"01"`, `"b8"`, `"r8"`, `"dets"`, `"hits"`, `"ptb64"`).
 //! - [`write_shot_data_file`] -- writes shot data to files in those formats.
 //!
+//! # Rust-only utilities
+//!
+//! - [`UniformDepolarizing`] and [`Si1000`] -- pure-Rust stabilizer noise
+//!   model presets that can be applied with [`Circuit::with_noise`].
+//!
 //! # Error handling
 //!
 //! All fallible operations return [`Result<T>`], which is an alias for
@@ -65,6 +70,7 @@ mod circuit;
 mod common;
 mod dem;
 mod metadata;
+mod noise;
 mod simulators;
 mod stabilizers;
 
@@ -89,6 +95,7 @@ pub use metadata::{
     gate_data, target_combined_paulis, target_combiner, target_inv, target_pauli, target_rec,
     target_sweep_bit, target_x, target_y, target_z,
 };
+pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{
     CompiledDemSampler, CompiledDetectorSampler, CompiledMeasurementSampler,
     CompiledMeasurementsToDetectionEventsConverter, ConvertedMeasurements, DemSampler,
