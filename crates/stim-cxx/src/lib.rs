@@ -6,9 +6,9 @@ use cxx::UniquePtr;
 
 pub use ffi::{
     BitTableData, CircuitErrorLocationData, CircuitErrorLocationStackFrameData,
-    CircuitTargetsInsideInstructionData, CircuitTopLevelItemData, DemSampleBatch,
-    DemTargetWithCoordsData, DemTopLevelItemData, ExplainedErrorData, FlippedMeasurementData,
-    GateTargetWithCoordsData,
+    CircuitTargetsInsideInstructionData, CircuitTopLevelItemData, CoordinateEntryData,
+    DemSampleBatch, DemTargetWithCoordsData, DemTopLevelItemData, ExplainedErrorData,
+    FlippedMeasurementData, GateTargetWithCoordsData,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -955,15 +955,17 @@ impl Circuit {
         )
     }
 
-    pub fn get_detector_coordinates_text(
+    pub fn get_detector_coordinates(
         &self,
         included_detector_indices: &[u64],
-    ) -> Result<String, cxx::Exception> {
-        ffi::circuit_get_detector_coordinates_text(self.inner(), included_detector_indices)
+    ) -> Result<Vec<ffi::CoordinateEntryData>, cxx::Exception> {
+        ffi::circuit_get_detector_coordinates(self.inner(), included_detector_indices)
     }
 
-    pub fn get_final_qubit_coordinates_text(&self) -> Result<String, cxx::Exception> {
-        ffi::circuit_get_final_qubit_coordinates_text(self.inner())
+    pub fn get_final_qubit_coordinates(
+        &self,
+    ) -> Result<Vec<ffi::CoordinateEntryData>, cxx::Exception> {
+        ffi::circuit_get_final_qubit_coordinates(self.inner())
     }
 
     pub fn diagram(&self, type_name: &str) -> Result<String, cxx::Exception> {
@@ -1147,14 +1149,11 @@ impl DetectorErrorModel {
         ffi::detector_error_model_num_observables(self.inner())
     }
 
-    pub fn get_detector_coordinates_text(
+    pub fn get_detector_coordinates(
         &self,
         included_detector_indices: &[u64],
-    ) -> Result<String, cxx::Exception> {
-        ffi::detector_error_model_get_detector_coordinates_text(
-            self.inner(),
-            included_detector_indices,
-        )
+    ) -> Result<Vec<ffi::CoordinateEntryData>, cxx::Exception> {
+        ffi::detector_error_model_get_detector_coordinates(self.inner(), included_detector_indices)
     }
 
     pub fn clear(&mut self) {
@@ -2309,6 +2308,11 @@ mod ffi {
         bit_packed: bool,
     }
 
+    struct CoordinateEntryData {
+        index: u64,
+        coords: Vec<f64>,
+    }
+
     struct GateTargetWithCoordsData {
         raw_target: u32,
         coords: Vec<f64>,
@@ -2586,11 +2590,13 @@ mod ffi {
             dont_explore_edges_increasing_symptom_degree: bool,
             canonicalize_circuit_errors: bool,
         ) -> Result<Vec<ExplainedErrorData>>;
-        fn circuit_get_detector_coordinates_text(
+        fn circuit_get_detector_coordinates(
             handle: &CircuitHandle,
             included_detector_indices: &[u64],
-        ) -> Result<String>;
-        fn circuit_get_final_qubit_coordinates_text(handle: &CircuitHandle) -> Result<String>;
+        ) -> Result<Vec<CoordinateEntryData>>;
+        fn circuit_get_final_qubit_coordinates(
+            handle: &CircuitHandle,
+        ) -> Result<Vec<CoordinateEntryData>>;
         fn circuit_reference_sample_bit_packed(handle: &CircuitHandle) -> Vec<u8>;
         fn circuit_reference_detector_signs_bit_packed(handle: &CircuitHandle) -> Vec<u8>;
         fn circuit_reference_observable_signs_bit_packed(handle: &CircuitHandle) -> Vec<u8>;
@@ -2708,10 +2714,10 @@ mod ffi {
         fn detector_error_model_num_detectors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_errors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_observables(handle: &DetectorErrorModelHandle) -> u64;
-        fn detector_error_model_get_detector_coordinates_text(
+        fn detector_error_model_get_detector_coordinates(
             handle: &DetectorErrorModelHandle,
             included_detector_indices: &[u64],
-        ) -> Result<String>;
+        ) -> Result<Vec<CoordinateEntryData>>;
         fn detector_error_model_clear(handle: Pin<&mut DetectorErrorModelHandle>);
         fn detector_error_model_equals(
             left: &DetectorErrorModelHandle,

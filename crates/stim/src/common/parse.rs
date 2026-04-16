@@ -19,32 +19,18 @@ pub fn decode_measurement_solution(text: String) -> Result<Option<Vec<i32>>> {
         .map(Some)
 }
 
-pub fn parse_detector_coordinate_map(serialized: &str) -> Result<BTreeMap<u64, Vec<f64>>> {
-    let mut result = BTreeMap::new();
-    for line in serialized.lines() {
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.split('\t');
-        let key = parts
-            .next()
-            .ok_or_else(|| StimError::new("missing detector coordinate key"))?
-            .parse::<u64>()
-            .map_err(|_| StimError::new(format!("invalid detector coordinate key: {line}")))?;
-        let coords = parts
-            .map(|part| {
-                part.parse::<f64>()
-                    .map_err(|_| StimError::new(format!("invalid detector coordinate: {part}")))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        result.insert(key, coords);
-    }
-    Ok(result)
+pub fn coordinate_entries_to_map(
+    entries: Vec<stim_cxx::CoordinateEntryData>,
+) -> BTreeMap<u64, Vec<f64>> {
+    entries
+        .into_iter()
+        .map(|entry| (entry.index, entry.coords))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_measurement_solution, parse_detector_coordinate_map};
+    use super::{coordinate_entries_to_map, decode_measurement_solution};
 
     #[test]
     fn parse_helpers_accept_empty_markers_and_blank_lines() {
@@ -54,8 +40,11 @@ mod tests {
             Some(Vec::new())
         );
         assert_eq!(
-            parse_detector_coordinate_map("\n1\t2\t3\n").unwrap(),
-            std::collections::BTreeMap::from([(1, vec![2.0, 3.0])])
+            coordinate_entries_to_map(vec![stim_cxx::CoordinateEntryData {
+                index: 4,
+                coords: vec![1.5, 2.5],
+            }]),
+            std::collections::BTreeMap::from([(4, vec![1.5, 2.5])])
         );
     }
 }

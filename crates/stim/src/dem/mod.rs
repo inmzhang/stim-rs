@@ -12,7 +12,7 @@ use std::ops::{Add, AddAssign, Index, Mul, MulAssign};
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::common::parse::parse_detector_coordinate_map;
+use crate::common::parse::coordinate_entries_to_map;
 use crate::common::slicing::{compute_slice_indices, normalize_index};
 use crate::{DemSampler, Result, StimError};
 
@@ -690,11 +690,10 @@ impl DetectorErrorModel {
         let included = only
             .map(std::borrow::ToOwned::to_owned)
             .unwrap_or_else(|| (0..self.num_detectors()).collect());
-        let serialized = self
-            .inner
-            .get_detector_coordinates_text(&included)
-            .map_err(StimError::from)?;
-        parse_detector_coordinate_map(&serialized)
+        self.inner
+            .get_detector_coordinates(&included)
+            .map(coordinate_entries_to_map)
+            .map_err(StimError::from)
     }
 
     /// Returns a diagram of the detector error model as a string.

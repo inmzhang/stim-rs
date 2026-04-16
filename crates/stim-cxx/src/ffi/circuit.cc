@@ -1729,37 +1729,33 @@ rust::Vec<ExplainedErrorData> circuit_search_for_undetectable_logical_errors(
   return result;
 }
 
-rust::String circuit_get_detector_coordinates_text(
+rust::Vec<CoordinateEntryData> coordinate_entries(
+    const std::map<std::uint64_t, std::vector<double>> &coords) {
+  rust::Vec<CoordinateEntryData> result;
+  for (const auto &entry : coords) {
+    rust::Vec<double> rust_coords;
+    for (double coord : entry.second) {
+      rust_coords.push_back(coord);
+    }
+    result.push_back(CoordinateEntryData{
+        entry.first,
+        std::move(rust_coords),
+    });
+  }
+  return result;
+}
+
+rust::Vec<CoordinateEntryData> circuit_get_detector_coordinates(
     const CircuitHandle &handle,
     rust::Slice<const std::uint64_t> included_detector_indices) {
   std::set<std::uint64_t> included(
       included_detector_indices.begin(),
       included_detector_indices.end());
-  auto coords = handle.get().get_detector_coordinates(included);
-  std::stringstream ss;
-  ss.precision(17);
-  for (const auto &entry : coords) {
-    ss << entry.first;
-    for (double coord : entry.second) {
-      ss << '\t' << coord;
-    }
-    ss << '\n';
-  }
-  return rust::String(ss.str());
+  return coordinate_entries(handle.get().get_detector_coordinates(included));
 }
 
-rust::String circuit_get_final_qubit_coordinates_text(const CircuitHandle &handle) {
-  auto coords = handle.get().get_final_qubit_coords();
-  std::stringstream ss;
-  ss.precision(17);
-  for (const auto &entry : coords) {
-    ss << entry.first;
-    for (double coord : entry.second) {
-      ss << '\t' << coord;
-    }
-    ss << '\n';
-  }
-  return rust::String(ss.str());
+rust::Vec<CoordinateEntryData> circuit_get_final_qubit_coordinates(const CircuitHandle &handle) {
+  return coordinate_entries(handle.get().get_final_qubit_coords());
 }
 
 rust::Vec<std::uint8_t> circuit_reference_sample_bit_packed(const CircuitHandle &handle) {
@@ -2474,23 +2470,13 @@ std::uint64_t detector_error_model_num_observables(const DetectorErrorModelHandl
   return handle.get().count_observables();
 }
 
-rust::String detector_error_model_get_detector_coordinates_text(
+rust::Vec<CoordinateEntryData> detector_error_model_get_detector_coordinates(
     const DetectorErrorModelHandle &handle,
     rust::Slice<const std::uint64_t> included_detector_indices) {
   std::set<std::uint64_t> included(
       included_detector_indices.begin(),
       included_detector_indices.end());
-  auto coords = handle.get().get_detector_coordinates(included);
-  std::stringstream ss;
-  ss.precision(17);
-  for (const auto &entry : coords) {
-    ss << entry.first;
-    for (double coord : entry.second) {
-      ss << '\t' << coord;
-    }
-    ss << '\n';
-  }
-  return rust::String(ss.str());
+  return coordinate_entries(handle.get().get_detector_coordinates(included));
 }
 
 void detector_error_model_clear(DetectorErrorModelHandle &handle) {

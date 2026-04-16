@@ -38,6 +38,7 @@ struct DemSampleBatch;
 struct DetectorSampleBatch;
 struct CircuitTopLevelItemData;
 struct DemTopLevelItemData;
+struct CoordinateEntryData;
 struct TableauMeasureKickbackData;
 struct BitTableData;
 
@@ -475,10 +476,10 @@ rust::Vec<ExplainedErrorData> circuit_search_for_undetectable_logical_errors(
     std::uint64_t dont_explore_edges_with_degree_above,
     bool dont_explore_edges_increasing_symptom_degree,
     bool canonicalize_circuit_errors);
-rust::String circuit_get_detector_coordinates_text(
+rust::Vec<CoordinateEntryData> circuit_get_detector_coordinates(
     const CircuitHandle &handle,
     rust::Slice<const std::uint64_t> included_detector_indices);
-rust::String circuit_get_final_qubit_coordinates_text(const CircuitHandle &handle);
+rust::Vec<CoordinateEntryData> circuit_get_final_qubit_coordinates(const CircuitHandle &handle);
 rust::Vec<std::uint8_t> circuit_reference_sample_bit_packed(const CircuitHandle &handle);
 rust::Vec<std::uint8_t> circuit_reference_detector_signs_bit_packed(const CircuitHandle &handle);
 rust::Vec<std::uint8_t> circuit_reference_observable_signs_bit_packed(const CircuitHandle &handle);
@@ -572,7 +573,7 @@ std::size_t detector_error_model_len(const DetectorErrorModelHandle &handle);
 std::uint64_t detector_error_model_num_detectors(const DetectorErrorModelHandle &handle);
 std::uint64_t detector_error_model_num_errors(const DetectorErrorModelHandle &handle);
 std::uint64_t detector_error_model_num_observables(const DetectorErrorModelHandle &handle);
-rust::String detector_error_model_get_detector_coordinates_text(
+rust::Vec<CoordinateEntryData> detector_error_model_get_detector_coordinates(
     const DetectorErrorModelHandle &handle,
     rust::Slice<const std::uint64_t> included_detector_indices);
 void detector_error_model_clear(DetectorErrorModelHandle &handle);

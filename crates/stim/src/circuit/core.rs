@@ -12,7 +12,7 @@ use super::{
     support::{convert_explained_error, parse_detecting_regions_text},
 };
 use crate::common::bit_packing::unpack_bits;
-use crate::common::parse::{decode_measurement_solution, parse_detector_coordinate_map};
+use crate::common::parse::{coordinate_entries_to_map, decode_measurement_solution};
 use crate::common::slicing::{compute_slice_indices, normalize_index};
 use crate::{
     DemTarget, DetectorErrorModel, DetectorSampler, ExplainedError, Flow, GateTarget,
@@ -1163,11 +1163,10 @@ impl Circuit {
         let included = only
             .map(std::borrow::ToOwned::to_owned)
             .unwrap_or_else(|| (0..self.num_detectors()).collect());
-        let serialized = self
-            .inner
-            .get_detector_coordinates_text(&included)
-            .map_err(StimError::from)?;
-        parse_detector_coordinate_map(&serialized)
+        self.inner
+            .get_detector_coordinates(&included)
+            .map(coordinate_entries_to_map)
+            .map_err(StimError::from)
     }
 
     /// Explains which circuit locations produce detector-error-model terms.
@@ -1233,11 +1232,10 @@ impl Circuit {
 
     /// Returns final qubit coordinates after all coordinate-shift instructions.
     pub fn get_final_qubit_coordinates(&self) -> Result<BTreeMap<u64, Vec<f64>>> {
-        let serialized = self
-            .inner
-            .get_final_qubit_coordinates_text()
-            .map_err(StimError::from)?;
-        parse_detector_coordinate_map(&serialized)
+        self.inner
+            .get_final_qubit_coordinates()
+            .map(coordinate_entries_to_map)
+            .map_err(StimError::from)
     }
 
     /// Returns a top-level item by index.
