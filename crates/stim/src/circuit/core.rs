@@ -4200,4 +4200,35 @@ mod residual_api_tests {
         .unwrap_err();
         assert!(no_errors.message().contains("NO ERRORS"));
     }
+
+    #[test]
+    fn residual_small_helper_paths_are_covered() {
+        let circuit: Circuit = "M 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]"
+            .parse()
+            .unwrap();
+        assert_eq!(format!("{:?}", Circuit::new()), "stim::Circuit()");
+        let encoded = circuit
+            .encode_diagram_filters(&[
+                DetectingRegionFilter::AllDetectors,
+                DetectingRegionFilter::AllObservables,
+            ])
+            .unwrap();
+        assert_eq!(encoded, vec!["D0".to_string(), "L0".to_string()]);
+        assert!(circuit.likeliest_error_sat_problem().unwrap().contains('p'));
+        assert_eq!(
+            circuit
+                .detecting_regions_with_filters(&[], None, false)
+                .unwrap(),
+            circuit
+                .detecting_regions_with_options(None, None, false)
+                .unwrap()
+        );
+        assert!(circuit.slice(Some(10), Some(11), 1).unwrap().is_empty());
+        let zero_step = circuit.slice(None, None, 0).unwrap_err();
+        assert!(zero_step.message().contains("slice step cannot be zero"));
+        assert_eq!(
+            circuit.slice(Some(0), Some(1), 9).unwrap().to_string(),
+            "M 0"
+        );
+    }
 }

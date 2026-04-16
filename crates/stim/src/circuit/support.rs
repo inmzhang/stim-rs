@@ -130,3 +130,60 @@ pub fn convert_explained_error(data: stim_cxx::ExplainedErrorData) -> Result<Exp
             .collect::<Result<Vec<_>>>()?,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{convert_explained_error, parse_detecting_regions_text};
+
+    #[test]
+    fn support_parsers_and_converters_cover_blank_lines_and_measurement_details() {
+        let parsed = parse_detecting_regions_text("\nD0\t4\t+X\n").unwrap();
+        assert_eq!(
+            parsed,
+            std::collections::BTreeMap::from([(
+                crate::target_relative_detector_id(0).unwrap(),
+                std::collections::BTreeMap::from([(
+                    4,
+                    crate::PauliString::from_text("+X").unwrap()
+                )]),
+            )])
+        );
+
+        let explained = convert_explained_error(stim_cxx::ExplainedErrorData {
+            dem_error_terms: vec![stim_cxx::DemTargetWithCoordsData {
+                dem_target: "D0".to_string(),
+                coords: vec![1.0, 2.0],
+            }],
+            circuit_error_locations: vec![stim_cxx::CircuitErrorLocationData {
+                tick_offset: 7,
+                flipped_pauli_product: vec![],
+                flipped_measurement: stim_cxx::FlippedMeasurementData {
+                    record_index: 3,
+                    observable: vec![],
+                },
+                instruction_targets: stim_cxx::CircuitTargetsInsideInstructionData {
+                    gate: "M".to_string(),
+                    tag: String::new(),
+                    args: vec![],
+                    target_range_start: 0,
+                    target_range_end: 1,
+                    targets_in_range: vec![stim_cxx::GateTargetWithCoordsData {
+                        raw_target: crate::GateTarget::new(0u32).raw_data(),
+                        coords: vec![0.0],
+                    }],
+                },
+                stack_frames: vec![],
+                noise_tag: "noise".to_string(),
+            }],
+        })
+        .unwrap();
+
+        assert_eq!(
+            explained.circuit_error_locations()[0]
+                .flipped_measurement()
+                .unwrap()
+                .record_index(),
+            Some(3)
+        );
+    }
+}

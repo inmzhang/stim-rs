@@ -869,6 +869,16 @@ mod tests {
             "unexpected record error: {record}"
         );
     }
+
+    #[test]
+    fn gate_target_rejects_unknown_text_and_identity_pauli_maps_to_plain_qubit() {
+        let error = GateTarget::from_target_str("not-a-target").unwrap_err();
+        assert!(error.message().contains("unrecognized target"));
+        assert_eq!(
+            GateTarget::pauli(5, 'I', true).unwrap(),
+            GateTarget::qubit(5, true).unwrap()
+        );
+    }
 }
 
 impl Display for GateTarget {

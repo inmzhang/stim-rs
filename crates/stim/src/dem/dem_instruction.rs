@@ -700,4 +700,61 @@ mod tests {
             "stim::DemInstruction(\"shift_detectors\", [1.0], [5])"
         );
     }
+
+    #[test]
+    fn parsing_and_helper_error_paths_are_covered() {
+        let empty = DemInstruction::from_dem_text("").unwrap_err();
+        assert!(empty.message().contains("got empty text"));
+        let repeat = DemInstruction::from_dem_text("repeat 2 {\n    error(0.1) D0\n}").unwrap_err();
+        assert!(
+            repeat
+                .message()
+                .contains("cannot represent DEM repeat blocks")
+        );
+        let multiple = DemInstruction::from_dem_text("error(0.1) D0\nerror(0.2) D1").unwrap_err();
+        assert!(
+            multiple
+                .message()
+                .contains("expected a single detector error model instruction")
+        );
+
+        assert_eq!(DemInstructionTarget::from(5u32).to_string(), "5");
+        assert_eq!(DemInstructionTarget::from(6usize).to_string(), "6");
+
+        let shifted = DemInstruction::new("shift_detectors", [1.0], [5u64], "").unwrap();
+        assert!(format!("{shifted:?}").contains("[5]"));
+
+        let unterminated_tag = parse_head("error[tag").unwrap_err();
+        assert!(
+            unterminated_tag
+                .message()
+                .contains("unterminated DEM instruction tag")
+        );
+        let bad_target = parse_targets("bad").unwrap_err();
+        assert!(
+            bad_target
+                .message()
+                .contains("failed to parse DEM instruction target")
+        );
+        assert_eq!(
+            split_head_and_tail("shift_detectors"),
+            ("shift_detectors", "")
+        );
+
+        let low = DemInstruction::new(
+            "error",
+            [0.1],
+            [target_relative_detector_id(0).unwrap()],
+            "",
+        )
+        .unwrap();
+        let high = DemInstruction::new(
+            "error",
+            [0.2],
+            [target_relative_detector_id(0).unwrap()],
+            "",
+        )
+        .unwrap();
+        assert!(low < high);
+    }
 }

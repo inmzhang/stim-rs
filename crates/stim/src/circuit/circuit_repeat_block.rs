@@ -323,4 +323,19 @@ mod tests {
 
         assert!(error.message().contains("repeat 0"));
     }
+
+    #[test]
+    fn empty_body_display_and_ordering_paths_are_covered() {
+        let empty = CircuitRepeatBlock::new(2, &Circuit::new(), "tag").unwrap();
+        assert_eq!(empty.to_string(), "REPEAT[tag] 2 {\n}");
+
+        let earlier = CircuitRepeatBlock::new(1, &Circuit::new(), "").unwrap();
+        let later = CircuitRepeatBlock::new(2, &Circuit::new(), "").unwrap();
+        assert!(earlier < later);
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&later, &mut hasher);
+        assert_ne!(std::hash::Hasher::finish(&hasher), 0);
+        assert_eq!(earlier.partial_cmp(&later), Some(std::cmp::Ordering::Less));
+    }
 }

@@ -90,3 +90,18 @@ impl From<&CircuitRepeatBlock> for CircuitInsertOperation {
         Self::RepeatBlock(value.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CircuitInsertOperation;
+
+    #[test]
+    fn borrowed_repeat_blocks_convert_into_insert_operations() {
+        let body: crate::Circuit = "H 0".parse().unwrap();
+        let block = crate::CircuitRepeatBlock::new(2, &body, "tag").unwrap();
+        assert!(matches!(
+            CircuitInsertOperation::from(&block),
+            CircuitInsertOperation::RepeatBlock(_)
+        ));
+    }
+}

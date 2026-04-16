@@ -2115,6 +2115,29 @@ mod tests {
                 .expect("expected rounded model should parse")
             );
     }
+
+    #[test]
+    fn detector_error_model_remaining_sampler_and_slice_paths_are_covered() {
+        let dem: DetectorErrorModel = "error(0.125) D0\nshift_detectors(1, 2) 5\nerror(0.25) D1 L0"
+            .parse()
+            .unwrap();
+        let sampler = dem.compile_sampler();
+        assert_eq!(sampler.num_detectors(), 7);
+        let sat = dem.likeliest_error_sat_problem().unwrap();
+        assert!(sat.contains("p wcnf") || sat.contains("p cnf"));
+
+        let zero_step = dem.slice(None, None, 0).unwrap_err();
+        assert!(zero_step.message().contains("slice step cannot be zero"));
+        assert!(dem.slice(Some(10), Some(11), 1).unwrap().is_empty());
+        assert_eq!(
+            dem.slice(Some(1), Some(2), 9).unwrap().to_string(),
+            "shift_detectors(1, 2) 5"
+        );
+        assert_eq!(
+            dem.get(1).unwrap(),
+            DemItem::Instruction("shift_detectors(1, 2) 5".parse().unwrap())
+        );
+    }
 }
 
 #[cfg(test)]

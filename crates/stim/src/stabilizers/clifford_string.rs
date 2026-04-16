@@ -881,4 +881,19 @@ mod tests {
         s.set(-1, &crate::gate_data("S").unwrap()).unwrap();
         assert_eq!(s, CliffordString::from_text("I,H,I,I,S").unwrap());
     }
+
+    #[test]
+    fn clifford_string_remaining_convenience_paths_are_covered() {
+        let default = CliffordString::default();
+        assert!(default.is_empty());
+
+        let random = CliffordString::random(3);
+        assert_eq!(random.copy().len(), 3);
+
+        let step_error = CliffordString::from_text("I,X")
+            .unwrap()
+            .slice(None, None, 0)
+            .unwrap_err();
+        assert!(step_error.message().contains("slice step cannot be zero"));
+    }
 }

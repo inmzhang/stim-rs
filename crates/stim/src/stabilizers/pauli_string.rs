@@ -1860,6 +1860,111 @@ mod tests {
     }
 
     #[test]
+    fn pauli_string_remaining_public_entrypoints_and_error_paths_are_exercised() {
+        let empty = PauliString::from_text("").unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(
+            PauliString::from_unitary_matrix(&[], "little", false).unwrap(),
+            empty
+        );
+
+        let mut p = PauliString::new(2);
+        let invalid_code = p.set(0, 9u8).unwrap_err();
+        assert!(invalid_code.to_string().contains("Expected new_pauli"));
+        let invalid_symbol = p.set(0, 'Q').unwrap_err();
+        assert!(invalid_symbol.to_string().contains("Expected new_pauli"));
+        let invalid_sign = PauliString::from_ndarray_bit_packed(
+            ndarray::array![0u8].view(),
+            ndarray::array![0u8].view(),
+            1,
+            0,
+        )
+        .unwrap_err();
+        assert!(invalid_sign.to_string().contains("sign must be +1 or -1"));
+
+        let too_wide = PauliString::new(usize::BITS as usize)
+            .to_unitary_matrix("little")
+            .unwrap_err();
+        assert!(too_wide.to_string().contains("Too many qubits"));
+
+        assert_eq!(
+            PauliString::from_text("-X")
+                .unwrap()
+                .to_unitary_matrix("little")
+                .unwrap()[0][1],
+            Complex32::new(-1.0, 0.0)
+        );
+        assert_eq!(
+            PauliString::from_text("-iX")
+                .unwrap()
+                .to_unitary_matrix("little")
+                .unwrap()[0][1],
+            Complex32::new(0.0, -1.0)
+        );
+        assert_eq!(
+            PauliString::from_unitary_matrix(
+                &PauliString::from_text("+XZ")
+                    .unwrap()
+                    .to_unitary_matrix("big")
+                    .unwrap(),
+                "big",
+                false,
+            )
+            .unwrap(),
+            PauliString::from_text("+XZ").unwrap()
+        );
+
+        assert_eq!(
+            PauliString::from_text("iX")
+                .unwrap()
+                .div_complex_unit(Complex32::new(1.0, 0.0))
+                .unwrap(),
+            PauliString::from_text("iX").unwrap()
+        );
+        assert_eq!(
+            PauliString::from_text("iX")
+                .unwrap()
+                .div_complex_unit(Complex32::new(-1.0, 0.0))
+                .unwrap(),
+            PauliString::from_text("-iX").unwrap()
+        );
+        assert_eq!(
+            PauliString::from_text("iX")
+                .unwrap()
+                .div_complex_unit(Complex32::new(0.0, -1.0))
+                .unwrap(),
+            PauliString::from_text("-X").unwrap()
+        );
+        let invalid_divisor = PauliString::from_text("X")
+            .unwrap()
+            .div_complex_unit(Complex32::new(0.5, 0.0))
+            .unwrap_err();
+        assert!(
+            invalid_divisor
+                .to_string()
+                .contains("divisor not in (1, -1, 1j, -1j)")
+        );
+        assert_eq!(format!("{}", PauliString::from_text("iX").unwrap()), "+iX");
+
+        let circuit: Circuit = "H 0".parse().unwrap();
+        let instruction = CircuitInstruction::from_stim_program_text("H 0").unwrap();
+        assert_eq!(
+            PauliString::from_text("Z")
+                .unwrap()
+                .after(&circuit)
+                .unwrap(),
+            PauliString::from_text("X").unwrap()
+        );
+        assert_eq!(
+            PauliString::from_text("X")
+                .unwrap()
+                .before(&instruction)
+                .unwrap(),
+            PauliString::from_text("Z").unwrap()
+        );
+    }
+
+    #[test]
     fn pauli_string_from_unitary_matrix_matches_documented_examples() {
         assert_eq!(
             PauliString::from_unitary_matrix(
@@ -1930,6 +2035,117 @@ mod tests {
             )
             .unwrap(),
             PauliString::from_text("+XZ").unwrap()
+        );
+    }
+
+    #[test]
+    fn pauli_string_from_unitary_matrix_reports_remaining_error_shapes() {
+        let invalid_endian =
+            PauliString::from_unitary_matrix(&[vec![Complex32::new(1.0, 0.0)]], "middle", false)
+                .unwrap_err();
+        assert!(
+            invalid_endian
+                .to_string()
+                .contains("endian not in ['little', 'big']")
+        );
+
+        let non_square = PauliString::from_unitary_matrix(
+            &[
+                vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
+                vec![Complex32::new(0.0, 0.0)],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(non_square.to_string().contains("matrix must be square"));
+
+        let non_power_of_two = PauliString::from_unitary_matrix(
+            &[
+                vec![
+                    Complex32::new(1.0, 0.0),
+                    Complex32::new(0.0, 0.0),
+                    Complex32::new(0.0, 0.0),
+                ],
+                vec![
+                    Complex32::new(0.0, 0.0),
+                    Complex32::new(1.0, 0.0),
+                    Complex32::new(0.0, 0.0),
+                ],
+                vec![
+                    Complex32::new(0.0, 0.0),
+                    Complex32::new(0.0, 0.0),
+                    Complex32::new(1.0, 0.0),
+                ],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            non_power_of_two
+                .to_string()
+                .contains("isn't a Pauli string matrix")
+        );
+
+        let no_non_zero = PauliString::from_unitary_matrix(
+            &[
+                vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 0.0)],
+                vec![Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            no_non_zero
+                .to_string()
+                .contains("row with no non-zero entries")
+        );
+
+        let two_non_zero = PauliString::from_unitary_matrix(
+            &[
+                vec![Complex32::new(1.0, 0.0), Complex32::new(1.0, 0.0)],
+                vec![Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            two_non_zero
+                .to_string()
+                .contains("two non-zero entries in the same row")
+        );
+
+        let inconsistent_flips = PauliString::from_unitary_matrix(
+            &[
+                vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
+                vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            inconsistent_flips
+                .to_string()
+                .contains("Rows disagree about which qubits are flipped")
+        );
+
+        let inconsistent_phases = PauliString::from_unitary_matrix(
+            &[
+                vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
+                vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 1.0)],
+            ],
+            "little",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            inconsistent_phases
+                .to_string()
+                .contains("doesn't have consistent phase flips")
         );
     }
 }

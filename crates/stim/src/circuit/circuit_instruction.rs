@@ -853,4 +853,51 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn parser_rejects_multi_operation_and_repeat_inputs_and_covers_remaining_formats() {
+        let multiple = CircuitInstruction::from_stim_program_text("H 0\nX 1").unwrap_err();
+        assert!(
+            multiple
+                .message()
+                .contains("expected a single circuit instruction")
+        );
+
+        let repeat =
+            CircuitInstruction::from_stim_program_text("REPEAT 2 {\n    H 0\n}").unwrap_err();
+        assert!(
+            repeat.message().contains("REPEAT")
+                || repeat.message().contains("single circuit instruction")
+        );
+
+        let tick = CircuitInstruction::from_str("TICK").unwrap();
+        assert!(tick.target_groups().is_empty());
+
+        let multi_args =
+            CircuitInstruction::from_stim_program_text("PAULI_CHANNEL_1(0.1,0.2,0.3) 0").unwrap();
+        assert_eq!(multi_args.to_string(), "PAULI_CHANNEL_1(0.1,0.2,0.3) 0");
+
+        let mpp = CircuitInstruction::from_str("MPP X0*Y1").unwrap();
+        assert_eq!(mpp.to_string(), "MPP X0* Y1");
+        assert!(format!("{mpp:?}").contains("CircuitInstruction"));
+
+        let mut circuit = Circuit::new();
+        let invalid = CircuitInstruction {
+            name: " ".to_string(),
+            tag: String::new(),
+            gate_args: vec![],
+            targets: vec![],
+            num_measurements: 0,
+        };
+        let error = circuit.append_instruction(&invalid).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("instruction name must not be empty")
+        );
+
+        let low = CircuitInstruction::new("X_ERROR", [0u32], [0.1], "").unwrap();
+        let high = CircuitInstruction::new("X_ERROR", [0u32], [0.2], "").unwrap();
+        assert!(low < high);
+    }
 }

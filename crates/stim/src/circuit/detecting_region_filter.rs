@@ -87,3 +87,24 @@ impl DetectingRegionFilter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DetectingRegionFilter;
+
+    #[test]
+    fn coordinate_prefix_filter_skips_non_matching_detectors() {
+        let matches = DetectingRegionFilter::DetectorCoordinatePrefix(vec![1.0, 2.0])
+            .matching_targets(3, 0, || {
+                Ok(std::collections::BTreeMap::from([
+                    (0, vec![1.0, 2.0]),
+                    (1, vec![1.0, 3.0]),
+                ]))
+            })
+            .unwrap();
+        assert_eq!(
+            matches,
+            vec![crate::target_relative_detector_id(0).unwrap()]
+        );
+    }
+}

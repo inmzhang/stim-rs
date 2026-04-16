@@ -83,3 +83,18 @@ impl From<&DetectorErrorModel> for DemAppendOperation {
         Self::DetectorErrorModel(value.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DemAppendOperation;
+
+    #[test]
+    fn borrowed_repeat_blocks_convert_into_append_operations() {
+        let body: crate::DetectorErrorModel = "error(0.125) D0".parse().unwrap();
+        let block = crate::DemRepeatBlock::new(2, &body).unwrap();
+        assert!(matches!(
+            DemAppendOperation::from(&block),
+            DemAppendOperation::RepeatBlock(_)
+        ));
+    }
+}

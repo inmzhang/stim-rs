@@ -41,3 +41,21 @@ pub fn parse_detector_coordinate_map(serialized: &str) -> Result<BTreeMap<u64, V
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_measurement_solution, parse_detector_coordinate_map};
+
+    #[test]
+    fn parse_helpers_accept_empty_markers_and_blank_lines() {
+        assert_eq!(decode_measurement_solution("!".to_string()).unwrap(), None);
+        assert_eq!(
+            decode_measurement_solution(String::new()).unwrap(),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            parse_detector_coordinate_map("\n1\t2\t3\n").unwrap(),
+            std::collections::BTreeMap::from([(1, vec![2.0, 3.0])])
+        );
+    }
+}

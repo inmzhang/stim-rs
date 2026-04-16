@@ -273,4 +273,24 @@ mod tests {
 )"
         );
     }
+
+    #[test]
+    fn ordering_without_record_indices_falls_back_to_observable_contents() {
+        let left = FlippedMeasurement::new(
+            None,
+            [GateTargetWithCoords::new(
+                target_x(0, false).unwrap(),
+                vec![0.0],
+            )],
+        );
+        let right = FlippedMeasurement::new(
+            None,
+            [GateTargetWithCoords::new(
+                target_x(1, false).unwrap(),
+                vec![0.0],
+            )],
+        );
+
+        assert!(left < right);
+    }
 }

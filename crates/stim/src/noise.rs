@@ -837,7 +837,12 @@ fn append_grouped_noise_ops(
 
 #[cfg(test)]
 mod tests {
-    use super::{NoiseModel, NoiseModelConfig, NoiseRule, Si1000, UniformDepolarizing};
+    use super::{
+        NoiseModel, NoiseModelConfig, NoiseOperation, NoiseRule, Si1000, UniformDepolarizing,
+        annotation_line_name, append_grouped_noise_ops, append_instruction_verbatim,
+        occurs_in_classical_control_system, record_noise_operations, split_instruction_for_noise,
+        validate_gate_args, validate_probability,
+    };
     use crate::Circuit;
 
     #[test]
@@ -917,5 +922,124 @@ TICK"
     fn rejects_non_noise_channels_inside_noise_rules() {
         let error = NoiseRule::new().with_after("H", &[]).unwrap_err();
         assert!(error.to_string().contains("pure noise channel"));
+    }
+
+    #[test]
+    fn internal_config_covers_combined_reset_and_classical_control_paths() {
+        let model = NoiseModelConfig::new()
+            .with_gate_rule(
+                "R",
+                NoiseRule::new().with_after("X_ERROR", &[0.25]).unwrap(),
+            )
+            .unwrap()
+            .with_measure_rule("Z", NoiseRule::new().with_flip_result(0.125).unwrap());
+
+        let mr_circuit: Circuit = "MR 0".parse().unwrap();
+        let noisy = model.noisy_circuit(&mr_circuit).unwrap();
+        assert!(noisy.to_string().contains("MR(0.125) 0"));
+        assert!(noisy.to_string().contains("X_ERROR(0.25) 0"));
+
+        let control_model = NoiseModelConfig::new().with_any_clifford_2q_rule(
+            NoiseRule::new().with_after("DEPOLARIZE2", &[0.01]).unwrap(),
+        );
+        let classically_controlled: Circuit = "M 0\nCX rec[-1] 1".parse().unwrap();
+        let noisy = control_model
+            .noisy_circuit(&classically_controlled)
+            .unwrap();
+        assert_eq!(noisy.to_string(), "M 0\nCX rec[-1] 1");
+        assert!(
+            occurs_in_classical_control_system(
+                &crate::CircuitInstruction::from_stim_program_text("CX rec[-1] 1").unwrap()
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn internal_noise_validation_and_helper_paths_are_exercised() {
+        let reuse_model = NoiseModelConfig::new().with_any_clifford_1q_rule(NoiseRule::new());
+        let reused_qubit: Circuit = "H 0\nM 0".parse().unwrap();
+        let error = reuse_model.noisy_circuit(&reused_qubit).unwrap_err();
+        assert!(error.to_string().contains("qubit reused in the same TICK"));
+
+        let measurement_flip_model = NoiseModelConfig::new()
+            .with_any_measurement_rule(NoiseRule::new().with_flip_result(0.25).unwrap());
+        let parameterized_measurement: Circuit = "MPP(0.125) X0*X1".parse().unwrap();
+        let error = measurement_flip_model
+            .noisy_circuit(&parameterized_measurement)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot inject result flips into already-parameterized instruction")
+        );
+
+        let mpp = crate::CircuitInstruction::from_stim_program_text("MPP X0*X1 Z2*Z3").unwrap();
+        let split = split_instruction_for_noise(&mpp).unwrap();
+        assert_eq!(split.len(), 2);
+        assert_eq!(
+            split[0].target_groups(),
+            vec![vec![
+                crate::GateTarget::x(0, false).unwrap(),
+                crate::GateTarget::x(1, false).unwrap(),
+            ]]
+        );
+        assert_eq!(
+            split[1].target_groups(),
+            vec![vec![
+                crate::GateTarget::z(2, false).unwrap(),
+                crate::GateTarget::z(3, false).unwrap(),
+            ]]
+        );
+
+        assert_eq!(
+            split_instruction_for_noise(
+                &crate::CircuitInstruction::from_stim_program_text("MPP X0*X1").unwrap()
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+
+        assert!(annotation_line_name("DETECTOR(1, 2) rec[-1]").is_some());
+        assert!(annotation_line_name("H 0").is_none());
+
+        let mut with_tag = Circuit::new();
+        let tagged = crate::CircuitInstruction::new("H", [0u32], [], "tag").unwrap();
+        append_instruction_verbatim(&mut with_tag, &tagged).unwrap();
+        assert_eq!(with_tag.to_string(), "H[tag] 0");
+
+        let mut without_tag = Circuit::new();
+        let plain = crate::CircuitInstruction::new("H", [1u32], [], "").unwrap();
+        append_instruction_verbatim(&mut without_tag, &plain).unwrap();
+        assert_eq!(without_tag.to_string(), "H 1");
+
+        let mut grouped = std::collections::BTreeMap::new();
+        record_noise_operations(
+            &mut grouped,
+            &[],
+            &[NoiseOperation::new("X_ERROR", &[0.25]).unwrap()],
+        );
+        assert!(grouped.is_empty());
+        grouped.insert(("X_ERROR".to_string(), vec![0.25f64.to_bits()]), Vec::new());
+        let mut output = Circuit::new();
+        append_grouped_noise_ops(&mut output, &grouped).unwrap();
+        assert!(output.is_empty());
+
+        let invalid_probability = validate_probability(f64::NAN, "noise").unwrap_err();
+        assert!(
+            invalid_probability
+                .to_string()
+                .contains("must be a finite probability")
+        );
+        let invalid_count = validate_gate_args("X_ERROR", &[], &[1]).unwrap_err();
+        assert!(
+            invalid_count
+                .to_string()
+                .contains("wrong number of arguments for 'X_ERROR'")
+        );
+        let invalid_sum =
+            validate_gate_args("PAULI_CHANNEL_1", &[0.5, 0.5, 0.5], &[3]).unwrap_err();
+        assert!(invalid_sum.to_string().contains("must sum to at most 1"));
     }
 }

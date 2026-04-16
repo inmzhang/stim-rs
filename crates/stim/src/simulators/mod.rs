@@ -2746,7 +2746,10 @@ mod tests {
     use ndarray::Array2;
 
     use super::{BitTable, FlipSimulator, FlipSimulatorArrays, TableauSimulator};
-    use crate::{Circuit, ConvertedMeasurements, PauliString, Tableau};
+    use crate::{
+        Circuit, CircuitInstruction, CircuitRepeatBlock, ConvertedMeasurements, DetectorErrorModel,
+        MeasurementSampler, MeasurementsToDetectionEventsConverter, PauliString, Tableau,
+    };
 
     fn bool_matrix(rows: Vec<Vec<bool>>) -> Array2<bool> {
         let nrows = rows.len();
@@ -2808,6 +2811,35 @@ mod tests {
         assert!(format!("{sampler:?}").contains("MeasurementSampler"));
         assert!(format!("{detector_sampler:?}").contains("DetectorSampler"));
         assert!(format!("{converter:?}").contains("MeasurementsToDetectionEventsConverter"));
+    }
+
+    #[test]
+    fn measurement_and_detector_sampler_direct_constructors_cover_remaining_methods() {
+        let circuit =
+            Circuit::from_str("X 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]").unwrap();
+
+        let mut measurement_sampler = MeasurementSampler::new(&circuit, false, 0);
+        assert_eq!(measurement_sampler.num_measurements(), 1);
+        assert_eq!(measurement_sampler.sample_bit_packed(2), vec![1, 1]);
+        assert_eq!(
+            measurement_sampler.sample(2),
+            bool_matrix(vec![vec![true]; 2])
+        );
+        assert!(format!("{measurement_sampler:?}").contains("MeasurementSampler"));
+
+        let mut detector_sampler = super::DetectorSampler::new(&circuit, 0);
+        assert_eq!(detector_sampler.num_detectors(), 1);
+        assert_eq!(detector_sampler.num_observables(), 1);
+        assert_eq!(detector_sampler.sample_bit_packed(2), vec![0, 0]);
+        assert_eq!(
+            detector_sampler.sample_observables_bit_packed(2),
+            vec![0, 0]
+        );
+        assert_eq!(
+            detector_sampler.sample(2),
+            bool_matrix(vec![vec![false]; 2])
+        );
+        assert!(format!("{detector_sampler:?}").contains("DetectorSampler"));
     }
 
     #[test]
@@ -2877,6 +2909,69 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["+Z", "+Z", "+X", "+Y"]
         );
+    }
+
+    #[test]
+    fn tableau_simulator_convenience_paths_cover_remaining_methods() {
+        let default_sim = TableauSimulator::default();
+        assert_eq!(default_sim.num_qubits(), 0);
+        assert!(format!("{default_sim:?}").contains("measurement_record_len"));
+
+        let mut pauli_sim = TableauSimulator::with_seed(5);
+        pauli_sim
+            .r#do(&PauliString::from_text("X").unwrap())
+            .unwrap();
+        assert_eq!(pauli_sim.measure_many(&[0]), vec![true]);
+
+        let mut instruction_sim = TableauSimulator::new();
+        let instruction = CircuitInstruction::from_stim_program_text("H 0").unwrap();
+        instruction_sim.r#do(&instruction).unwrap();
+        assert_eq!(
+            instruction_sim.peek_bloch(0),
+            PauliString::from_text("+X").unwrap()
+        );
+
+        let mut repeat_sim = TableauSimulator::new();
+        let repeat_body: Circuit = "X 0".parse().unwrap();
+        let repeat_block = CircuitRepeatBlock::new(1, &repeat_body, "tag").unwrap();
+        repeat_sim.r#do(&repeat_block).unwrap();
+        assert_eq!(repeat_sim.measure_many(&[0]), vec![true]);
+
+        let mut sim = TableauSimulator::with_seed(7);
+        sim.h_xy(&[0]).unwrap();
+        sim.h_xz(&[1]).unwrap();
+        sim.c_xyz(&[2]).unwrap();
+        sim.c_zyx(&[3]).unwrap();
+        sim.y(&[4]).unwrap();
+        sim.s(&[5]).unwrap();
+        sim.s_dag(&[5]).unwrap();
+        sim.sqrt_x(&[6]).unwrap();
+        sim.sqrt_x_dag(&[6]).unwrap();
+        sim.sqrt_y(&[7]).unwrap();
+        sim.sqrt_y_dag(&[7]).unwrap();
+        sim.reset(&[8]).unwrap();
+        sim.reset_z(&[9]).unwrap();
+        sim.cx(&[0, 1]).unwrap();
+        sim.cnot(&[2, 3]).unwrap();
+        sim.cy(&[4, 5]).unwrap();
+        sim.swap(&[6, 7]).unwrap();
+        sim.iswap(&[8, 9]).unwrap();
+        sim.iswap_dag(&[8, 9]).unwrap();
+        sim.xcx(&[0, 2]).unwrap();
+        sim.xcy(&[1, 3]).unwrap();
+        sim.xcz(&[4, 6]).unwrap();
+        sim.ycx(&[5, 7]).unwrap();
+        sim.ycy(&[0, 8]).unwrap();
+        sim.zcx(&[1, 9]).unwrap();
+        sim.zcy(&[2, 4]).unwrap();
+        sim.zcz(&[3, 5]).unwrap();
+        sim.x_error(&[0], 0.25).unwrap();
+        sim.y_error(&[1], 0.25).unwrap();
+        sim.z_error(&[2], 0.25).unwrap();
+
+        let copy = sim.copy();
+        assert_eq!(copy.num_qubits(), sim.num_qubits());
+        assert!(format!("{copy:?}").contains("measurement_record_len"));
     }
 
     #[test]
@@ -3603,6 +3698,72 @@ mod tests {
     }
 
     #[test]
+    fn flip_simulator_error_and_operation_variants_cover_remaining_surface() {
+        let mut sim = FlipSimulator::new(2, true, 2, 0);
+
+        let invalid_code = sim.set_pauli_flip(9u8, 0, 0).unwrap_err();
+        assert!(invalid_code.to_string().contains("Need pauli"));
+        let invalid_symbol = sim.set_pauli_flip('Q', 0, 0).unwrap_err();
+        assert!(invalid_symbol.to_string().contains("Need pauli"));
+
+        let append_err = sim
+            .append_measurement_flips(bool_matrix(vec![vec![true]]).view())
+            .unwrap_err();
+        assert!(
+            append_err
+                .to_string()
+                .contains("measurement flip rows must all have width batch_size")
+        );
+        let packed_err = sim
+            .append_measurement_flips_bit_packed(ndarray::array![[1, 2]].view())
+            .unwrap_err();
+        assert!(
+            packed_err
+                .to_string()
+                .contains("bit-packed measurement flip rows must all have width")
+        );
+
+        let instruction = CircuitInstruction::from_stim_program_text("M 0").unwrap();
+        sim.r#do(&instruction).unwrap();
+        let repeat_body: Circuit = "M 1".parse().unwrap();
+        let repeat_block = CircuitRepeatBlock::new(2, &repeat_body, "").unwrap();
+        sim.r#do(&repeat_block).unwrap();
+        assert_eq!(sim.num_measurements(), 3);
+
+        let width_err = sim
+            .broadcast_pauli_errors('X', bool_matrix(vec![vec![true]]).view(), 1.0)
+            .unwrap_err();
+        assert!(
+            width_err
+                .to_string()
+                .contains("mask rows must all have width batch_size")
+        );
+        let invalid_broadcast = sim
+            .broadcast_pauli_errors('Q', bool_matrix(vec![vec![true, false]]).view(), 1.0)
+            .unwrap_err();
+        assert!(invalid_broadcast.to_string().contains("Need pauli"));
+
+        sim.broadcast_pauli_errors(
+            'Z',
+            bool_matrix(vec![vec![true, false], vec![false, true]]).view(),
+            1.0,
+        )
+        .unwrap();
+        match sim.to_ndarray(true) {
+            FlipSimulatorArrays {
+                xs: BitTable::PackedMatrix(xs),
+                zs: BitTable::PackedMatrix(zs),
+                ..
+            } => {
+                assert_eq!(xs.nrows(), 2);
+                assert_eq!(zs.nrows(), 2);
+            }
+            other => panic!("unexpected packed arrays: {other:?}"),
+        }
+        assert!(format!("{sim:?}").contains("batch_size"));
+    }
+
+    #[test]
     fn flip_simulator_records_and_sampling_helpers_work() {
         let mut sim = FlipSimulator::new(9, true, 0, 0);
         sim.r#do(
@@ -3639,5 +3800,170 @@ mod tests {
 
         sim.clear();
         assert_eq!(sim.num_measurements(), 0);
+    }
+
+    #[test]
+    fn dem_sampler_and_converter_cover_replay_and_error_branches() {
+        let dem: DetectorErrorModel = "error(0) D0\nerror(1) D1 D2 L0".parse().unwrap();
+        let mut direct_sampler = dem.compile_sampler();
+        let (packed_detectors, packed_observables, packed_errors) =
+            direct_sampler.sample_bit_packed(2);
+        assert_eq!(
+            unpack_rows(&packed_detectors, 3),
+            vec![vec![false, true, true]; 2]
+        );
+        assert_eq!(unpack_rows(&packed_observables, 1), vec![vec![true]; 2]);
+        assert_eq!(unpack_rows(&packed_errors, 2), vec![vec![false, true]; 2]);
+
+        let mut replay_sampler = dem.compile_sampler_with_seed(999);
+        let replay = replay_sampler.sample_replay(&packed_errors, 2);
+        assert_eq!(replay.0, bool_matrix(vec![vec![false, true, true]; 2]));
+        assert_eq!(replay.1, bool_matrix(vec![vec![true]; 2]));
+        assert_eq!(replay.2, bool_matrix(vec![vec![false, true]; 2]));
+
+        let dets_path = unique_temp_path("dem-dets-direct");
+        let obs_path = unique_temp_path("dem-obs-direct");
+        let err_path = unique_temp_path("dem-err-direct");
+        let replay_dets_path = unique_temp_path("dem-dets-replay");
+        let replay_obs_path = unique_temp_path("dem-obs-replay");
+        let replay_all_dets_path = unique_temp_path("dem-dets-replay-all");
+        let replay_all_obs_path = unique_temp_path("dem-obs-replay-all");
+        let replay_all_err_path = unique_temp_path("dem-err-replay-all");
+
+        let mut writer = dem.compile_sampler();
+        writer
+            .sample_write(2, &dets_path, "01", &obs_path, "01")
+            .unwrap();
+        assert_eq!(fs::read_to_string(&dets_path).unwrap(), "011\n011\n");
+        assert_eq!(fs::read_to_string(&obs_path).unwrap(), "1\n1\n");
+
+        let mut writer = dem.compile_sampler();
+        writer
+            .sample_write_with_errors(2, &dets_path, "01", &obs_path, "01", &err_path, "01")
+            .unwrap();
+        assert_eq!(fs::read_to_string(&err_path).unwrap(), "01\n01\n");
+
+        let mut replay_writer = dem.compile_sampler_with_seed(123);
+        replay_writer
+            .sample_write_replay(
+                2,
+                &replay_dets_path,
+                "01",
+                &replay_obs_path,
+                "01",
+                &err_path,
+                "01",
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&replay_dets_path).unwrap(),
+            fs::read_to_string(&dets_path).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(&replay_obs_path).unwrap(),
+            fs::read_to_string(&obs_path).unwrap()
+        );
+
+        let mut replay_writer = dem.compile_sampler_with_seed(321);
+        replay_writer
+            .sample_write_replay_with_errors(
+                2,
+                &replay_all_dets_path,
+                "01",
+                &replay_all_obs_path,
+                "01",
+                &replay_all_err_path,
+                "01",
+                &err_path,
+                "01",
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&replay_all_dets_path).unwrap(),
+            fs::read_to_string(&dets_path).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(&replay_all_obs_path).unwrap(),
+            fs::read_to_string(&obs_path).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(&replay_all_err_path).unwrap(),
+            fs::read_to_string(&err_path).unwrap()
+        );
+
+        for path in [
+            dets_path,
+            obs_path,
+            err_path,
+            replay_dets_path,
+            replay_obs_path,
+            replay_all_dets_path,
+            replay_all_obs_path,
+            replay_all_err_path,
+        ] {
+            fs::remove_file(path).unwrap();
+        }
+
+        let sweep_circuit = sweep_m2d_circuit();
+        let mut converter = MeasurementsToDetectionEventsConverter::new(&sweep_circuit, false);
+        assert_eq!(
+            converter
+                .convert(
+                    bool_matrix(vec![vec![false], vec![true]]).view(),
+                    Some(bool_matrix(vec![vec![false], vec![true]]).view()),
+                    false,
+                    true,
+                )
+                .unwrap(),
+            ConvertedMeasurements::DetectionEvents(bool_matrix(vec![
+                vec![true, true],
+                vec![true, true]
+            ]))
+        );
+
+        let mismatch = converter
+            .convert_measurements_and_sweep_bits(
+                bool_matrix(vec![vec![false], vec![true]]).view(),
+                bool_matrix(vec![vec![false]]).view(),
+                false,
+            )
+            .unwrap_err();
+        assert!(
+            mismatch
+                .to_string()
+                .contains("expected equal shot counts for measurements and sweep bits")
+        );
+        let mismatch = converter
+            .convert_measurements_and_sweep_bits_separate_observables(
+                bool_matrix(vec![vec![false], vec![true]]).view(),
+                bool_matrix(vec![vec![false]]).view(),
+            )
+            .unwrap_err();
+        assert!(
+            mismatch
+                .to_string()
+                .contains("expected equal shot counts for measurements and sweep bits")
+        );
+
+        let measurements_path = unique_temp_path("m2d-no-sweep-measurements");
+        let detections_path = unique_temp_path("m2d-no-sweep-detections");
+        fs::write(&measurements_path, "0\n1\n").unwrap();
+        let mut converter = MeasurementsToDetectionEventsConverter::new(&m2d_circuit(), false);
+        converter
+            .convert_file(
+                &measurements_path,
+                "01",
+                None::<&std::path::Path>,
+                "01",
+                &detections_path,
+                "01",
+                false,
+                None::<&std::path::Path>,
+                "01",
+            )
+            .unwrap();
+        assert_eq!(fs::read_to_string(&detections_path).unwrap(), "1\n0\n");
+        fs::remove_file(measurements_path).unwrap();
+        fs::remove_file(detections_path).unwrap();
     }
 }
