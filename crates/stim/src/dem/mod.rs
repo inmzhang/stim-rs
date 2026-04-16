@@ -955,6 +955,13 @@ impl DetectorErrorModel {
         split_top_level_dem_items(&self.to_string())
     }
 
+    fn top_level_items(&self) -> Result<Vec<DemItem>> {
+        self.top_level_item_texts()?
+            .into_iter()
+            .map(|text| parse_dem_item(&text))
+            .collect()
+    }
+
     fn append_text_item(&mut self, text: &str) -> Result<()> {
         let combined = if self.is_empty() {
             text.to_string()
@@ -963,6 +970,39 @@ impl DetectorErrorModel {
         };
         *self = Self::from_str(&combined)?;
         Ok(())
+    }
+}
+
+impl IntoIterator for DetectorErrorModel {
+    type Item = DemItem;
+    type IntoIter = std::vec::IntoIter<DemItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid DetectorErrorModel values must iterate as valid top-level items")
+            .into_iter()
+    }
+}
+
+impl IntoIterator for &DetectorErrorModel {
+    type Item = DemItem;
+    type IntoIter = std::vec::IntoIter<DemItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid DetectorErrorModel values must iterate as valid top-level items")
+            .into_iter()
+    }
+}
+
+impl IntoIterator for &mut DetectorErrorModel {
+    type Item = DemItem;
+    type IntoIter = std::vec::IntoIter<DemItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid DetectorErrorModel values must iterate as valid top-level items")
+            .into_iter()
     }
 }
 
@@ -1205,12 +1245,12 @@ fn parse_dem_item(text: &str) -> Result<DemItem> {
             .map(|line| line.strip_prefix("    ").unwrap_or(line))
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(DemItem::repeat_block(DemRepeatBlock::new(
+        Ok(DemItem::RepeatBlock(DemRepeatBlock::new(
             repeat_count,
             &DetectorErrorModel::from_str(&inner)?,
         )?))
     } else {
-        Ok(DemItem::instruction(DemInstruction::from_str(text)?))
+        Ok(DemItem::Instruction(DemInstruction::from_str(text)?))
     }
 }
 
@@ -1384,7 +1424,7 @@ mod tests {
 
         assert_eq!(
             model.get(0).unwrap(),
-            DemItem::instruction(
+            DemItem::Instruction(
                 DemInstruction::new(
                     "error",
                     [0.125],
@@ -1396,7 +1436,7 @@ mod tests {
         );
         assert_eq!(
             model.get(2).unwrap(),
-            DemItem::repeat_block(
+            DemItem::RepeatBlock(
                 DemRepeatBlock::new(
                     100,
                     &"error(0.125) D1 D2\nshift_detectors 1"
@@ -1408,7 +1448,7 @@ mod tests {
         );
         assert_eq!(
             model.get(-1).unwrap(),
-            DemItem::instruction(
+            DemItem::Instruction(
                 DemInstruction::new(
                     "detector",
                     [],
@@ -1442,6 +1482,51 @@ mod tests {
         sliced.clear();
         assert_eq!(sliced, DetectorErrorModel::new());
         assert_eq!(model.len(), 6);
+    }
+
+    #[test]
+    fn detector_error_model_supports_borrowed_and_owned_iteration() {
+        let model: DetectorErrorModel = "\
+    error(0.125) D0
+    repeat 2 {
+        shift_detectors 1
+    }
+    logical_observable L0"
+            .parse()
+            .unwrap();
+
+        let expected = vec![
+            DemItem::Instruction(
+                DemInstruction::new(
+                    "error",
+                    [0.125],
+                    [target_relative_detector_id(0).unwrap()],
+                    "",
+                )
+                .unwrap(),
+            ),
+            DemItem::RepeatBlock(
+                DemRepeatBlock::new(
+                    2,
+                    &"shift_detectors 1".parse::<DetectorErrorModel>().unwrap(),
+                )
+                .unwrap(),
+            ),
+            DemItem::Instruction(
+                DemInstruction::new(
+                    "logical_observable",
+                    [],
+                    [target_logical_observable_id(0).unwrap()],
+                    "",
+                )
+                .unwrap(),
+            ),
+        ];
+        let mut mutable = model.clone();
+
+        assert_eq!((&model).into_iter().collect::<Vec<_>>(), expected);
+        assert_eq!((&mut mutable).into_iter().collect::<Vec<_>>(), expected);
+        assert_eq!(model.clone().into_iter().collect::<Vec<_>>(), expected);
     }
 
     #[test]

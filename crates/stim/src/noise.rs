@@ -79,6 +79,7 @@ impl NoiseRule {
 
 /// Applies a noise model to a circuit and returns a noisy circuit.
 pub trait NoiseModel {
+    /// Produces a noisy circuit derived from `circuit` according to the model.
     fn noisy_circuit(&self, circuit: &Circuit) -> Result<Circuit>;
 }
 
@@ -343,6 +344,7 @@ pub struct UniformDepolarizing {
 }
 
 impl UniformDepolarizing {
+    /// Creates the standard near-uniform depolarizing noise model.
     pub fn new(probability: f64) -> Result<Self> {
         Ok(Self {
             strength: NoiseStrength::uniform_depolarizing(probability)?,
@@ -363,6 +365,7 @@ pub struct Si1000 {
 }
 
 impl Si1000 {
+    /// Creates the superconducting-inspired SI1000 noise model.
     pub fn new(probability: f64) -> Result<Self> {
         Ok(Self {
             strength: NoiseStrength::si1000(probability)?,

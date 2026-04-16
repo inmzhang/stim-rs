@@ -32,7 +32,7 @@ use crate::{CircuitInstruction, CircuitRepeatBlock};
 ///     "H", [0u32, 1u32], std::iter::empty::<f64>(), "",
 /// ).expect("H is a valid gate");
 ///
-/// let item = stim::CircuitItem::instruction(instruction.clone());
+/// let item = stim::CircuitItem::Instruction(instruction.clone());
 /// assert_eq!(item, stim::CircuitItem::Instruction(instruction));
 /// ```
 ///
@@ -71,28 +71,4 @@ pub enum CircuitItem {
     /// }
     /// ```
     RepeatBlock(CircuitRepeatBlock),
-}
-
-impl CircuitItem {
-    /// Wraps a [`CircuitInstruction`] into a [`CircuitItem::Instruction`].
-    ///
-    /// This is a convenience constructor equivalent to
-    /// `CircuitItem::Instruction(instruction)`. It is useful when building
-    /// a `CircuitItem` from a variable without needing to name the variant
-    /// explicitly.
-    #[must_use]
-    pub fn instruction(instruction: CircuitInstruction) -> Self {
-        Self::Instruction(instruction)
-    }
-
-    /// Wraps a [`CircuitRepeatBlock`] into a [`CircuitItem::RepeatBlock`].
-    ///
-    /// This is a convenience constructor equivalent to
-    /// `CircuitItem::RepeatBlock(repeat_block)`. It is useful when building
-    /// a `CircuitItem` from a variable without needing to name the variant
-    /// explicitly.
-    #[must_use]
-    pub fn repeat_block(repeat_block: CircuitRepeatBlock) -> Self {
-        Self::RepeatBlock(repeat_block)
-    }
 }

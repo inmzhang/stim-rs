@@ -195,13 +195,13 @@ pub fn parse_circuit_item(text: &str) -> Result<CircuitItem> {
             .map(|line| line.strip_prefix("    ").unwrap_or(line))
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(CircuitItem::repeat_block(CircuitRepeatBlock::new(
+        Ok(CircuitItem::RepeatBlock(CircuitRepeatBlock::new(
             repeat_count,
             &Circuit::from_str(&inner)?,
             tag,
         )?))
     } else {
-        Ok(CircuitItem::instruction(CircuitInstruction::from_str(
+        Ok(CircuitItem::Instruction(CircuitInstruction::from_str(
             text,
         )?))
     }

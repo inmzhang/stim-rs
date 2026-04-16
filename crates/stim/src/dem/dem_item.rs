@@ -20,12 +20,12 @@ use crate::{DemInstruction, DemRepeatBlock};
 ///
 /// ```
 /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid");
-/// let item = stim::DemItem::instruction(inst.clone());
+/// let item = stim::DemItem::Instruction(inst.clone());
 /// assert_eq!(item, stim::DemItem::Instruction(inst));
 ///
 /// let body: stim::DetectorErrorModel = "error(0.1) D0".parse().expect("valid");
 /// let block = stim::DemRepeatBlock::new(10, &body).expect("valid");
-/// let item = stim::DemItem::repeat_block(block.clone());
+/// let item = stim::DemItem::RepeatBlock(block.clone());
 /// assert_eq!(item, stim::DemItem::RepeatBlock(block));
 /// ```
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -36,20 +36,4 @@ pub enum DemItem {
     /// A repeat block containing a sub-model that is repeated a given number
     /// of times.
     RepeatBlock(DemRepeatBlock),
-}
-
-impl DemItem {
-    /// Creates an [`Instruction`](Self::Instruction) item wrapping the
-    /// given [`DemInstruction`].
-    #[must_use]
-    pub fn instruction(instruction: DemInstruction) -> Self {
-        Self::Instruction(instruction)
-    }
-
-    /// Creates a [`RepeatBlock`](Self::RepeatBlock) item wrapping the
-    /// given [`DemRepeatBlock`].
-    #[must_use]
-    pub fn repeat_block(repeat_block: DemRepeatBlock) -> Self {
-        Self::RepeatBlock(repeat_block)
-    }
 }

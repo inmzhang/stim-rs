@@ -255,6 +255,7 @@ impl GateTarget {
         })
     }
 
+    /// Returns the `*` target combiner used inside grouped targets such as `MPP`.
     #[must_use]
     pub const fn combiner() -> Self {
         Self {
@@ -262,6 +263,7 @@ impl GateTarget {
         }
     }
 
+    /// Returns the underlying packed Stim target encoding.
     #[must_use]
     pub const fn raw_data(self) -> u32 {
         self.data

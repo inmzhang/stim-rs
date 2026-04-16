@@ -1393,6 +1393,13 @@ impl Circuit {
         split_top_level_circuit_items(&self.to_string())
     }
 
+    fn top_level_items(&self) -> Result<Vec<CircuitItem>> {
+        self.top_level_item_texts()?
+            .into_iter()
+            .map(|text| parse_circuit_item(&text))
+            .collect()
+    }
+
     /// Returns the circuit's reference sample in bit-packed form.
     #[must_use]
     pub fn reference_sample_bit_packed(&self) -> Vec<u8> {
@@ -1624,6 +1631,39 @@ impl Circuit {
         MeasurementsToDetectionEventsConverter {
             inner: self.inner.compile_m2d_converter(skip_reference_sample),
         }
+    }
+}
+
+impl IntoIterator for Circuit {
+    type Item = CircuitItem;
+    type IntoIter = std::vec::IntoIter<CircuitItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid Circuit values must iterate as valid top-level items")
+            .into_iter()
+    }
+}
+
+impl IntoIterator for &Circuit {
+    type Item = CircuitItem;
+    type IntoIter = std::vec::IntoIter<CircuitItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid Circuit values must iterate as valid top-level items")
+            .into_iter()
+    }
+}
+
+impl IntoIterator for &mut Circuit {
+    type Item = CircuitItem;
+    type IntoIter = std::vec::IntoIter<CircuitItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top_level_items()
+            .expect("valid Circuit values must iterate as valid top-level items")
+            .into_iter()
     }
 }
 
@@ -3081,20 +3121,20 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit.get(1).unwrap(),
-            CircuitItem::instruction(
+            CircuitItem::Instruction(
                 CircuitInstruction::new("X_ERROR", [2u32], [0.5], "").unwrap()
             )
         );
         assert_eq!(
             circuit.get(2).unwrap(),
-            CircuitItem::repeat_block(
+            CircuitItem::RepeatBlock(
                 CircuitRepeatBlock::new(100, &Circuit::from_str("X 0\nY 1 2").unwrap(), "")
                     .unwrap()
             )
         );
         assert_eq!(
             circuit.get(-1).unwrap(),
-            CircuitItem::instruction(
+            CircuitItem::Instruction(
                 CircuitInstruction::new(
                     "DETECTOR",
                     [GateTarget::from_target_str("rec[-1]").unwrap()],
@@ -3163,11 +3203,11 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit.pop(-1).unwrap(),
-            CircuitItem::instruction(CircuitInstruction::new("Y", [3u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new("Y", [3u32], [], "").unwrap())
         );
         assert_eq!(
             circuit.pop(1).unwrap(),
-            CircuitItem::instruction(CircuitInstruction::new("S", [1u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new("S", [1u32], [], "").unwrap())
         );
         assert_eq!(circuit, Circuit::from_str("H 0\nX 2").unwrap());
     }
@@ -3190,10 +3230,36 @@ mod residual_api_tests {
 
         assert_eq!(
             popped,
-            CircuitItem::instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap())
         );
         assert_eq!(circuit, Circuit::from_str("X 0\nDETECTOR rec[-1]").unwrap());
         assert_eq!(sliced, Circuit::new());
+    }
+
+    #[test]
+    fn circuit_supports_borrowed_and_owned_iteration() {
+        let circuit = Circuit::from_str(
+            "\
+    H 0
+    REPEAT 2 {
+        X 1
+    }
+    M 0",
+        )
+        .unwrap();
+
+        let expected = vec![
+            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap()),
+            CircuitItem::RepeatBlock(
+                CircuitRepeatBlock::new(2, &Circuit::from_str("X 1").unwrap(), "").unwrap(),
+            ),
+            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap()),
+        ];
+        let mut mutable = circuit.clone();
+
+        assert_eq!((&circuit).into_iter().collect::<Vec<_>>(), expected);
+        assert_eq!((&mut mutable).into_iter().collect::<Vec<_>>(), expected);
+        assert_eq!(circuit.clone().into_iter().collect::<Vec<_>>(), expected);
     }
 
     #[test]
@@ -3208,7 +3274,7 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit.get(0).unwrap(),
-            CircuitItem::repeat_block(
+            CircuitItem::RepeatBlock(
                 CircuitRepeatBlock::new(2, &Circuit::from_str("X 0").unwrap(), "look").unwrap()
             )
         );
