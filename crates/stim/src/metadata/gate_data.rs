@@ -365,9 +365,8 @@ impl GateData {
             .inner
             .flows()
             .into_iter()
-            .map(|text| Flow::from_text(&text))
-            .collect::<Result<Vec<_>>>()
-            .expect("gate flow texts from stim-cxx should be valid canonical flow text");
+            .map(Flow::from_canonical_text)
+            .collect::<Vec<_>>();
         if flows.is_empty() { None } else { Some(flows) }
     }
 

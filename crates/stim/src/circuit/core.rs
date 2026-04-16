@@ -378,11 +378,12 @@ impl Circuit {
     /// assert_eq!(generators.len(), 2);
     /// ```
     pub fn flow_generators(&self) -> Result<Vec<Flow>> {
-        self.inner
+        Ok(self
+            .inner
             .flow_generators()
             .into_iter()
-            .map(|text| Flow::from_text(&text))
-            .collect()
+            .map(Flow::from_canonical_text)
+            .collect())
     }
 
     /// Finds measurement sets that explain the starts and ends of the given
@@ -470,8 +471,8 @@ impl Circuit {
         let circuit = Self::from_str(&circuit_text)?;
         let flows = flow_texts
             .into_iter()
-            .map(|text| Flow::from_text(&text))
-            .collect::<Result<Vec<_>>>()?;
+            .map(Flow::from_canonical_text)
+            .collect::<Vec<_>>();
         Ok((circuit, flows))
     }
 

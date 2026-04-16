@@ -59,6 +59,10 @@ pub struct Flow {
 }
 
 impl Flow {
+    pub(crate) fn from_canonical_text(text: String) -> Self {
+        Self { text }
+    }
+
     /// Creates a flow by parsing and canonicalizing Stim flow shorthand text.
     ///
     /// This is a convenience alias for [`Flow::from_text`]. The input string
@@ -114,7 +118,7 @@ impl Flow {
     /// ```
     pub fn from_text(text: &str) -> crate::Result<Self> {
         stim_cxx::canonicalize_flow_text(text)
-            .map(|text| Self { text })
+            .map(Self::from_canonical_text)
             .map_err(crate::StimError::from)
     }
 
