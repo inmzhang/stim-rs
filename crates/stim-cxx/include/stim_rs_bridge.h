@@ -36,6 +36,8 @@ struct CircuitErrorLocationData;
 struct ExplainedErrorData;
 struct DemSampleBatch;
 struct DetectorSampleBatch;
+struct CircuitTopLevelItemData;
+struct DemTopLevelItemData;
 struct TableauMeasureKickbackData;
 struct BitTableData;
 
@@ -332,6 +334,10 @@ std::unique_ptr<CircuitHandle> circuit_mul(
     const CircuitHandle &handle,
     std::uint64_t repetitions);
 void circuit_mul_assign(CircuitHandle &handle, std::uint64_t repetitions);
+CircuitTopLevelItemData circuit_get_top_level_item(const CircuitHandle &handle, std::size_t index);
+std::unique_ptr<CircuitHandle> circuit_get_top_level_repeat_block_body(
+    const CircuitHandle &handle,
+    std::size_t index);
 std::unique_ptr<CircuitHandle> circuit_generated(
     rust::Str code_task,
     std::size_t distance,
@@ -526,6 +532,12 @@ std::unique_ptr<DetectorErrorModelHandle> detector_error_model_mul(
 void detector_error_model_mul_assign(
     DetectorErrorModelHandle &handle,
     std::uint64_t repetitions);
+DemTopLevelItemData detector_error_model_get_top_level_item(
+    const DetectorErrorModelHandle &handle,
+    std::size_t index);
+std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_top_level_repeat_block_body(
+    const DetectorErrorModelHandle &handle,
+    std::size_t index);
 rust::String detector_error_model_to_dem_text(const DetectorErrorModelHandle &handle);
 std::size_t detector_error_model_len(const DetectorErrorModelHandle &handle);
 std::uint64_t detector_error_model_num_detectors(const DetectorErrorModelHandle &handle);

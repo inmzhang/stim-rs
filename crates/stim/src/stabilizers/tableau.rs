@@ -1325,7 +1325,7 @@ impl Tableau {
     pub fn to_circuit_with_method(&self, method: &str) -> crate::Result<crate::Circuit> {
         self.inner
             .to_circuit(method)
-            .map(|inner| crate::Circuit { inner })
+            .map(crate::Circuit::from_inner)
             .map_err(crate::StimError::from)
     }
 

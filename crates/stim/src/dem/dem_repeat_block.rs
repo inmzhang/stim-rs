@@ -145,7 +145,8 @@ impl Hash for DemRepeatBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{BTreeSet, HashSet};
+    use std::collections::BTreeSet;
+    use std::hash::{DefaultHasher, Hash, Hasher};
     use std::str::FromStr;
 
     #[test]
@@ -187,12 +188,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(ordered, vec![different.clone(), first.clone()]);
 
-        let hashed = [first.clone(), same, different.clone()]
-            .into_iter()
-            .collect::<HashSet<_>>();
-        assert_eq!(hashed.len(), 2);
-        assert!(hashed.contains(&first));
-        assert!(hashed.contains(&different));
+        let hash_of = |value: &DemRepeatBlock| {
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_eq!(hash_of(&first), hash_of(&same));
+        assert_ne!(hash_of(&first), hash_of(&different));
     }
 
     #[test]

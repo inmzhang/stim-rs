@@ -4,10 +4,11 @@ mod dem_item;
 mod dem_repeat_block;
 mod dem_target;
 
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::ops::{Add, AddAssign, Mul, MulAssign};
+use std::ops::{Add, AddAssign, Index, Mul, MulAssign};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -79,9 +80,21 @@ pub use dem_target::{
 /// ```
 pub struct DetectorErrorModel {
     pub(crate) inner: stim_cxx::DetectorErrorModel,
+    item_cache: OnceCell<Vec<DemItem>>,
 }
 
 impl DetectorErrorModel {
+    pub(crate) fn from_inner(inner: stim_cxx::DetectorErrorModel) -> Self {
+        Self {
+            inner,
+            item_cache: OnceCell::new(),
+        }
+    }
+
+    fn invalidate_item_cache(&mut self) {
+        let _ = self.item_cache.take();
+    }
+
     /// Creates an empty detector error model with no instructions.
     ///
     /// This is the starting point for programmatically building a detector error
@@ -100,9 +113,7 @@ impl DetectorErrorModel {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            inner: stim_cxx::DetectorErrorModel::new(),
-        }
+        Self::from_inner(stim_cxx::DetectorErrorModel::new())
     }
 
     /// Returns the number of top-level instructions and blocks in the detector
@@ -233,6 +244,7 @@ impl DetectorErrorModel {
     /// ```
     pub fn clear(&mut self) {
         self.inner.clear();
+        self.invalidate_item_cache();
     }
 
     /// Reads a detector error model from a file on disk.
@@ -355,9 +367,7 @@ impl DetectorErrorModel {
     /// ```
     #[must_use]
     pub fn without_tags(&self) -> Self {
-        Self {
-            inner: self.inner.without_tags(),
-        }
+        Self::from_inner(self.inner.without_tags())
     }
 
     /// Returns an equivalent detector error model with repeat blocks fully
@@ -387,9 +397,7 @@ impl DetectorErrorModel {
     /// ```
     #[must_use]
     pub fn flattened(&self) -> Self {
-        Self {
-            inner: self.inner.flattened(),
-        }
+        Self::from_inner(self.inner.flattened())
     }
 
     /// Creates an equivalent detector error model with error probabilities
@@ -421,9 +429,7 @@ impl DetectorErrorModel {
     /// ```
     #[must_use]
     pub fn rounded(&self, digits: u8) -> Self {
-        Self {
-            inner: self.inner.rounded(digits),
-        }
+        Self::from_inner(self.inner.rounded(digits))
     }
 
     /// Compiles a [`DemSampler`] for the detector error model, seeded from
@@ -541,7 +547,7 @@ impl DetectorErrorModel {
     pub fn shortest_graphlike_error(&self, ignore_ungraphlike_errors: bool) -> Result<Self> {
         self.inner
             .shortest_graphlike_error(ignore_ungraphlike_errors)
-            .map(|inner| Self { inner })
+            .map(Self::from_inner)
             .map_err(StimError::from)
     }
 
@@ -898,10 +904,9 @@ impl DetectorErrorModel {
     /// assert!(matches!(model.get(-1).unwrap(), stim::DemItem::Instruction(_)));
     /// ```
     pub fn get(&self, index: isize) -> Result<DemItem> {
-        let items = self.top_level_item_texts()?;
-        let normalized = normalize_index(index, items.len())
+        let normalized = normalize_index(index, self.len())
             .ok_or_else(|| StimError::new(format!("index {index} out of range")))?;
-        parse_dem_item(&items[normalized])
+        Ok(self.cached_top_level_items()[normalized].clone())
     }
 
     /// Returns a new detector error model containing a slice of top-level
@@ -956,10 +961,48 @@ impl DetectorErrorModel {
     }
 
     fn top_level_items(&self) -> Result<Vec<DemItem>> {
-        self.top_level_item_texts()?
-            .into_iter()
-            .map(|text| parse_dem_item(&text))
-            .collect()
+        Ok(self.cached_top_level_items().clone())
+    }
+
+    fn top_level_item(&self, index: usize) -> DemItem {
+        Self::build_top_level_item(&self.inner, index)
+    }
+
+    fn build_top_level_item(inner: &stim_cxx::DetectorErrorModel, index: usize) -> DemItem {
+        let item = inner.top_level_item(index);
+        if item.is_repeat_block {
+            DemItem::RepeatBlock(
+                DemRepeatBlock::new(
+                    item.repeat_count,
+                    &Self::from_inner(inner.top_level_repeat_block_body(index)),
+                )
+                .expect("stim-cxx repeat block data should be valid"),
+            )
+        } else {
+            let targets: Vec<_> = if item.instruction_type == "shift_detectors" {
+                item.targets
+                    .into_iter()
+                    .map(DemInstructionTarget::from)
+                    .collect()
+            } else {
+                item.targets
+                    .into_iter()
+                    .map(|raw| DemInstructionTarget::from(DemTarget::from_raw_data(raw)))
+                    .collect()
+            };
+            DemItem::Instruction(
+                DemInstruction::new(item.instruction_type, item.args, targets, item.tag)
+                    .expect("stim-cxx instruction data should be valid"),
+            )
+        }
+    }
+
+    fn cached_top_level_items(&self) -> &Vec<DemItem> {
+        self.item_cache.get_or_init(|| {
+            (0..self.len())
+                .map(|index| self.top_level_item(index))
+                .collect()
+        })
     }
 
     fn append_text_item(&mut self, text: &str) -> Result<()> {
@@ -978,8 +1021,15 @@ impl IntoIterator for DetectorErrorModel {
     type IntoIter = std::vec::IntoIter<DemItem>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.top_level_items()
-            .expect("valid DetectorErrorModel values must iterate as valid top-level items")
+        let len = self.len();
+        let Self { inner, item_cache } = self;
+        item_cache
+            .into_inner()
+            .unwrap_or_else(|| {
+                (0..len)
+                    .map(|index| Self::build_top_level_item(&inner, index))
+                    .collect()
+            })
             .into_iter()
     }
 }
@@ -1008,9 +1058,7 @@ impl IntoIterator for &mut DetectorErrorModel {
 
 impl Clone for DetectorErrorModel {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+        Self::from_inner(self.inner.clone())
     }
 }
 
@@ -1052,9 +1100,7 @@ impl Add for DetectorErrorModel {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            inner: self.inner.add(&rhs.inner),
-        }
+        Self::from_inner(self.inner.add(&rhs.inner))
     }
 }
 
@@ -1075,6 +1121,7 @@ impl Add for DetectorErrorModel {
 impl AddAssign for DetectorErrorModel {
     fn add_assign(&mut self, rhs: Self) {
         self.inner.add_assign(&rhs.inner);
+        self.invalidate_item_cache();
     }
 }
 
@@ -1099,9 +1146,7 @@ impl Mul<u64> for DetectorErrorModel {
     type Output = Self;
 
     fn mul(self, rhs: u64) -> Self::Output {
-        Self {
-            inner: self.inner.repeat(rhs),
-        }
+        Self::from_inner(self.inner.repeat(rhs))
     }
 }
 
@@ -1148,6 +1193,15 @@ impl Mul<DetectorErrorModel> for u64 {
 impl MulAssign<u64> for DetectorErrorModel {
     fn mul_assign(&mut self, rhs: u64) {
         self.inner.repeat_assign(rhs);
+        self.invalidate_item_cache();
+    }
+}
+
+impl Index<usize> for DetectorErrorModel {
+    type Output = DemItem;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.cached_top_level_items()[index]
     }
 }
 
@@ -1188,7 +1242,7 @@ impl FromStr for DetectorErrorModel {
 
     fn from_str(s: &str) -> Result<Self> {
         stim_cxx::DetectorErrorModel::from_dem_text(s)
-            .map(|inner| Self { inner })
+            .map(Self::from_inner)
             .map_err(StimError::from)
     }
 }
@@ -1226,32 +1280,6 @@ fn split_top_level_dem_items(text: &str) -> Result<Vec<String>> {
     }
 
     Ok(items)
-}
-
-fn parse_dem_item(text: &str) -> Result<DemItem> {
-    if let Some((header, body)) = text.split_once("{\n") {
-        let repeat_count = header
-            .trim()
-            .strip_prefix("repeat ")
-            .ok_or_else(|| StimError::new(format!("invalid DEM repeat block header: {header}")))?;
-        let repeat_count = repeat_count
-            .parse::<u64>()
-            .map_err(|_| StimError::new(format!("invalid repeat count: {repeat_count}")))?;
-        let inner = body
-            .strip_suffix("\n}")
-            .ok_or_else(|| StimError::new("invalid DEM repeat block body"))?;
-        let inner = inner
-            .lines()
-            .map(|line| line.strip_prefix("    ").unwrap_or(line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(DemItem::RepeatBlock(DemRepeatBlock::new(
-            repeat_count,
-            &DetectorErrorModel::from_str(&inner)?,
-        )?))
-    } else {
-        Ok(DemItem::Instruction(DemInstruction::from_str(text)?))
-    }
 }
 
 #[cfg(test)]
@@ -1527,6 +1555,76 @@ mod tests {
         assert_eq!((&model).into_iter().collect::<Vec<_>>(), expected);
         assert_eq!((&mut mutable).into_iter().collect::<Vec<_>>(), expected);
         assert_eq!(model.clone().into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn detector_error_model_supports_indexing_top_level_items() {
+        let model: DetectorErrorModel = "\
+    error(0.125) D0
+    repeat 2 {
+        shift_detectors 1
+    }
+    logical_observable L0"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            model[0],
+            DemItem::Instruction(
+                DemInstruction::new(
+                    "error",
+                    [0.125],
+                    [target_relative_detector_id(0).unwrap()],
+                    "",
+                )
+                .unwrap(),
+            )
+        );
+        assert_eq!(
+            model[1],
+            DemItem::RepeatBlock(
+                DemRepeatBlock::new(
+                    2,
+                    &"shift_detectors 1".parse::<DetectorErrorModel>().unwrap()
+                )
+                .unwrap(),
+            )
+        );
+    }
+
+    #[test]
+    fn detector_error_model_index_cache_invalidates_after_mutation() {
+        let mut model: DetectorErrorModel = "error(0.125) D0".parse().unwrap();
+        assert_eq!(
+            model[0],
+            DemItem::Instruction(
+                DemInstruction::new(
+                    "error",
+                    [0.125],
+                    [target_relative_detector_id(0).unwrap()],
+                    "",
+                )
+                .unwrap(),
+            )
+        );
+
+        model += "logical_observable L0"
+            .parse::<DetectorErrorModel>()
+            .unwrap();
+
+        assert_eq!(model.len(), 2);
+        assert_eq!(
+            model[1],
+            DemItem::Instruction(
+                DemInstruction::new(
+                    "logical_observable",
+                    [],
+                    [target_logical_observable_id(0).unwrap()],
+                    "",
+                )
+                .unwrap(),
+            )
+        );
     }
 
     #[test]

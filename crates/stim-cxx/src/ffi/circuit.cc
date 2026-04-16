@@ -71,6 +71,12 @@ size_t normalize_index_or_throw(std::int64_t index, size_t len) {
   return static_cast<size_t>(index);
 }
 
+rust::String dem_instruction_type_name(stim::DemInstructionType type) {
+  std::stringstream out;
+  out << type;
+  return rust::String(out.str());
+}
+
 rust::Vec<std::uint8_t> packed_bits_to_rust_vec(
     const stim::simd_bits<stim::MAX_BITWORD_WIDTH> &bits,
     size_t num_bits) {
@@ -1331,6 +1337,52 @@ std::size_t circuit_len(const CircuitHandle &handle) {
   return handle.get().operations.size();
 }
 
+CircuitTopLevelItemData circuit_get_top_level_item(const CircuitHandle &handle, std::size_t index) {
+  if (index >= handle.get().operations.size()) {
+    throw std::invalid_argument("index out of range");
+  }
+  const auto &op = handle.get().operations[index];
+
+  CircuitTopLevelItemData result{
+      .is_repeat_block = op.gate_type == stim::GateType::REPEAT,
+      .name = rust::String(),
+      .tag = rust::String(op.tag.data(), op.tag.size()),
+      .gate_args = {},
+      .targets = {},
+      .repeat_count = 0,
+  };
+
+  if (result.is_repeat_block) {
+    result.repeat_count = op.repeat_block_rep_count();
+    return result;
+  }
+
+  auto gate_name = stim::GATE_DATA[op.gate_type].name;
+  result.name = rust::String(gate_name.data(), gate_name.size());
+  result.gate_args.reserve(op.args.size());
+  for (const auto &arg : op.args) {
+    result.gate_args.push_back(arg);
+  }
+  result.targets.reserve(op.targets.size());
+  for (const auto &target : op.targets) {
+    result.targets.push_back(target.data);
+  }
+  return result;
+}
+
+std::unique_ptr<CircuitHandle> circuit_get_top_level_repeat_block_body(
+    const CircuitHandle &handle,
+    std::size_t index) {
+  if (index >= handle.get().operations.size()) {
+    throw std::invalid_argument("index out of range");
+  }
+  const auto &op = handle.get().operations[index];
+  if (op.gate_type != stim::GateType::REPEAT) {
+    throw std::invalid_argument("top-level item is not a repeat block");
+  }
+  return std::make_unique<CircuitHandle>(op.repeat_block_body(handle.get()));
+}
+
 std::uint64_t circuit_num_measurements(const CircuitHandle &handle) {
   return handle.get().count_measurements();
 }
@@ -2249,6 +2301,53 @@ rust::String detector_error_model_to_dem_text(const DetectorErrorModelHandle &ha
 
 std::size_t detector_error_model_len(const DetectorErrorModelHandle &handle) {
   return handle.get().instructions.size();
+}
+
+DemTopLevelItemData detector_error_model_get_top_level_item(
+    const DetectorErrorModelHandle &handle,
+    std::size_t index) {
+  if (index >= handle.get().instructions.size()) {
+    throw std::invalid_argument("index out of range");
+  }
+  const auto &op = handle.get().instructions[index];
+
+  DemTopLevelItemData result{
+      .is_repeat_block = op.type == stim::DemInstructionType::DEM_REPEAT_BLOCK,
+      .instruction_type = rust::String(),
+      .tag = rust::String(op.tag.data(), op.tag.size()),
+      .args = {},
+      .targets = {},
+      .repeat_count = 0,
+  };
+
+  if (result.is_repeat_block) {
+    result.repeat_count = op.repeat_block_rep_count();
+    return result;
+  }
+
+  result.instruction_type = dem_instruction_type_name(op.type);
+  result.args.reserve(op.arg_data.size());
+  for (const auto &arg : op.arg_data) {
+    result.args.push_back(arg);
+  }
+  result.targets.reserve(op.target_data.size());
+  for (const auto &target : op.target_data) {
+    result.targets.push_back(target.data);
+  }
+  return result;
+}
+
+std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_top_level_repeat_block_body(
+    const DetectorErrorModelHandle &handle,
+    std::size_t index) {
+  if (index >= handle.get().instructions.size()) {
+    throw std::invalid_argument("index out of range");
+  }
+  const auto &op = handle.get().instructions[index];
+  if (op.type != stim::DemInstructionType::DEM_REPEAT_BLOCK) {
+    throw std::invalid_argument("top-level item is not a repeat block");
+  }
+  return std::make_unique<DetectorErrorModelHandle>(op.repeat_block_body(handle.get()));
 }
 
 std::uint64_t detector_error_model_num_detectors(const DetectorErrorModelHandle &handle) {

@@ -6,8 +6,9 @@ use cxx::UniquePtr;
 
 pub use ffi::{
     BitTableData, CircuitErrorLocationData, CircuitErrorLocationStackFrameData,
-    CircuitTargetsInsideInstructionData, DemSampleBatch, DemTargetWithCoordsData,
-    ExplainedErrorData, FlippedMeasurementData, GateTargetWithCoordsData,
+    CircuitTargetsInsideInstructionData, CircuitTopLevelItemData, DemSampleBatch,
+    DemTargetWithCoordsData, DemTopLevelItemData, ExplainedErrorData, FlippedMeasurementData,
+    GateTargetWithCoordsData,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -689,6 +690,18 @@ impl Circuit {
     }
 
     #[must_use]
+    pub fn top_level_item(&self, index: usize) -> ffi::CircuitTopLevelItemData {
+        ffi::circuit_get_top_level_item(self.inner(), index)
+    }
+
+    #[must_use]
+    pub fn top_level_repeat_block_body(&self, index: usize) -> Self {
+        Self {
+            inner: ffi::circuit_get_top_level_repeat_block_body(self.inner(), index),
+        }
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -1041,6 +1054,18 @@ impl DetectorErrorModel {
     #[must_use]
     pub fn len(&self) -> usize {
         ffi::detector_error_model_len(self.inner())
+    }
+
+    #[must_use]
+    pub fn top_level_item(&self, index: usize) -> ffi::DemTopLevelItemData {
+        ffi::detector_error_model_get_top_level_item(self.inner(), index)
+    }
+
+    #[must_use]
+    pub fn top_level_repeat_block_body(&self, index: usize) -> Self {
+        Self {
+            inner: ffi::detector_error_model_get_top_level_repeat_block_body(self.inner(), index),
+        }
     }
 
     #[must_use]
@@ -2166,6 +2191,24 @@ mod ffi {
         observables: Vec<u8>,
     }
 
+    struct CircuitTopLevelItemData {
+        is_repeat_block: bool,
+        name: String,
+        tag: String,
+        gate_args: Vec<f64>,
+        targets: Vec<u32>,
+        repeat_count: u64,
+    }
+
+    struct DemTopLevelItemData {
+        is_repeat_block: bool,
+        instruction_type: String,
+        tag: String,
+        args: Vec<f64>,
+        targets: Vec<u64>,
+        repeat_count: u64,
+    }
+
     struct TableauMeasureKickbackData {
         result: bool,
         has_kickback: bool,
@@ -2344,6 +2387,14 @@ mod ffi {
         fn circuit_to_stim_program_text(handle: &CircuitHandle) -> String;
         fn circuit_num_qubits(handle: &CircuitHandle) -> usize;
         fn circuit_len(handle: &CircuitHandle) -> usize;
+        fn circuit_get_top_level_item(
+            handle: &CircuitHandle,
+            index: usize,
+        ) -> CircuitTopLevelItemData;
+        fn circuit_get_top_level_repeat_block_body(
+            handle: &CircuitHandle,
+            index: usize,
+        ) -> UniquePtr<CircuitHandle>;
         fn circuit_num_measurements(handle: &CircuitHandle) -> u64;
         fn circuit_count_determined_measurements(
             handle: &CircuitHandle,
@@ -2525,6 +2576,14 @@ mod ffi {
         );
         fn detector_error_model_to_dem_text(handle: &DetectorErrorModelHandle) -> String;
         fn detector_error_model_len(handle: &DetectorErrorModelHandle) -> usize;
+        fn detector_error_model_get_top_level_item(
+            handle: &DetectorErrorModelHandle,
+            index: usize,
+        ) -> DemTopLevelItemData;
+        fn detector_error_model_get_top_level_repeat_block_body(
+            handle: &DetectorErrorModelHandle,
+            index: usize,
+        ) -> UniquePtr<DetectorErrorModelHandle>;
         fn detector_error_model_num_detectors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_errors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_observables(handle: &DetectorErrorModelHandle) -> u64;

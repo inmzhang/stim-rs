@@ -1,12 +1,14 @@
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::ops::{Add, AddAssign, Mul, MulAssign};
+use std::ops::{Add, AddAssign, Index, Mul, MulAssign};
 use std::path::Path;
 use std::str::FromStr;
 
 use super::{
-    CircuitInsertOperation, CircuitInstruction, CircuitItem, DetectingRegionFilter,
+    CircuitInsertOperation, CircuitInstruction, CircuitItem, CircuitRepeatBlock,
+    DetectingRegionFilter,
     support::{
         convert_explained_error, parse_circuit_item, parse_detecting_regions_text,
         split_top_level_circuit_items,
@@ -75,9 +77,21 @@ use crate::{
 /// ```
 pub struct Circuit {
     pub(crate) inner: stim_cxx::Circuit,
+    item_cache: OnceCell<Vec<CircuitItem>>,
 }
 
 impl Circuit {
+    pub(crate) fn from_inner(inner: stim_cxx::Circuit) -> Self {
+        Self {
+            inner,
+            item_cache: OnceCell::new(),
+        }
+    }
+
+    fn invalidate_item_cache(&mut self) {
+        let _ = self.item_cache.take();
+    }
+
     /// Creates a new, empty circuit containing no operations and referencing
     /// zero qubits.
     ///
@@ -97,9 +111,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            inner: stim_cxx::Circuit::new(),
-        }
+        Self::from_inner(stim_cxx::Circuit::new())
     }
 
     /// Returns the number of qubits used when simulating the circuit.
@@ -210,7 +222,7 @@ impl Circuit {
                 ignore_decomposition_failures,
                 block_decomposition_from_introducing_remnant_edges,
             )
-            .map(|inner| DetectorErrorModel { inner })
+            .map(DetectorErrorModel::from_inner)
             .map_err(StimError::from)
     }
 
@@ -248,9 +260,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn missing_detectors(&self, unknown_input: bool) -> Self {
-        Self {
-            inner: self.inner.missing_detectors(unknown_input),
-        }
+        Self::from_inner(self.inner.missing_detectors(unknown_input))
     }
 
     /// Converts the circuit into an equivalent stabilizer tableau.
@@ -613,6 +623,7 @@ impl Circuit {
     /// ```
     pub fn clear(&mut self) {
         self.inner.clear();
+        self.invalidate_item_cache();
     }
 
     /// Appends operations described by Stim program text onto the end of the
@@ -638,7 +649,9 @@ impl Circuit {
     pub fn append_from_stim_program_text(&mut self, text: &str) -> Result<()> {
         self.inner
             .append_from_stim_program_text(text)
-            .map_err(StimError::from)
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Appends an operation into the circuit, specified by gate name, qubit
@@ -667,7 +680,9 @@ impl Circuit {
     pub fn append(&mut self, gate_name: &str, targets: &[u32], args: &[f64]) -> Result<()> {
         self.inner
             .append(gate_name, targets, args)
-            .map_err(StimError::from)
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Appends an operation into the circuit using rich [`GateTarget`] values.
@@ -710,7 +725,9 @@ impl Circuit {
         let raw_targets: Vec<u32> = targets.iter().map(|target| target.raw_data()).collect();
         self.inner
             .append(gate_name, &raw_targets, args)
-            .map_err(StimError::from)
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Checks whether two circuits are approximately equal, allowing slight
@@ -758,9 +775,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn without_noise(&self) -> Self {
-        Self {
-            inner: self.inner.without_noise(),
-        }
+        Self::from_inner(self.inner.without_noise())
     }
 
     /// Returns a noisy copy of the circuit using a Rust-side [`NoiseModel`].
@@ -808,9 +823,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn with_inlined_feedback(&self) -> Self {
-        Self {
-            inner: self.inner.with_inlined_feedback(),
-        }
+        Self::from_inner(self.inner.with_inlined_feedback())
     }
 
     /// Returns a copy of the circuit with all instruction tags removed.
@@ -820,9 +833,7 @@ impl Circuit {
     /// otherwise unchanged (including any noise parameters).
     #[must_use]
     pub fn without_tags(&self) -> Self {
-        Self {
-            inner: self.inner.without_tags(),
-        }
+        Self::from_inner(self.inner.without_tags())
     }
 
     /// Returns an equivalent circuit with all `REPEAT` blocks unrolled and
@@ -844,9 +855,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn flattened(&self) -> Self {
-        Self {
-            inner: self.inner.flattened(),
-        }
+        Self::from_inner(self.inner.flattened())
     }
 
     /// Returns the flattened operations of the circuit as a list of
@@ -897,9 +906,7 @@ impl Circuit {
     /// ```
     #[must_use]
     pub fn decomposed(&self) -> Self {
-        Self {
-            inner: self.inner.decomposed(),
-        }
+        Self::from_inner(self.inner.decomposed())
     }
 
     /// Returns the inverse of the circuit, when one exists.
@@ -914,7 +921,7 @@ impl Circuit {
     pub fn inverse(&self) -> Result<Self> {
         self.inner
             .inverse()
-            .map(|inner| Self { inner })
+            .map(Self::from_inner)
             .map_err(StimError::from)
     }
 
@@ -1273,10 +1280,9 @@ impl Circuit {
     /// );
     /// ```
     pub fn get(&self, index: isize) -> Result<CircuitItem> {
-        let items = self.top_level_item_texts()?;
-        let normalized = normalize_index(index, items.len())
+        let normalized = normalize_index(index, self.len())
             .ok_or_else(|| StimError::new(format!("index {index} out of range")))?;
-        parse_circuit_item(&items[normalized])
+        Ok(self.cached_top_level_items()[normalized].clone())
     }
 
     /// Returns a sliced circuit over top-level items.
@@ -1394,10 +1400,43 @@ impl Circuit {
     }
 
     fn top_level_items(&self) -> Result<Vec<CircuitItem>> {
-        self.top_level_item_texts()?
-            .into_iter()
-            .map(|text| parse_circuit_item(&text))
-            .collect()
+        Ok(self.cached_top_level_items().clone())
+    }
+
+    fn top_level_item(&self, index: usize) -> CircuitItem {
+        Self::build_top_level_item(&self.inner, index)
+    }
+
+    fn build_top_level_item(inner: &stim_cxx::Circuit, index: usize) -> CircuitItem {
+        let item = inner.top_level_item(index);
+        if item.is_repeat_block {
+            CircuitItem::RepeatBlock(
+                CircuitRepeatBlock::new(
+                    item.repeat_count,
+                    &Self::from_inner(inner.top_level_repeat_block_body(index)),
+                    item.tag,
+                )
+                .expect("stim-cxx repeat block data should be valid"),
+            )
+        } else {
+            CircuitItem::Instruction(
+                CircuitInstruction::new(
+                    item.name,
+                    item.targets.into_iter().map(GateTarget::from_raw_data),
+                    item.gate_args,
+                    item.tag,
+                )
+                .expect("stim-cxx instruction data should be valid"),
+            )
+        }
+    }
+
+    fn cached_top_level_items(&self) -> &Vec<CircuitItem> {
+        self.item_cache.get_or_init(|| {
+            (0..self.len())
+                .map(|index| self.top_level_item(index))
+                .collect()
+        })
     }
 
     /// Returns the circuit's reference sample in bit-packed form.
@@ -1539,7 +1578,7 @@ impl Circuit {
             before_measure_flip_probability,
             after_reset_flip_probability,
         )
-        .map(|inner| Self { inner })
+        .map(Self::from_inner)
         .map_err(StimError::from)
     }
 
@@ -1639,8 +1678,15 @@ impl IntoIterator for Circuit {
     type IntoIter = std::vec::IntoIter<CircuitItem>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.top_level_items()
-            .expect("valid Circuit values must iterate as valid top-level items")
+        let len = self.len();
+        let Self { inner, item_cache } = self;
+        item_cache
+            .into_inner()
+            .unwrap_or_else(|| {
+                (0..len)
+                    .map(|index| Self::build_top_level_item(&inner, index))
+                    .collect()
+            })
             .into_iter()
     }
 }
@@ -1669,9 +1715,7 @@ impl IntoIterator for &mut Circuit {
 
 impl Clone for Circuit {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+        Self::from_inner(self.inner.clone())
     }
 }
 
@@ -1693,15 +1737,14 @@ impl Add for Circuit {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            inner: self.inner.add(&rhs.inner),
-        }
+        Self::from_inner(self.inner.add(&rhs.inner))
     }
 }
 
 impl AddAssign for Circuit {
     fn add_assign(&mut self, rhs: Self) {
         self.inner.add_assign(&rhs.inner);
+        self.invalidate_item_cache();
     }
 }
 
@@ -1709,9 +1752,7 @@ impl Mul<u64> for Circuit {
     type Output = Self;
 
     fn mul(self, rhs: u64) -> Self::Output {
-        Self {
-            inner: self.inner.repeat(rhs),
-        }
+        Self::from_inner(self.inner.repeat(rhs))
     }
 }
 
@@ -1726,6 +1767,15 @@ impl Mul<Circuit> for u64 {
 impl MulAssign<u64> for Circuit {
     fn mul_assign(&mut self, rhs: u64) {
         self.inner.repeat_assign(rhs);
+        self.invalidate_item_cache();
+    }
+}
+
+impl Index<usize> for Circuit {
+    type Output = CircuitItem;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.cached_top_level_items()[index]
     }
 }
 
@@ -1750,7 +1800,7 @@ impl FromStr for Circuit {
 
     fn from_str(s: &str) -> Result<Self> {
         stim_cxx::Circuit::from_stim_program_text(s)
-            .map(|inner| Self { inner })
+            .map(Self::from_inner)
             .map_err(StimError::from)
     }
 }
@@ -3260,6 +3310,47 @@ mod residual_api_tests {
         assert_eq!((&circuit).into_iter().collect::<Vec<_>>(), expected);
         assert_eq!((&mut mutable).into_iter().collect::<Vec<_>>(), expected);
         assert_eq!(circuit.clone().into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn circuit_supports_indexing_top_level_items() {
+        let circuit = Circuit::from_str(
+            "\
+    H 0
+    REPEAT 2 {
+        X 1
+    }
+    M 0",
+        )
+        .unwrap();
+
+        assert_eq!(
+            circuit[0],
+            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap())
+        );
+        assert_eq!(
+            circuit[1],
+            CircuitItem::RepeatBlock(
+                CircuitRepeatBlock::new(2, &Circuit::from_str("X 1").unwrap(), "").unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn circuit_index_cache_invalidates_after_mutation() {
+        let mut circuit = Circuit::from_str("H 0").unwrap();
+        assert_eq!(
+            circuit[0],
+            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap())
+        );
+
+        circuit.append_from_stim_program_text("M 0").unwrap();
+
+        assert_eq!(circuit.len(), 2);
+        assert_eq!(
+            circuit[1],
+            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap())
+        );
     }
 
     #[test]
