@@ -2,6 +2,8 @@
 name = "stim-cxx"
 version = "0.1.0"
 edition = "2024"
+authors.workspace = true
+repository.workspace = true
 license.workspace = true
 publish = true
 description = "Low-level C++ bridge crate for the safe stim Rust bindings"
@@ -9,7 +11,7 @@ readme = "README.md"
 documentation = "https://docs.rs/stim-cxx"
 links = "stimrs-cxx"
 keywords = ["quantum", "stim", "ffi", "bindings", "cxx"]
-categories = ["external-ffi-bindings", "simulation", "science"]
+categories = ["external-ffi-bindings", "simulation", "science", "quantum"]
 include = [
     "Cargo.toml",
     "README.md",

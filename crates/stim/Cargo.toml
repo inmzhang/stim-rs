@@ -1,6 +1,8 @@
 [package]
 name = "stim"
 version = "0.1.0"
+authors.workspace = true
+repository.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,7 +11,7 @@ description = "Safe Rust bindings for Stim, a high-performance stabilizer circui
 readme = "README.md"
 documentation = "https://docs.rs/stim"
 keywords = ["quantum", "stim", "stabilizer", "qec", "bindings"]
-categories = ["api-bindings", "simulation", "science"]
+categories = ["api-bindings", "simulation", "science", "quantum"]
 include = ["src/**", "Cargo.toml", "README.md"]
 
 [package.metadata.docs.rs]

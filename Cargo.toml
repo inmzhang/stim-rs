@@ -5,6 +5,8 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
+authors = ["Yiming Zhang <quantuminm@gmail.com>"]
+repository = "https://github.com/inmzhang/stim-rs"
 license = "Apache-2.0"
 publish = false
 
