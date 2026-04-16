@@ -11,7 +11,7 @@ description = "Safe Rust bindings for Stim, a high-performance stabilizer circui
 readme = "README.md"
 documentation = "https://docs.rs/stim"
 keywords = ["quantum", "stim", "stabilizer", "qec", "bindings"]
-categories = ["api-bindings", "simulation", "science", "quantum"]
+categories = ["api-bindings", "simulation", "science"]
 include = ["src/**", "Cargo.toml", "README.md"]
 
 [package.metadata.docs.rs]

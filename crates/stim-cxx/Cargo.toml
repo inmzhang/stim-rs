@@ -11,7 +11,7 @@ readme = "README.md"
 documentation = "https://docs.rs/stim-cxx"
 links = "stimrs-cxx"
 keywords = ["quantum", "stim", "ffi", "bindings", "cxx"]
-categories = ["external-ffi-bindings", "simulation", "science", "quantum"]
+categories = ["external-ffi-bindings", "simulation", "science"]
 include = [
     "Cargo.toml",
     "README.md",
