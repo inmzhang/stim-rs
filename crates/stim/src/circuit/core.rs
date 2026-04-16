@@ -9,10 +9,7 @@ use std::str::FromStr;
 use super::{
     CircuitInsertOperation, CircuitInstruction, CircuitItem, CircuitRepeatBlock,
     DetectingRegionFilter,
-    support::{
-        convert_explained_error, parse_circuit_item, parse_detecting_regions_text,
-        split_top_level_circuit_items,
-    },
+    support::{convert_explained_error, parse_detecting_regions_text},
 };
 use crate::common::bit_packing::unpack_bits;
 use crate::common::parse::{decode_measurement_solution, parse_detector_coordinate_map};
@@ -88,7 +85,7 @@ impl Circuit {
         }
     }
 
-    fn invalidate_item_cache(&mut self) {
+    pub(crate) fn invalidate_item_cache(&mut self) {
         let _ = self.item_cache.take();
     }
 
@@ -679,7 +676,7 @@ impl Circuit {
     /// ```
     pub fn append(&mut self, gate_name: &str, targets: &[u32], args: &[f64]) -> Result<()> {
         self.inner
-            .append(gate_name, targets, args)
+            .append_with_tag(gate_name, targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -724,7 +721,7 @@ impl Circuit {
     ) -> Result<()> {
         let raw_targets: Vec<u32> = targets.iter().map(|target| target.raw_data()).collect();
         self.inner
-            .append(gate_name, &raw_targets, args)
+            .append_with_tag(gate_name, &raw_targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -1298,18 +1295,22 @@ impl Circuit {
         if step == 0 {
             return Err(StimError::new("slice step cannot be zero"));
         }
-        let items = self.top_level_item_texts()?;
-        let len = items.len() as isize;
+        let len = self.len() as isize;
         let indices = compute_slice_indices(len, start, stop, step);
         if indices.is_empty() {
             return Ok(Self::new());
         }
-        let text = indices
-            .into_iter()
-            .map(|index| items[index as usize].as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        Self::from_str(&text)
+        let slice_start = indices[0];
+        let slice_step = if indices.len() >= 2 {
+            indices[1] - indices[0]
+        } else {
+            step
+        };
+        Ok(Self::from_inner(self.inner.get_slice(
+            slice_start as i64,
+            slice_step as i64,
+            indices.len() as i64,
+        )))
     }
 
     /// Removes and returns a top-level item by index.
@@ -1323,15 +1324,11 @@ impl Circuit {
     /// assert_eq!(circuit.to_string(), "H 0\nM 0");
     /// ```
     pub fn pop(&mut self, index: isize) -> Result<CircuitItem> {
-        let mut items = self.top_level_item_texts()?;
-        let normalized = normalize_index(index, items.len())
+        let normalized = normalize_index(index, self.len())
             .ok_or_else(|| StimError::new(format!("index {index} out of range")))?;
-        let popped = parse_circuit_item(&items.remove(normalized))?;
-        *self = if items.is_empty() {
-            Self::new()
-        } else {
-            Self::from_str(&items.join("\n"))?
-        };
+        let popped = self.cached_top_level_items()[normalized].clone();
+        self.inner.remove_top_level(normalized);
+        self.invalidate_item_cache();
         Ok(popped)
     }
 
@@ -1349,20 +1346,47 @@ impl Circuit {
         index: isize,
         operation: impl Into<CircuitInsertOperation>,
     ) -> Result<()> {
-        let mut items = self.top_level_item_texts()?;
-        let len = items.len() as isize;
+        let len = self.len() as isize;
         let normalized = if index < 0 { len + index } else { index };
         if !(0..len).contains(&normalized) {
             return Err(StimError::new(format!("index {index} out of range")));
         }
 
-        let new_items = match operation.into() {
-            CircuitInsertOperation::Instruction(instruction) => vec![instruction.to_string()],
-            CircuitInsertOperation::Circuit(circuit) => circuit.top_level_item_texts()?,
-            CircuitInsertOperation::RepeatBlock(repeat_block) => vec![repeat_block.to_string()],
-        };
-        items.splice(normalized as usize..normalized as usize, new_items);
-        *self = Self::from_str(&items.join("\n"))?;
+        match operation.into() {
+            CircuitInsertOperation::Instruction(instruction) => {
+                let raw_targets = instruction
+                    .targets_copy()
+                    .into_iter()
+                    .map(|target| target.raw_data())
+                    .collect::<Vec<_>>();
+                self.inner
+                    .insert_with_tag(
+                        normalized as usize,
+                        instruction.name(),
+                        &raw_targets,
+                        &instruction.gate_args_copy(),
+                        instruction.tag(),
+                    )
+                    .map_err(StimError::from)?;
+            }
+            CircuitInsertOperation::Circuit(circuit) => {
+                if !circuit.is_empty() {
+                    self.inner
+                        .insert_circuit(normalized as usize, &circuit.inner);
+                }
+            }
+            CircuitInsertOperation::RepeatBlock(repeat_block) => {
+                self.inner
+                    .insert_repeat_block(
+                        normalized as usize,
+                        repeat_block.repeat_count(),
+                        &repeat_block.body_copy().inner,
+                        repeat_block.tag(),
+                    )
+                    .map_err(StimError::from)?;
+            }
+        }
+        self.invalidate_item_cache();
         Ok(())
     }
 
@@ -1386,17 +1410,23 @@ impl Circuit {
                 if circuit.is_empty() {
                     Ok(())
                 } else {
-                    self.append_from_stim_program_text(&circuit.to_string())
+                    self.inner.add_assign(&circuit.inner);
+                    self.invalidate_item_cache();
+                    Ok(())
                 }
             }
             CircuitInsertOperation::RepeatBlock(repeat_block) => {
-                self.append_from_stim_program_text(&repeat_block.to_string())
+                self.inner
+                    .append_repeat_block(
+                        repeat_block.repeat_count(),
+                        &repeat_block.body_copy().inner,
+                        repeat_block.tag(),
+                    )
+                    .map_err(StimError::from)?;
+                self.invalidate_item_cache();
+                Ok(())
             }
         }
-    }
-
-    fn top_level_item_texts(&self) -> Result<Vec<String>> {
-        split_top_level_circuit_items(&self.to_string())
     }
 
     fn top_level_items(&self) -> Result<Vec<CircuitItem>> {

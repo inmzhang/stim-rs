@@ -338,6 +338,12 @@ CircuitTopLevelItemData circuit_get_top_level_item(const CircuitHandle &handle, 
 std::unique_ptr<CircuitHandle> circuit_get_top_level_repeat_block_body(
     const CircuitHandle &handle,
     std::size_t index);
+std::unique_ptr<CircuitHandle> circuit_get_slice(
+    const CircuitHandle &handle,
+    std::int64_t start,
+    std::int64_t step,
+    std::int64_t slice_length);
+void circuit_remove_top_level(CircuitHandle &handle, std::size_t index);
 std::unique_ptr<CircuitHandle> circuit_generated(
     rust::Str code_task,
     std::size_t distance,
@@ -397,12 +403,30 @@ void circuit_append_gate(
     CircuitHandle &handle,
     rust::Str gate_name,
     rust::Slice<const std::uint32_t> targets,
-    rust::Slice<const double> args);
+    rust::Slice<const double> args,
+    rust::Str tag);
 void circuit_append_repeat_block(
     CircuitHandle &handle,
     std::uint64_t repeat_count,
     const CircuitHandle &body,
     rust::Str tag);
+void circuit_insert_gate(
+    CircuitHandle &handle,
+    std::size_t index,
+    rust::Str gate_name,
+    rust::Slice<const std::uint32_t> targets,
+    rust::Slice<const double> args,
+    rust::Str tag);
+void circuit_insert_repeat_block(
+    CircuitHandle &handle,
+    std::size_t index,
+    std::uint64_t repeat_count,
+    const CircuitHandle &body,
+    rust::Str tag);
+void circuit_insert_circuit(
+    CircuitHandle &handle,
+    std::size_t index,
+    const CircuitHandle &circuit);
 void circuit_clear(CircuitHandle &handle);
 bool circuit_equals(const CircuitHandle &left, const CircuitHandle &right);
 bool circuit_approx_equals(
@@ -538,6 +562,11 @@ DemTopLevelItemData detector_error_model_get_top_level_item(
 std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_top_level_repeat_block_body(
     const DetectorErrorModelHandle &handle,
     std::size_t index);
+std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_slice(
+    const DetectorErrorModelHandle &handle,
+    std::int64_t start,
+    std::int64_t step,
+    std::int64_t slice_length);
 rust::String detector_error_model_to_dem_text(const DetectorErrorModelHandle &handle);
 std::size_t detector_error_model_len(const DetectorErrorModelHandle &handle);
 std::uint64_t detector_error_model_num_detectors(const DetectorErrorModelHandle &handle);
@@ -561,6 +590,16 @@ std::unique_ptr<DetectorErrorModelHandle> detector_error_model_flattened(
 std::unique_ptr<DetectorErrorModelHandle> detector_error_model_rounded(
     const DetectorErrorModelHandle &handle,
     std::uint8_t digits);
+void detector_error_model_append_instruction(
+    DetectorErrorModelHandle &handle,
+    rust::Str instruction_type,
+    rust::Slice<const double> args,
+    rust::Slice<const std::uint64_t> targets,
+    rust::Str tag);
+void detector_error_model_append_repeat_block(
+    DetectorErrorModelHandle &handle,
+    std::uint64_t repeat_count,
+    const DetectorErrorModelHandle &body);
 std::unique_ptr<DetectorErrorModelHandle> detector_error_model_shortest_graphlike_error(
     const DetectorErrorModelHandle &handle,
     bool ignore_ungraphlike_errors);

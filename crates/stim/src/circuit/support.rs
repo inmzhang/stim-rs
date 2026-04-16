@@ -1,11 +1,9 @@
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use crate::{
-    Circuit, CircuitErrorLocation, CircuitErrorLocationStackFrame, CircuitInstruction, CircuitItem,
-    CircuitRepeatBlock, CircuitTargetsInsideInstruction, DemTarget, DemTargetWithCoords,
-    ExplainedError, FlippedMeasurement, GateTarget, GateTargetWithCoords, PauliString, Result,
-    StimError,
+    CircuitErrorLocation, CircuitErrorLocationStackFrame, CircuitTargetsInsideInstruction,
+    DemTarget, DemTargetWithCoords, ExplainedError, FlippedMeasurement, GateTarget,
+    GateTargetWithCoords, PauliString, Result, StimError,
 };
 
 pub fn parse_detecting_regions_text(
@@ -131,78 +129,4 @@ pub fn convert_explained_error(data: stim_cxx::ExplainedErrorData) -> Result<Exp
             .map(convert_circuit_error_location)
             .collect::<Result<Vec<_>>>()?,
     ))
-}
-
-pub fn split_top_level_circuit_items(text: &str) -> Result<Vec<String>> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut items = Vec::new();
-    let mut current = Vec::new();
-    let mut depth = 0isize;
-
-    for line in text.lines() {
-        if depth == 0 && current.is_empty() && !line.starts_with("REPEAT") {
-            items.push(line.to_string());
-            continue;
-        }
-
-        depth += line.matches('{').count() as isize;
-        current.push(line.to_string());
-        depth -= line.matches('}').count() as isize;
-
-        if depth < 0 {
-            return Err(StimError::new("unbalanced circuit repeat block braces"));
-        }
-        if depth == 0 {
-            items.push(current.join("\n"));
-            current.clear();
-        }
-    }
-
-    if depth != 0 || !current.is_empty() {
-        return Err(StimError::new("unterminated circuit repeat block"));
-    }
-
-    Ok(items)
-}
-
-pub fn parse_circuit_item(text: &str) -> Result<CircuitItem> {
-    if let Some((header, body)) = text.split_once("{\n") {
-        let header = header.trim();
-        let rest = header.strip_prefix("REPEAT").ok_or_else(|| {
-            StimError::new(format!("invalid circuit repeat block header: {header}"))
-        })?;
-        let (tag, count_text) = if let Some(rest) = rest.strip_prefix('[') {
-            let close = rest
-                .find(']')
-                .ok_or_else(|| StimError::new("unterminated circuit repeat block tag"))?;
-            let tag = &rest[..close];
-            let count_text = rest[close + 1..].trim();
-            (tag.to_string(), count_text.to_string())
-        } else {
-            (String::new(), rest.trim().to_string())
-        };
-        let repeat_count = count_text
-            .parse::<u64>()
-            .map_err(|_| StimError::new(format!("invalid repeat count: {count_text}")))?;
-        let inner = body
-            .strip_suffix("\n}")
-            .ok_or_else(|| StimError::new("invalid circuit repeat block body"))?;
-        let inner = inner
-            .lines()
-            .map(|line| line.strip_prefix("    ").unwrap_or(line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(CircuitItem::RepeatBlock(CircuitRepeatBlock::new(
-            repeat_count,
-            &Circuit::from_str(&inner)?,
-            tag,
-        )?))
-    } else {
-        Ok(CircuitItem::Instruction(CircuitInstruction::from_str(
-            text,
-        )?))
-    }
 }

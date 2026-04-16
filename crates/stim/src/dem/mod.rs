@@ -800,7 +800,24 @@ impl DetectorErrorModel {
     /// Returns an error if the serialized instruction text is invalid (this
     /// should not happen for well-formed `DemInstruction` values).
     pub fn append_dem_instruction(&mut self, instruction: &DemInstruction) -> Result<()> {
-        self.append_text_item(&instruction.to_string())
+        let raw_targets = instruction
+            .targets_copy()
+            .into_iter()
+            .map(|target| match target {
+                DemInstructionTarget::DemTarget(target) => target.raw_data(),
+                DemInstructionTarget::RelativeOffset(value) => value,
+            })
+            .collect::<Vec<_>>();
+        self.inner
+            .append_instruction(
+                instruction.r#type(),
+                &instruction.args_copy(),
+                &raw_targets,
+                instruction.tag(),
+            )
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Appends an existing [`DemRepeatBlock`] to the end of this model.
@@ -812,7 +829,11 @@ impl DetectorErrorModel {
     ///
     /// Returns an error if the serialized repeat block text is invalid.
     pub fn append_dem_repeat_block(&mut self, repeat_block: &DemRepeatBlock) -> Result<()> {
-        self.append_text_item(&repeat_block.to_string())
+        self.inner
+            .append_repeat_block(repeat_block.repeat_count(), &repeat_block.body_copy().inner)
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Appends all instructions from another [`DetectorErrorModel`] to the end
@@ -829,7 +850,9 @@ impl DetectorErrorModel {
         if model.is_empty() {
             return Ok(());
         }
-        self.append_text_item(&model.to_string())
+        self.inner.add_assign(&model.inner);
+        self.invalidate_item_cache();
+        Ok(())
     }
 
     /// Appends a detector-error-model operation of any supported owned type:
@@ -942,22 +965,22 @@ impl DetectorErrorModel {
         if step == 0 {
             return Err(StimError::new("slice step cannot be zero"));
         }
-        let items = self.top_level_item_texts()?;
-        let len = items.len() as isize;
+        let len = self.len() as isize;
         let indices = compute_slice_indices(len, start, stop, step);
         if indices.is_empty() {
             return Ok(Self::new());
         }
-        let text = indices
-            .into_iter()
-            .map(|index| items[index as usize].as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        Self::from_str(&text)
-    }
-
-    fn top_level_item_texts(&self) -> Result<Vec<String>> {
-        split_top_level_dem_items(&self.to_string())
+        let slice_start = indices[0];
+        let slice_step = if indices.len() >= 2 {
+            indices[1] - indices[0]
+        } else {
+            step
+        };
+        Ok(Self::from_inner(self.inner.get_slice(
+            slice_start as i64,
+            slice_step as i64,
+            indices.len() as i64,
+        )))
     }
 
     fn top_level_items(&self) -> Result<Vec<DemItem>> {
@@ -1003,16 +1026,6 @@ impl DetectorErrorModel {
                 .map(|index| self.top_level_item(index))
                 .collect()
         })
-    }
-
-    fn append_text_item(&mut self, text: &str) -> Result<()> {
-        let combined = if self.is_empty() {
-            text.to_string()
-        } else {
-            format!("{self}\n{text}")
-        };
-        *self = Self::from_str(&combined)?;
-        Ok(())
     }
 }
 
@@ -1245,41 +1258,6 @@ impl FromStr for DetectorErrorModel {
             .map(Self::from_inner)
             .map_err(StimError::from)
     }
-}
-
-fn split_top_level_dem_items(text: &str) -> Result<Vec<String>> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut items = Vec::new();
-    let mut current = Vec::new();
-    let mut depth = 0isize;
-
-    for line in text.lines() {
-        if depth == 0 && current.is_empty() && !line.starts_with("repeat ") {
-            items.push(line.to_string());
-            continue;
-        }
-
-        depth += line.matches('{').count() as isize;
-        current.push(line.to_string());
-        depth -= line.matches('}').count() as isize;
-
-        if depth < 0 {
-            return Err(StimError::new("unbalanced DEM repeat block braces"));
-        }
-        if depth == 0 {
-            items.push(current.join("\n"));
-            current.clear();
-        }
-    }
-
-    if depth != 0 || !current.is_empty() {
-        return Err(StimError::new("unterminated DEM repeat block"));
-    }
-
-    Ok(items)
 }
 
 #[cfg(test)]

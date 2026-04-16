@@ -132,6 +132,11 @@ impl DemTarget {
         Self { data }
     }
 
+    #[must_use]
+    pub(crate) const fn raw_data(self) -> u64 {
+        self.data
+    }
+
     /// Parses a `DemTarget` from its textual representation.
     ///
     /// This method recognizes the three canonical DEM target text formats:

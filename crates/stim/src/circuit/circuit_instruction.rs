@@ -457,7 +457,21 @@ impl Circuit {
         if instruction.name().trim().is_empty() {
             return Err(StimError::new("instruction name must not be empty"));
         }
-        self.append_from_stim_program_text(&instruction.to_string())
+        let raw_targets = instruction
+            .targets_copy()
+            .into_iter()
+            .map(|target| target.raw_data())
+            .collect::<Vec<_>>();
+        self.inner
+            .append_with_tag(
+                instruction.name(),
+                &raw_targets,
+                &instruction.gate_args_copy(),
+                instruction.tag(),
+            )
+            .map_err(StimError::from)?;
+        self.invalidate_item_cache();
+        Ok(())
     }
 }
 

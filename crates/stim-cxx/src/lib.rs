@@ -702,6 +702,17 @@ impl Circuit {
     }
 
     #[must_use]
+    pub fn get_slice(&self, start: i64, step: i64, slice_length: i64) -> Self {
+        Self {
+            inner: ffi::circuit_get_slice(self.inner(), start, step, slice_length),
+        }
+    }
+
+    pub fn remove_top_level(&mut self, index: usize) {
+        ffi::circuit_remove_top_level(self.inner.pin_mut(), index);
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -750,7 +761,17 @@ impl Circuit {
         targets: &[u32],
         args: &[f64],
     ) -> Result<(), cxx::Exception> {
-        ffi::circuit_append_gate(self.inner.pin_mut(), gate_name, targets, args)
+        self.append_with_tag(gate_name, targets, args, "")
+    }
+
+    pub fn append_with_tag(
+        &mut self,
+        gate_name: &str,
+        targets: &[u32],
+        args: &[f64],
+        tag: &str,
+    ) -> Result<(), cxx::Exception> {
+        ffi::circuit_append_gate(self.inner.pin_mut(), gate_name, targets, args, tag)
     }
 
     pub fn append_repeat_block(
@@ -760,6 +781,37 @@ impl Circuit {
         tag: &str,
     ) -> Result<(), cxx::Exception> {
         ffi::circuit_append_repeat_block(self.inner.pin_mut(), repeat_count, body.inner(), tag)
+    }
+
+    pub fn insert_with_tag(
+        &mut self,
+        index: usize,
+        gate_name: &str,
+        targets: &[u32],
+        args: &[f64],
+        tag: &str,
+    ) -> Result<(), cxx::Exception> {
+        ffi::circuit_insert_gate(self.inner.pin_mut(), index, gate_name, targets, args, tag)
+    }
+
+    pub fn insert_repeat_block(
+        &mut self,
+        index: usize,
+        repeat_count: u64,
+        body: &Self,
+        tag: &str,
+    ) -> Result<(), cxx::Exception> {
+        ffi::circuit_insert_repeat_block(
+            self.inner.pin_mut(),
+            index,
+            repeat_count,
+            body.inner(),
+            tag,
+        )
+    }
+
+    pub fn insert_circuit(&mut self, index: usize, circuit: &Self) {
+        ffi::circuit_insert_circuit(self.inner.pin_mut(), index, circuit.inner());
     }
 
     #[must_use]
@@ -1069,6 +1121,13 @@ impl DetectorErrorModel {
     }
 
     #[must_use]
+    pub fn get_slice(&self, start: i64, step: i64, slice_length: i64) -> Self {
+        Self {
+            inner: ffi::detector_error_model_get_slice(self.inner(), start, step, slice_length),
+        }
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -1131,6 +1190,34 @@ impl DetectorErrorModel {
         Self {
             inner: ffi::detector_error_model_rounded(self.inner(), digits),
         }
+    }
+
+    pub fn append_instruction(
+        &mut self,
+        instruction_type: &str,
+        args: &[f64],
+        targets: &[u64],
+        tag: &str,
+    ) -> Result<(), cxx::Exception> {
+        ffi::detector_error_model_append_instruction(
+            self.inner.pin_mut(),
+            instruction_type,
+            args,
+            targets,
+            tag,
+        )
+    }
+
+    pub fn append_repeat_block(
+        &mut self,
+        repeat_count: u64,
+        body: &Self,
+    ) -> Result<(), cxx::Exception> {
+        ffi::detector_error_model_append_repeat_block(
+            self.inner.pin_mut(),
+            repeat_count,
+            body.inner(),
+        )
     }
 
     #[must_use]
@@ -2395,6 +2482,13 @@ mod ffi {
             handle: &CircuitHandle,
             index: usize,
         ) -> UniquePtr<CircuitHandle>;
+        fn circuit_get_slice(
+            handle: &CircuitHandle,
+            start: i64,
+            step: i64,
+            slice_length: i64,
+        ) -> UniquePtr<CircuitHandle>;
+        fn circuit_remove_top_level(handle: Pin<&mut CircuitHandle>, index: usize);
         fn circuit_num_measurements(handle: &CircuitHandle) -> u64;
         fn circuit_count_determined_measurements(
             handle: &CircuitHandle,
@@ -2413,6 +2507,7 @@ mod ffi {
             gate_name: &str,
             targets: &[u32],
             args: &[f64],
+            tag: &str,
         ) -> Result<()>;
         fn circuit_append_repeat_block(
             handle: Pin<&mut CircuitHandle>,
@@ -2420,6 +2515,26 @@ mod ffi {
             body: &CircuitHandle,
             tag: &str,
         ) -> Result<()>;
+        fn circuit_insert_gate(
+            handle: Pin<&mut CircuitHandle>,
+            index: usize,
+            gate_name: &str,
+            targets: &[u32],
+            args: &[f64],
+            tag: &str,
+        ) -> Result<()>;
+        fn circuit_insert_repeat_block(
+            handle: Pin<&mut CircuitHandle>,
+            index: usize,
+            repeat_count: u64,
+            body: &CircuitHandle,
+            tag: &str,
+        ) -> Result<()>;
+        fn circuit_insert_circuit(
+            handle: Pin<&mut CircuitHandle>,
+            index: usize,
+            circuit: &CircuitHandle,
+        );
         fn circuit_clear(handle: Pin<&mut CircuitHandle>);
         fn circuit_equals(left: &CircuitHandle, right: &CircuitHandle) -> bool;
         fn circuit_approx_equals(left: &CircuitHandle, right: &CircuitHandle, atol: f64) -> bool;
@@ -2584,6 +2699,12 @@ mod ffi {
             handle: &DetectorErrorModelHandle,
             index: usize,
         ) -> UniquePtr<DetectorErrorModelHandle>;
+        fn detector_error_model_get_slice(
+            handle: &DetectorErrorModelHandle,
+            start: i64,
+            step: i64,
+            slice_length: i64,
+        ) -> UniquePtr<DetectorErrorModelHandle>;
         fn detector_error_model_num_detectors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_errors(handle: &DetectorErrorModelHandle) -> u64;
         fn detector_error_model_num_observables(handle: &DetectorErrorModelHandle) -> u64;
@@ -2611,6 +2732,18 @@ mod ffi {
             handle: &DetectorErrorModelHandle,
             digits: u8,
         ) -> UniquePtr<DetectorErrorModelHandle>;
+        fn detector_error_model_append_instruction(
+            handle: Pin<&mut DetectorErrorModelHandle>,
+            instruction_type: &str,
+            args: &[f64],
+            targets: &[u64],
+            tag: &str,
+        ) -> Result<()>;
+        fn detector_error_model_append_repeat_block(
+            handle: Pin<&mut DetectorErrorModelHandle>,
+            repeat_count: u64,
+            body: &DetectorErrorModelHandle,
+        ) -> Result<()>;
         fn detector_error_model_shortest_graphlike_error(
             handle: &DetectorErrorModelHandle,
             ignore_ungraphlike_errors: bool,

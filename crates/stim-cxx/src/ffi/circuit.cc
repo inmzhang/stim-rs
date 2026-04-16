@@ -77,6 +77,23 @@ rust::String dem_instruction_type_name(stim::DemInstructionType type) {
   return rust::String(out.str());
 }
 
+stim::DemInstructionType dem_instruction_type_from_name(rust::Str name) {
+  std::string_view text(name.data(), name.size());
+  if (text == "error") {
+    return stim::DemInstructionType::DEM_ERROR;
+  }
+  if (text == "shift_detectors") {
+    return stim::DemInstructionType::DEM_SHIFT_DETECTORS;
+  }
+  if (text == "detector") {
+    return stim::DemInstructionType::DEM_DETECTOR;
+  }
+  if (text == "logical_observable") {
+    return stim::DemInstructionType::DEM_LOGICAL_OBSERVABLE;
+  }
+  throw std::invalid_argument("unrecognized DEM instruction type");
+}
+
 rust::Vec<std::uint8_t> packed_bits_to_rust_vec(
     const stim::simd_bits<stim::MAX_BITWORD_WIDTH> &bits,
     size_t num_bits) {
@@ -1383,6 +1400,21 @@ std::unique_ptr<CircuitHandle> circuit_get_top_level_repeat_block_body(
   return std::make_unique<CircuitHandle>(op.repeat_block_body(handle.get()));
 }
 
+std::unique_ptr<CircuitHandle> circuit_get_slice(
+    const CircuitHandle &handle,
+    std::int64_t start,
+    std::int64_t step,
+    std::int64_t slice_length) {
+  return std::make_unique<CircuitHandle>(handle.get().py_get_slice(start, step, slice_length));
+}
+
+void circuit_remove_top_level(CircuitHandle &handle, std::size_t index) {
+  if (index >= handle.get().operations.size()) {
+    throw std::invalid_argument("index out of range");
+  }
+  handle.get().operations.erase(handle.get().operations.begin() + index);
+}
+
 std::uint64_t circuit_num_measurements(const CircuitHandle &handle) {
   return handle.get().count_measurements();
 }
@@ -1419,13 +1451,15 @@ void circuit_append_gate(
     CircuitHandle &handle,
     rust::Str gate_name,
     rust::Slice<const std::uint32_t> targets,
-    rust::Slice<const double> args) {
+    rust::Slice<const double> args,
+    rust::Str tag) {
   std::vector<std::uint32_t> owned_targets(targets.begin(), targets.end());
   std::vector<double> owned_args(args.begin(), args.end());
   handle.get().safe_append_u(
       std::string_view(gate_name.data(), gate_name.size()),
       owned_targets,
-      owned_args);
+      owned_args,
+      std::string_view(tag.data(), tag.size()));
 }
 
 void circuit_append_repeat_block(
@@ -1437,6 +1471,48 @@ void circuit_append_repeat_block(
       repeat_count,
       body.get(),
       std::string_view(tag.data(), tag.size()));
+}
+
+void circuit_insert_gate(
+    CircuitHandle &handle,
+    std::size_t index,
+    rust::Str gate_name,
+    rust::Slice<const std::uint32_t> targets,
+    rust::Slice<const double> args,
+    rust::Str tag) {
+  std::vector<stim::GateTarget> owned_targets;
+  owned_targets.reserve(targets.size());
+  for (auto raw : targets) {
+    owned_targets.push_back(stim::GateTarget{raw});
+  }
+  std::vector<double> owned_args(args.begin(), args.end());
+  handle.get().safe_insert(
+      index,
+      stim::CircuitInstruction(
+          stim::GATE_DATA.at(std::string_view(gate_name.data(), gate_name.size())).id,
+          owned_args,
+          owned_targets,
+          std::string_view(tag.data(), tag.size())));
+}
+
+void circuit_insert_repeat_block(
+    CircuitHandle &handle,
+    std::size_t index,
+    std::uint64_t repeat_count,
+    const CircuitHandle &body,
+    rust::Str tag) {
+  handle.get().safe_insert_repeat_block(
+      index,
+      repeat_count,
+      body.get(),
+      std::string_view(tag.data(), tag.size()));
+}
+
+void circuit_insert_circuit(
+    CircuitHandle &handle,
+    std::size_t index,
+    const CircuitHandle &circuit) {
+  handle.get().safe_insert(index, circuit.get());
 }
 
 void circuit_clear(CircuitHandle &handle) {
@@ -2348,6 +2424,42 @@ std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_top_level_rep
     throw std::invalid_argument("top-level item is not a repeat block");
   }
   return std::make_unique<DetectorErrorModelHandle>(op.repeat_block_body(handle.get()));
+}
+
+std::unique_ptr<DetectorErrorModelHandle> detector_error_model_get_slice(
+    const DetectorErrorModelHandle &handle,
+    std::int64_t start,
+    std::int64_t step,
+    std::int64_t slice_length) {
+  return std::make_unique<DetectorErrorModelHandle>(
+      handle.get().py_get_slice(start, step, slice_length));
+}
+
+void detector_error_model_append_instruction(
+    DetectorErrorModelHandle &handle,
+    rust::Str instruction_type,
+    rust::Slice<const double> args,
+    rust::Slice<const std::uint64_t> targets,
+    rust::Str tag) {
+  std::vector<double> owned_args(args.begin(), args.end());
+  std::vector<stim::DemTarget> owned_targets;
+  owned_targets.reserve(targets.size());
+  for (auto raw : targets) {
+    owned_targets.push_back(stim::DemTarget{raw});
+  }
+  handle.get().append_dem_instruction(stim::DemInstruction{
+      owned_args,
+      owned_targets,
+      std::string_view(tag.data(), tag.size()),
+      dem_instruction_type_from_name(instruction_type),
+  });
+}
+
+void detector_error_model_append_repeat_block(
+    DetectorErrorModelHandle &handle,
+    std::uint64_t repeat_count,
+    const DetectorErrorModelHandle &body) {
+  handle.get().append_repeat_block(repeat_count, body.get(), "");
 }
 
 std::uint64_t detector_error_model_num_detectors(const DetectorErrorModelHandle &handle) {
