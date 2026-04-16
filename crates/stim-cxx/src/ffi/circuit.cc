@@ -1592,7 +1592,23 @@ rust::String circuit_likeliest_error_sat_problem(
       dem, quantization, std::string_view(format_name.data(), format_name.size())));
 }
 
-rust::String circuit_detecting_regions_text(const CircuitHandle &handle) {
+rust::Vec<DetectingRegionEntryData> detecting_region_entries(
+    const std::map<stim::DemTarget, std::map<uint64_t, stim::FlexPauliString>> &regions) {
+  rust::Vec<DetectingRegionEntryData> result;
+  for (const auto &[target, tick_map] : regions) {
+    for (const auto &[tick, pauli] : tick_map) {
+      result.push_back(DetectingRegionEntryData{
+          target.raw_id(),
+          target.is_observable_id(),
+          tick,
+          rust::String(pauli.str()),
+      });
+    }
+  }
+  return result;
+}
+
+rust::Vec<DetectingRegionEntryData> circuit_detecting_regions(const CircuitHandle &handle) {
   auto stats = handle.get().compute_stats();
   std::set<stim::DemTarget> targets;
   std::set<uint64_t> ticks;
@@ -1606,18 +1622,11 @@ rust::String circuit_detecting_regions_text(const CircuitHandle &handle) {
     ticks.insert(k);
   }
 
-  auto regions = stim::circuit_to_detecting_regions(handle.get(), targets, ticks, false);
-  std::stringstream ss;
-  ss.precision(17);
-  for (const auto &[target, tick_map] : regions) {
-    for (const auto &[tick, pauli] : tick_map) {
-      ss << target.str() << '\t' << tick << '\t' << pauli.str() << '\n';
-    }
-  }
-  return rust::String(ss.str());
+  return detecting_region_entries(
+      stim::circuit_to_detecting_regions(handle.get(), targets, ticks, false));
 }
 
-rust::String circuit_detecting_regions_text_with_options(
+rust::Vec<DetectingRegionEntryData> circuit_detecting_regions_with_options(
     const CircuitHandle &handle,
     rust::Vec<rust::String> target_texts,
     rust::Vec<std::uint64_t> ticks,
@@ -1648,16 +1657,8 @@ rust::String circuit_detecting_regions_text_with_options(
     included_ticks.insert(ticks.begin(), ticks.end());
   }
 
-  auto regions = stim::circuit_to_detecting_regions(
-      handle.get(), targets, included_ticks, ignore_anticommutation_errors);
-  std::stringstream ss;
-  ss.precision(17);
-  for (const auto &[target, tick_map] : regions) {
-    for (const auto &[tick, pauli] : tick_map) {
-      ss << target.str() << '\t' << tick << '\t' << pauli.str() << '\n';
-    }
-  }
-  return rust::String(ss.str());
+  return detecting_region_entries(stim::circuit_to_detecting_regions(
+      handle.get(), targets, included_ticks, ignore_anticommutation_errors));
 }
 
 rust::Vec<ExplainedErrorData> circuit_explain_detector_error_model_errors(

@@ -7,8 +7,8 @@ use cxx::UniquePtr;
 pub use ffi::{
     BitTableData, CircuitErrorLocationData, CircuitErrorLocationStackFrameData,
     CircuitTargetsInsideInstructionData, CircuitTopLevelItemData, CoordinateEntryData,
-    DemSampleBatch, DemTargetWithCoordsData, DemTopLevelItemData, ExplainedErrorData,
-    FlippedMeasurementData, GateTargetWithCoordsData,
+    DemSampleBatch, DemTargetWithCoordsData, DemTopLevelItemData, DetectingRegionEntryData,
+    ExplainedErrorData, FlippedMeasurementData, GateTargetWithCoordsData,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -891,17 +891,17 @@ impl Circuit {
         ffi::circuit_likeliest_error_sat_problem(self.inner(), quantization, format_name)
     }
 
-    pub fn detecting_regions_text(&self) -> Result<String, cxx::Exception> {
-        ffi::circuit_detecting_regions_text(self.inner())
+    pub fn detecting_regions(&self) -> Result<Vec<ffi::DetectingRegionEntryData>, cxx::Exception> {
+        ffi::circuit_detecting_regions(self.inner())
     }
 
-    pub fn detecting_regions_text_with_options(
+    pub fn detecting_regions_with_options(
         &self,
         target_texts: Vec<String>,
         ticks: Vec<u64>,
         ignore_anticommutation_errors: bool,
-    ) -> Result<String, cxx::Exception> {
-        ffi::circuit_detecting_regions_text_with_options(
+    ) -> Result<Vec<ffi::DetectingRegionEntryData>, cxx::Exception> {
+        ffi::circuit_detecting_regions_with_options(
             self.inner(),
             target_texts,
             ticks,
@@ -2313,6 +2313,13 @@ mod ffi {
         coords: Vec<f64>,
     }
 
+    struct DetectingRegionEntryData {
+        target_index: u64,
+        target_is_observable: bool,
+        tick: u64,
+        pauli: String,
+    }
+
     struct GateTargetWithCoordsData {
         raw_target: u32,
         coords: Vec<f64>,
@@ -2564,13 +2571,15 @@ mod ffi {
             quantization: i32,
             format_name: &str,
         ) -> Result<String>;
-        fn circuit_detecting_regions_text(handle: &CircuitHandle) -> Result<String>;
-        fn circuit_detecting_regions_text_with_options(
+        fn circuit_detecting_regions(
+            handle: &CircuitHandle,
+        ) -> Result<Vec<DetectingRegionEntryData>>;
+        fn circuit_detecting_regions_with_options(
             handle: &CircuitHandle,
             target_texts: Vec<String>,
             ticks: Vec<u64>,
             ignore_anticommutation_errors: bool,
-        ) -> Result<String>;
+        ) -> Result<Vec<DetectingRegionEntryData>>;
         fn circuit_explain_detector_error_model_errors(
             handle: &CircuitHandle,
             dem_filter_text: &str,

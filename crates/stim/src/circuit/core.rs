@@ -9,7 +9,7 @@ use std::str::FromStr;
 use super::{
     CircuitInsertOperation, CircuitInstruction, CircuitItem, CircuitRepeatBlock,
     DetectingRegionFilter,
-    support::{convert_explained_error, parse_detecting_regions_text},
+    support::{convert_explained_error, detecting_region_entries_to_map},
 };
 use crate::common::bit_packing::unpack_bits;
 use crate::common::parse::{coordinate_entries_to_map, decode_measurement_solution};
@@ -1094,11 +1094,10 @@ impl Circuit {
 
     /// Returns detecting regions for all detectors and observables.
     pub fn detecting_regions(&self) -> Result<BTreeMap<DemTarget, BTreeMap<u64, PauliString>>> {
-        let text = self
-            .inner
-            .detecting_regions_text()
-            .map_err(StimError::from)?;
-        parse_detecting_regions_text(&text)
+        self.inner
+            .detecting_regions()
+            .map_err(StimError::from)
+            .and_then(detecting_region_entries_to_map)
     }
 
     /// Returns detecting regions with explicit target and tick filters.
@@ -1108,9 +1107,8 @@ impl Circuit {
         ticks: Option<&[u64]>,
         ignore_anticommutation_errors: bool,
     ) -> Result<BTreeMap<DemTarget, BTreeMap<u64, PauliString>>> {
-        let text = self
-            .inner
-            .detecting_regions_text_with_options(
+        self.inner
+            .detecting_regions_with_options(
                 targets
                     .map(|targets| targets.iter().map(ToString::to_string).collect())
                     .unwrap_or_default(),
@@ -1119,8 +1117,8 @@ impl Circuit {
                     .unwrap_or_default(),
                 ignore_anticommutation_errors,
             )
-            .map_err(StimError::from)?;
-        parse_detecting_regions_text(&text)
+            .map_err(StimError::from)
+            .and_then(detecting_region_entries_to_map)
     }
 
     /// Returns detecting regions using higher-level filter helpers.

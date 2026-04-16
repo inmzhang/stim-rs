@@ -39,6 +39,7 @@ struct DetectorSampleBatch;
 struct CircuitTopLevelItemData;
 struct DemTopLevelItemData;
 struct CoordinateEntryData;
+struct DetectingRegionEntryData;
 struct TableauMeasureKickbackData;
 struct BitTableData;
 
@@ -455,8 +456,8 @@ rust::String circuit_likeliest_error_sat_problem(
     const CircuitHandle &handle,
     std::int32_t quantization,
     rust::Str format_name);
-rust::String circuit_detecting_regions_text(const CircuitHandle &handle);
-rust::String circuit_detecting_regions_text_with_options(
+rust::Vec<DetectingRegionEntryData> circuit_detecting_regions(const CircuitHandle &handle);
+rust::Vec<DetectingRegionEntryData> circuit_detecting_regions_with_options(
     const CircuitHandle &handle,
     rust::Vec<rust::String> target_texts,
     rust::Vec<std::uint64_t> ticks,

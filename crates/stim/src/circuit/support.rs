@@ -6,31 +6,20 @@ use crate::{
     GateTargetWithCoords, PauliString, Result, StimError,
 };
 
-pub fn parse_detecting_regions_text(
-    text: &str,
+pub fn detecting_region_entries_to_map(
+    entries: Vec<stim_cxx::DetectingRegionEntryData>,
 ) -> Result<BTreeMap<DemTarget, BTreeMap<u64, PauliString>>> {
     let mut result: BTreeMap<DemTarget, BTreeMap<u64, PauliString>> = BTreeMap::new();
-    for line in text.lines() {
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.splitn(3, '\t');
-        let target = parts
-            .next()
-            .ok_or_else(|| StimError::new("missing detecting-region target"))?;
-        let tick = parts
-            .next()
-            .ok_or_else(|| StimError::new("missing detecting-region tick"))?;
-        let pauli = parts
-            .next()
-            .ok_or_else(|| StimError::new("missing detecting-region pauli string"))?;
-
-        let target = DemTarget::from_text(target)?;
-        let tick = tick
-            .parse::<u64>()
-            .map_err(|_| StimError::new("failed to parse detecting-region tick"))?;
-        let pauli = PauliString::from_text(pauli)?;
-        result.entry(target).or_default().insert(tick, pauli);
+    for entry in entries {
+        let target = if entry.target_is_observable {
+            DemTarget::logical_observable_id(entry.target_index)?
+        } else {
+            DemTarget::relative_detector_id(entry.target_index)?
+        };
+        result
+            .entry(target)
+            .or_default()
+            .insert(entry.tick, PauliString::from_text(&entry.pauli)?);
     }
     Ok(result)
 }
@@ -133,11 +122,17 @@ pub fn convert_explained_error(data: stim_cxx::ExplainedErrorData) -> Result<Exp
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_explained_error, parse_detecting_regions_text};
+    use super::{convert_explained_error, detecting_region_entries_to_map};
 
     #[test]
     fn support_parsers_and_converters_cover_blank_lines_and_measurement_details() {
-        let parsed = parse_detecting_regions_text("\nD0\t4\t+X\n").unwrap();
+        let parsed = detecting_region_entries_to_map(vec![stim_cxx::DetectingRegionEntryData {
+            target_index: 0,
+            target_is_observable: false,
+            tick: 4,
+            pauli: "+X".to_string(),
+        }])
+        .unwrap();
         assert_eq!(
             parsed,
             std::collections::BTreeMap::from([(
