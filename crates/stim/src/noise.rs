@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Circuit, CircuitInstruction, GateTarget, Result, StimError, gate_data};
+use crate::{Circuit, CircuitInstruction, GateData, GateTarget, Result, StimError};
 
 /// A single noise-channel operation to insert before or after a circuit instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -11,7 +11,7 @@ struct NoiseOperation {
 
 impl NoiseOperation {
     fn new(gate_name: &str, args: &[f64]) -> Result<Self> {
-        let gate = gate_data(gate_name)?;
+        let gate = GateData::new(gate_name)?;
         if gate.produces_measurements() || !gate.is_noisy_gate() {
             return Err(StimError::new(format!(
                 "'{}' is not a pure noise channel",
@@ -166,7 +166,7 @@ impl NoiseModelConfig {
     }
 
     fn with_gate_rule(mut self, gate_name: &str, rule: NoiseRule) -> Result<Self> {
-        let canonical = gate_data(gate_name)?.name();
+        let canonical = GateData::new(gate_name)?.name();
         self.gate_rules.insert(canonical, rule);
         Ok(self)
     }
@@ -298,7 +298,7 @@ impl NoiseModel for NoiseModelConfig {
             let instruction = CircuitInstruction::from_stim_program_text(line)?;
 
             for split_instruction in split_instruction_for_noise(&instruction)? {
-                let gate = gate_data(split_instruction.name())?;
+                let gate = GateData::new(split_instruction.name())?;
                 let qubit_targets = qubit_targets(&split_instruction);
 
                 self.record_qubit_usage(
@@ -692,7 +692,7 @@ fn occurs_in_classical_control_system(instruction: &CircuitInstruction) -> Resul
         return Ok(true);
     }
 
-    let gate = gate_data(instruction.name())?;
+    let gate = GateData::new(instruction.name())?;
     if gate.is_unitary() && gate.is_two_qubit_gate() {
         let targets = instruction.targets_copy();
         for pair in targets.chunks_exact(2) {

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
-use crate::{Circuit, GateTarget, Result, StimError, gate_data};
+use crate::{Circuit, GateData, GateTarget, Result, StimError};
 
 /// A single instruction from a stabilizer circuit, such as `H 0 1` or
 /// `CNOT rec[-1] 5`.
@@ -42,7 +42,7 @@ use crate::{Circuit, GateTarget, Result, StimError, gate_data};
 /// - [`Display`](std::fmt::Display) formats the instruction as a valid
 ///   Stim circuit file line, e.g. `X_ERROR(0.125) 5 7`.
 /// - [`Debug`](std::fmt::Debug) produces the Rust-repr form, e.g.
-///   `stim::CircuitInstruction("X_ERROR", [stim::GateTarget(5), stim::GateTarget(7)], [0.125])`.
+///   `stim::CircuitInstruction("X_ERROR", [stim::GateTarget::qubit(5, false).unwrap(), stim::GateTarget::qubit(7, false).unwrap()], [0.125])`.
 ///
 /// # Ordering and hashing
 ///
@@ -326,7 +326,7 @@ impl CircuitInstruction {
             return split_on_combiners(&self.targets);
         }
 
-        match gate_data(&self.name) {
+        match GateData::new(&self.name) {
             Ok(gate) if gate.is_two_qubit_gate() => self
                 .targets
                 .chunks_exact(2)
@@ -512,7 +512,7 @@ impl FromStr for CircuitInstruction {
 }
 
 fn canonical_gate_name(name: &str) -> String {
-    gate_data(name)
+    GateData::new(name)
         .map(|gate| gate.name())
         .unwrap_or_else(|_| name.to_string())
 }
@@ -592,11 +592,6 @@ mod tests {
     use std::collections::{BTreeSet, HashSet};
     use std::str::FromStr;
 
-    use crate::target_combiner;
-    use crate::target_rec;
-    use crate::target_x;
-    use crate::target_y;
-
     #[test]
     fn constructor_and_accessors_preserve_values() {
         let instruction = CircuitInstruction::new("X_ERROR", [5u32, 7u32], [0.125], "").unwrap();
@@ -606,7 +601,7 @@ mod tests {
         assert_eq!(instruction.gate_args_copy(), vec![0.125]);
         assert_eq!(
             instruction.targets_copy(),
-            vec![GateTarget::new(5u32), GateTarget::new(7u32)]
+            vec![GateTarget::from(5u32), GateTarget::from(7u32)]
         );
         assert_eq!(instruction.num_measurements(), 0);
         assert_eq!(instruction.to_string(), "X_ERROR(0.125) 5 7");
@@ -616,7 +611,7 @@ mod tests {
     fn constructor_canonicalizes_aliases_and_parser_roundtrips_lines() {
         let aliased = CircuitInstruction::new(
             "cnot",
-            [target_rec(-1).unwrap(), GateTarget::new(5u32)],
+            [GateTarget::rec(-1).unwrap(), GateTarget::from(5u32)],
             std::iter::empty::<f64>(),
             "annotated",
         )
@@ -629,12 +624,12 @@ mod tests {
         assert_eq!(
             mpp.targets_copy(),
             vec![
-                target_x(0u32, false).unwrap(),
-                target_combiner(),
-                target_y(1u32, false).unwrap(),
-                target_x(5u32, false).unwrap(),
-                target_combiner(),
-                target_x(6u32, false).unwrap(),
+                GateTarget::x(0u32, false).unwrap(),
+                GateTarget::combiner(),
+                GateTarget::y(1u32, false).unwrap(),
+                GateTarget::x(5u32, false).unwrap(),
+                GateTarget::combiner(),
+                GateTarget::x(6u32, false).unwrap(),
             ]
         );
     }
@@ -648,11 +643,11 @@ mod tests {
 
         assert_eq!(qubit_coords.name(), "QUBIT_COORDS");
         assert_eq!(qubit_coords.gate_args_copy(), vec![1.0, 2.0]);
-        assert_eq!(qubit_coords.targets_copy(), vec![GateTarget::new(0u32)]);
+        assert_eq!(qubit_coords.targets_copy(), vec![GateTarget::from(0u32)]);
 
         assert_eq!(detector.name(), "DETECTOR");
         assert_eq!(detector.gate_args_copy(), vec![2.0, 0.0, 0.0]);
-        assert_eq!(detector.targets_copy(), vec![target_rec(-24).unwrap()]);
+        assert_eq!(detector.targets_copy(), vec![GateTarget::rec(-24).unwrap()]);
     }
 
     #[test]
@@ -663,7 +658,7 @@ mod tests {
         assert_eq!(instruction.to_string(), "I[100ns] 2");
         assert_eq!(
             format!("{instruction:?}"),
-            "stim::CircuitInstruction(\"I\", [stim::GateTarget(2)], [], tag=\"100ns\")"
+            "stim::CircuitInstruction(\"I\", [stim::GateTarget::qubit(2, false).unwrap()], [], tag=\"100ns\")"
         );
 
         let mut circuit = Circuit::new();
@@ -720,12 +715,12 @@ mod tests {
         let mpp = CircuitInstruction::new(
             "MPP",
             [
-                target_x(0u32, false).unwrap(),
-                target_combiner(),
-                target_y(1u32, false).unwrap(),
-                target_x(5u32, false).unwrap(),
-                target_combiner(),
-                target_x(6u32, false).unwrap(),
+                GateTarget::x(0u32, false).unwrap(),
+                GateTarget::combiner(),
+                GateTarget::y(1u32, false).unwrap(),
+                GateTarget::x(5u32, false).unwrap(),
+                GateTarget::combiner(),
+                GateTarget::x(6u32, false).unwrap(),
             ],
             std::iter::empty::<f64>(),
             "",
@@ -733,7 +728,7 @@ mod tests {
         .unwrap();
         let detector = CircuitInstruction::new(
             "DETECTOR",
-            [target_rec(-1).unwrap(), target_rec(-2).unwrap()],
+            [GateTarget::rec(-1).unwrap(), GateTarget::rec(-2).unwrap()],
             [2.0, 3.0],
             "",
         )
@@ -741,8 +736,8 @@ mod tests {
         let correlated = CircuitInstruction::new(
             "CORRELATED_ERROR",
             [
-                target_x(0u32, false).unwrap(),
-                target_y(1u32, false).unwrap(),
+                GateTarget::x(0u32, false).unwrap(),
+                GateTarget::y(1u32, false).unwrap(),
             ],
             [0.1],
             "",
@@ -752,40 +747,43 @@ mod tests {
         assert_eq!(
             single.target_groups(),
             vec![
-                vec![GateTarget::new(0u32)],
-                vec![GateTarget::new(1u32)],
-                vec![GateTarget::new(2u32)],
+                vec![GateTarget::from(0u32)],
+                vec![GateTarget::from(1u32)],
+                vec![GateTarget::from(2u32)],
             ]
         );
         assert_eq!(
             two_qubit.target_groups(),
             vec![
-                vec![GateTarget::new(0u32), GateTarget::new(1u32)],
-                vec![GateTarget::new(2u32), GateTarget::new(3u32)],
+                vec![GateTarget::from(0u32), GateTarget::from(1u32)],
+                vec![GateTarget::from(2u32), GateTarget::from(3u32)],
             ]
         );
         assert_eq!(
             mpp.target_groups(),
             vec![
                 vec![
-                    target_x(0u32, false).unwrap(),
-                    target_y(1u32, false).unwrap()
+                    GateTarget::x(0u32, false).unwrap(),
+                    GateTarget::y(1u32, false).unwrap()
                 ],
                 vec![
-                    target_x(5u32, false).unwrap(),
-                    target_x(6u32, false).unwrap()
+                    GateTarget::x(5u32, false).unwrap(),
+                    GateTarget::x(6u32, false).unwrap()
                 ],
             ]
         );
         assert_eq!(
             detector.target_groups(),
-            vec![vec![target_rec(-1).unwrap()], vec![target_rec(-2).unwrap()]]
+            vec![
+                vec![GateTarget::rec(-1).unwrap()],
+                vec![GateTarget::rec(-2).unwrap()]
+            ]
         );
         assert_eq!(
             correlated.target_groups(),
             vec![vec![
-                target_x(0u32, false).unwrap(),
-                target_y(1u32, false).unwrap(),
+                GateTarget::x(0u32, false).unwrap(),
+                GateTarget::y(1u32, false).unwrap(),
             ]]
         );
     }
@@ -830,14 +828,14 @@ mod tests {
             CircuitInstruction::new(
                 "MPP",
                 [
-                    target_x(0u32, false).unwrap(),
-                    target_combiner(),
-                    target_x(1u32, false).unwrap(),
-                    target_x(0u32, false).unwrap(),
-                    target_combiner(),
-                    target_y(1u32, false).unwrap(),
-                    target_combiner(),
-                    target_y(2u32, false).unwrap(),
+                    GateTarget::x(0u32, false).unwrap(),
+                    GateTarget::combiner(),
+                    GateTarget::x(1u32, false).unwrap(),
+                    GateTarget::x(0u32, false).unwrap(),
+                    GateTarget::combiner(),
+                    GateTarget::y(1u32, false).unwrap(),
+                    GateTarget::combiner(),
+                    GateTarget::y(2u32, false).unwrap(),
                 ],
                 std::iter::empty::<f64>(),
                 "",

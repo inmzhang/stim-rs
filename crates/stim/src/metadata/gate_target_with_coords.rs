@@ -22,13 +22,13 @@ use super::GateTarget;
 /// use stim::{GateTarget, GateTargetWithCoords};
 ///
 /// // A plain qubit target with 2D coordinates.
-/// let target = GateTargetWithCoords::new(GateTarget::new(0u32), vec![1.5, 2.0]);
-/// assert_eq!(target.gate_target(), GateTarget::new(0u32));
+/// let target = GateTargetWithCoords::new(GateTarget::from(0u32), vec![1.5, 2.0]);
+/// assert_eq!(target.gate_target(), GateTarget::from(0u32));
 /// assert_eq!(target.coords(), &[1.5, 2.0]);
 ///
 /// // A Pauli target with no coordinates.
 /// let pauli = GateTargetWithCoords::new(
-///     stim::target_x(5u32, false).expect("valid target"),
+///     stim::GateTarget::x(5u32, false).expect("valid target"),
 ///     vec![],
 /// );
 /// assert!(pauli.coords().is_empty());
@@ -147,13 +147,13 @@ fn compare_coord_slices(left: &[f64], right: &[f64]) -> std::cmp::Ordering {
 mod tests {
     use std::collections::{BTreeSet, HashSet};
 
-    use crate::{GateTarget, target_x};
+    use crate::GateTarget;
 
     use super::GateTargetWithCoords;
 
     #[test]
     fn gate_target_with_coords_constructor_exposes_target_and_coords() {
-        let gate_target = target_x(5u32, false).expect("X target should build");
+        let gate_target = GateTarget::x(5u32, false).expect("X target should build");
         let target_with_coords = GateTargetWithCoords::new(gate_target, vec![1.0, -2.5, 3.25]);
 
         assert_eq!(target_with_coords.gate_target(), gate_target);
@@ -162,8 +162,8 @@ mod tests {
 
     #[test]
     fn gate_target_with_coords_supports_equality_order_and_hash() {
-        let qubit = GateTarget::new(5u32);
-        let pauli = target_x(5u32, false).expect("X target should build");
+        let qubit = GateTarget::from(5u32);
+        let pauli = GateTarget::x(5u32, false).expect("X target should build");
 
         let first = GateTargetWithCoords::new(qubit, vec![1.0]);
         let same_as_first = GateTargetWithCoords::new(qubit, vec![1.0]);
@@ -196,22 +196,22 @@ mod tests {
 
     #[test]
     fn gate_target_with_coords_display_and_debug_match_rust_binding_conventions() {
-        let qubit = GateTargetWithCoords::new(GateTarget::new(5u32), vec![1.0, -2.5]);
+        let qubit = GateTargetWithCoords::new(GateTarget::from(5u32), vec![1.0, -2.5]);
         let pauli = GateTargetWithCoords::new(
-            target_x(5u32, false).expect("X target should build"),
+            GateTarget::x(5u32, false).expect("X target should build"),
             vec![],
         );
 
         assert_eq!(qubit.to_string(), "5[coords 1,-2.5]");
         assert_eq!(
             format!("{qubit:?}"),
-            "stim::GateTargetWithCoords { gate_target: stim::GateTarget(5), coords: [1.0, -2.5] }"
+            "stim::GateTargetWithCoords { gate_target: stim::GateTarget::qubit(5, false).unwrap(), coords: [1.0, -2.5] }"
         );
 
         assert_eq!(pauli.to_string(), "X5");
         assert_eq!(
             format!("{pauli:?}"),
-            "stim::GateTargetWithCoords { gate_target: stim::target_x(5), coords: [] }"
+            "stim::GateTargetWithCoords { gate_target: stim::GateTarget::x(5, false).unwrap(), coords: [] }"
         );
     }
 }

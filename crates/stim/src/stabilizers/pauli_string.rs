@@ -492,12 +492,6 @@ impl PauliString {
         }
     }
 
-    /// Returns an owned copy of the Pauli string.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
-
     /// Returns the number of qubits described by the Pauli string.
     #[must_use]
     pub fn num_qubits(&self) -> usize {
@@ -1581,7 +1575,7 @@ mod tests {
     #[test]
     fn pauli_string_copy_matches_documented_behavior() {
         let p1 = PauliString::random(2);
-        let p2 = p1.copy();
+        let p2 = p1.clone();
 
         assert_eq!(p2, p1);
         assert_ne!((&p2 as *const PauliString), (&p1 as *const PauliString));

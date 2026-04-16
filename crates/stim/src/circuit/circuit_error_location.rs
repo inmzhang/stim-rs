@@ -47,7 +47,7 @@ use crate::{
 /// let location = CircuitErrorLocation::new(
 ///     3, // after 3 TICKs
 ///     vec![GateTargetWithCoords::new(
-///         stim::target_x(0u32, false).expect("valid target"),
+///         stim::GateTarget::x(0u32, false).expect("valid target"),
 ///         vec![],
 ///     )],
 ///     None, // no flipped measurement (Pauli error)
@@ -57,7 +57,7 @@ use crate::{
 ///         vec![0.001],
 ///         0,
 ///         1,
-///         vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+///         vec![GateTargetWithCoords::new(GateTarget::from(0u32), vec![])],
 ///     ),
 ///     vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
 ///     "",
@@ -141,7 +141,7 @@ impl CircuitErrorLocation {
     ///     None,
     ///     CircuitTargetsInsideInstruction::new(
     ///         "X_ERROR", "", vec![0.1], 0, 1,
-    ///         vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+    ///         vec![GateTargetWithCoords::new(GateTarget::from(0u32), vec![])],
     ///     ),
     ///     vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
     ///     "",
@@ -348,7 +348,7 @@ mod tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
 
-    use crate::{GateTarget, target_x, target_y};
+    use crate::GateTarget;
 
     fn sample_instruction_targets() -> CircuitTargetsInsideInstruction {
         CircuitTargetsInsideInstruction::new(
@@ -358,9 +358,9 @@ mod tests {
             2,
             5,
             vec![
-                GateTargetWithCoords::new(GateTarget::new(5u32), vec![1.0, 2.0]),
-                GateTargetWithCoords::new(GateTarget::new(6u32), vec![1.0, 3.0]),
-                GateTargetWithCoords::new(GateTarget::new(7u32), vec![]),
+                GateTargetWithCoords::new(GateTarget::from(5u32), vec![1.0, 2.0]),
+                GateTargetWithCoords::new(GateTarget::from(6u32), vec![1.0, 3.0]),
+                GateTargetWithCoords::new(GateTarget::from(7u32), vec![]),
             ],
         )
     }
@@ -369,7 +369,7 @@ mod tests {
         FlippedMeasurement::new(
             Some(5),
             [GateTargetWithCoords::new(
-                target_x(5u32, false).expect("X target should build"),
+                GateTarget::x(5u32, false).expect("X target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
         )
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn constructor_and_accessors_round_trip() {
         let flipped_pauli_product = vec![GateTargetWithCoords::new(
-            target_y(6u32, false).expect("Y target should build"),
+            GateTarget::y(6u32, false).expect("Y target should build"),
             vec![1.0, 2.0, 3.0],
         )];
         let flipped_measurement = sample_flipped_measurement();
@@ -456,7 +456,7 @@ mod tests {
         let first = CircuitErrorLocation::new(
             5,
             vec![GateTargetWithCoords::new(
-                target_y(6u32, false).expect("Y target should build"),
+                GateTarget::y(6u32, false).expect("Y target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             Some(sample_flipped_measurement()),
@@ -468,7 +468,7 @@ mod tests {
         let later_tick = CircuitErrorLocation::new(
             6,
             vec![GateTargetWithCoords::new(
-                target_y(6u32, false).expect("Y target should build"),
+                GateTarget::y(6u32, false).expect("Y target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             Some(sample_flipped_measurement()),
@@ -479,7 +479,7 @@ mod tests {
         let different_tag = CircuitErrorLocation::new(
             5,
             vec![GateTargetWithCoords::new(
-                target_y(6u32, false).expect("Y target should build"),
+                GateTarget::y(6u32, false).expect("Y target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             Some(sample_flipped_measurement()),
@@ -520,7 +520,7 @@ mod tests {
         let location = CircuitErrorLocation::new(
             5,
             vec![GateTargetWithCoords::new(
-                target_y(6u32, false).expect("Y target should build"),
+                GateTarget::y(6u32, false).expect("Y target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             Some(sample_flipped_measurement()),
@@ -547,10 +547,10 @@ mod tests {
         );
         assert_eq!(
             format!("{location:?}"),
-            r#"stim::CircuitErrorLocation { tick_offset: 5, flipped_pauli_product: [stim::GateTargetWithCoords { gate_target: stim::target_y(6), coords: [1.0, 2.0, 3.0] }], flipped_measurement: Some(stim::FlippedMeasurement(
+            r#"stim::CircuitErrorLocation { tick_offset: 5, flipped_pauli_product: [stim::GateTargetWithCoords { gate_target: stim::GateTarget::y(6, false).unwrap(), coords: [1.0, 2.0, 3.0] }], flipped_measurement: Some(stim::FlippedMeasurement(
     record_index=5,
-    observable=(stim::GateTargetWithCoords(stim::target_x(5), [1.0, 2.0, 3.0]),),
-)), instruction_targets: stim::CircuitTargetsInsideInstruction(gate="X_ERROR", tag="", args=[0.25], target_range_start=2, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::GateTarget(5), [1.0, 2.0]), stim::GateTargetWithCoords(stim::GateTarget(6), [1.0, 3.0]), stim::GateTargetWithCoords(stim::GateTarget(7), []))), stack_frames: [stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 0, instruction_repetitions_arg: 3 }, stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 2, instruction_repetitions_arg: 0 }], noise_tag: "test-tag" }"#
+    observable=(stim::GateTargetWithCoords(stim::GateTarget::x(5, false).unwrap(), [1.0, 2.0, 3.0]),),
+)), instruction_targets: stim::CircuitTargetsInsideInstruction(gate="X_ERROR", tag="", args=[0.25], target_range_start=2, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::GateTarget::qubit(5, false).unwrap(), [1.0, 2.0]), stim::GateTargetWithCoords(stim::GateTarget::qubit(6, false).unwrap(), [1.0, 3.0]), stim::GateTargetWithCoords(stim::GateTarget::qubit(7, false).unwrap(), []))), stack_frames: [stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 0, instruction_repetitions_arg: 3 }, stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 2, instruction_repetitions_arg: 0 }], noise_tag: "test-tag" }"#
         );
     }
 }

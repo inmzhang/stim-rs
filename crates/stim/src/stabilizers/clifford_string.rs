@@ -217,24 +217,6 @@ impl CliffordString {
         }
     }
 
-    /// Returns an independent copy of the Clifford string.
-    ///
-    /// This is equivalent to `Clone::clone`, but provided for API parity with
-    /// the Python `stim.CliffordString.copy()` method. Mutating the copy does
-    /// not affect the original.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let original = stim::CliffordString::from_text("H,S").unwrap();
-    /// let copy = original.copy();
-    /// assert_eq!(original, copy);
-    /// ```
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
-
     /// Returns the number of qubit positions in the Clifford string.
     ///
     /// This is identical to [`CliffordString::len`].
@@ -299,7 +281,7 @@ impl CliffordString {
         self.inner
             .get_item_name(index as i64)
             .map_err(crate::StimError::from)
-            .and_then(|name| crate::gate_data(&name))
+            .and_then(|name| crate::GateData::new(&name))
     }
 
     /// Replaces the single-qubit Clifford gate at the given index.
@@ -318,7 +300,7 @@ impl CliffordString {
     /// ```
     /// let mut c = stim::CliffordString::from_text("I,I,I").unwrap();
     /// c.set(1, "H").unwrap();
-    /// c.set(-1, &stim::gate_data("S").unwrap()).unwrap();
+    /// c.set(-1, &stim::GateData::new("S").unwrap()).unwrap();
     /// assert_eq!(c.to_string(), "I,H,S");
     /// ```
     pub fn set<'a>(
@@ -329,7 +311,7 @@ impl CliffordString {
         let normalized = crate::normalize_index(index, self.len())
             .ok_or_else(|| crate::StimError::new(format!("index {index} out of range")))?;
         let replacement = match value.into() {
-            CliffordGateValue::Name(name) => crate::gate_data(name)?.name(),
+            CliffordGateValue::Name(name) => crate::GateData::new(name)?.name(),
             CliffordGateValue::GateData(gate) => gate.name(),
         };
         let mut parts: Vec<String> = if self.is_empty() {
@@ -878,7 +860,7 @@ mod tests {
         let mut s = CliffordString::from_text("I,I,I,I,I").unwrap();
         s.set(1, "H").unwrap();
         assert_eq!(s, CliffordString::from_text("I,H,I,I,I").unwrap());
-        s.set(-1, &crate::gate_data("S").unwrap()).unwrap();
+        s.set(-1, &crate::GateData::new("S").unwrap()).unwrap();
         assert_eq!(s, CliffordString::from_text("I,H,I,I,S").unwrap());
     }
 
@@ -888,7 +870,7 @@ mod tests {
         assert!(default.is_empty());
 
         let random = CliffordString::random(3);
-        assert_eq!(random.copy().len(), 3);
+        assert_eq!(random.clone().len(), 3);
 
         let step_error = CliffordString::from_text("I,X")
             .unwrap()

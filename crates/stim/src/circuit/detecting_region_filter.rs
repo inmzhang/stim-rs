@@ -1,4 +1,4 @@
-use crate::{DemTarget, Result, target_logical_observable_id, target_relative_detector_id};
+use crate::{DemTarget, Result};
 
 /// A filter that selects which detecting regions to return from a circuit
 /// analysis.
@@ -30,7 +30,7 @@ use crate::{DemTarget, Result, target_logical_observable_id, target_relative_det
 /// let spatial = DetectingRegionFilter::DetectorCoordinatePrefix(vec![1.0, 2.0]);
 ///
 /// // Select a single specific target.
-/// let target = stim::target_relative_detector_id(3).expect("valid id");
+/// let target = stim::DemTarget::relative_detector_id(3).expect("valid id");
 /// let single = DetectingRegionFilter::Target(target);
 /// ```
 #[derive(Clone, Debug, PartialEq)]
@@ -62,10 +62,10 @@ impl DetectingRegionFilter {
     ) -> Result<Vec<DemTarget>> {
         match self {
             Self::AllDetectors => (0..num_detectors)
-                .map(target_relative_detector_id)
+                .map(DemTarget::relative_detector_id)
                 .collect(),
             Self::AllObservables => (0..num_observables)
-                .map(target_logical_observable_id)
+                .map(DemTarget::logical_observable_id)
                 .collect(),
             Self::Target(target) => Ok(vec![*target]),
             Self::DetectorCoordinatePrefix(prefix) => {
@@ -74,7 +74,7 @@ impl DetectingRegionFilter {
                         .into_iter()
                         .filter_map(|(index, candidate)| {
                             if candidate.starts_with(prefix) {
-                                Some(target_relative_detector_id(index).expect(
+                                Some(DemTarget::relative_detector_id(index).expect(
                                     "detector ids from existing coordinates should be valid",
                                 ))
                             } else {
@@ -104,7 +104,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             matches,
-            vec![crate::target_relative_detector_id(0).unwrap()]
+            vec![crate::DemTarget::relative_detector_id(0).unwrap()]
         );
     }
 }

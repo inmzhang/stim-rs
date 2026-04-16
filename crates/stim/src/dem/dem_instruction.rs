@@ -23,7 +23,7 @@ use crate::{DemTarget, DetectorErrorModel, Result, StimError};
 /// ```
 /// use stim::{DemInstructionTarget, DemTarget};
 ///
-/// let det = stim::target_relative_detector_id(3).expect("valid id");
+/// let det = stim::DemTarget::relative_detector_id(3).expect("valid id");
 /// let target = DemInstructionTarget::from(det);
 /// assert!(!target.is_separator());
 ///
@@ -133,8 +133,8 @@ impl fmt::Debug for DemInstructionTarget {
 ///     "error",
 ///     [0.125],
 ///     [
-///         stim::target_relative_detector_id(5).expect("valid id"),
-///         stim::target_logical_observable_id(2).expect("valid id"),
+///         stim::DemTarget::relative_detector_id(5).expect("valid id"),
+///         stim::DemTarget::logical_observable_id(2).expect("valid id"),
 ///     ],
 ///     "",
 /// ).expect("valid instruction");
@@ -166,8 +166,8 @@ impl DemInstruction {
     ///     "error",
     ///     [0.125],
     ///     [
-    ///         stim::target_relative_detector_id(5).expect("valid id"),
-    ///         stim::target_logical_observable_id(2).expect("valid id"),
+    ///         stim::DemTarget::relative_detector_id(5).expect("valid id"),
+    ///         stim::DemTarget::logical_observable_id(2).expect("valid id"),
     ///     ],
     ///     "",
     /// ).expect("valid instruction");
@@ -523,18 +523,14 @@ mod tests {
     use std::collections::{BTreeSet, HashSet};
     use std::str::FromStr;
 
-    use crate::target_logical_observable_id;
-    use crate::target_relative_detector_id;
-    use crate::target_separator;
-
     #[test]
     fn constructor_and_accessors_preserve_values() {
         let instruction = DemInstruction::new(
             "error",
             [0.125],
             [
-                target_relative_detector_id(5).unwrap(),
-                target_logical_observable_id(2).unwrap(),
+                DemTarget::relative_detector_id(5).unwrap(),
+                DemTarget::logical_observable_id(2).unwrap(),
             ],
             "test-tag",
         )
@@ -546,8 +542,8 @@ mod tests {
         assert_eq!(
             instruction.targets_copy(),
             vec![
-                DemInstructionTarget::from(target_relative_detector_id(5).unwrap()),
-                DemInstructionTarget::from(target_logical_observable_id(2).unwrap()),
+                DemInstructionTarget::from(DemTarget::relative_detector_id(5).unwrap()),
+                DemInstructionTarget::from(DemTarget::logical_observable_id(2).unwrap()),
             ]
         );
         assert_eq!(instruction.to_string(), "error[test-tag](0.125) D5 L2");
@@ -563,10 +559,10 @@ mod tests {
         assert_eq!(
             instruction.targets_copy(),
             vec![
-                DemInstructionTarget::from(target_relative_detector_id(5).unwrap()),
-                DemInstructionTarget::from(target_logical_observable_id(6).unwrap()),
-                DemInstructionTarget::from(target_separator()),
-                DemInstructionTarget::from(target_relative_detector_id(4).unwrap()),
+                DemInstructionTarget::from(DemTarget::relative_detector_id(5).unwrap()),
+                DemInstructionTarget::from(DemTarget::logical_observable_id(6).unwrap()),
+                DemInstructionTarget::from(DemTarget::separator()),
+                DemInstructionTarget::from(DemTarget::relative_detector_id(4).unwrap()),
             ]
         );
         assert_eq!(instruction.to_string(), "error(0.125) D5 L6 ^ D4");
@@ -577,21 +573,21 @@ mod tests {
         let first = DemInstruction::new(
             "error",
             [0.125],
-            [target_relative_detector_id(2).unwrap()],
+            [DemTarget::relative_detector_id(2).unwrap()],
             "",
         )
         .unwrap();
         let same = DemInstruction::new(
             "error",
             [0.125],
-            [target_relative_detector_id(2).unwrap()],
+            [DemTarget::relative_detector_id(2).unwrap()],
             "",
         )
         .unwrap();
         let different = DemInstruction::new(
             "error",
             [0.125],
-            [target_relative_detector_id(3).unwrap()],
+            [DemTarget::relative_detector_id(3).unwrap()],
             "",
         )
         .unwrap();
@@ -620,10 +616,10 @@ mod tests {
             "error",
             [0.01],
             [
-                target_relative_detector_id(0).unwrap(),
-                target_relative_detector_id(1).unwrap(),
-                target_separator(),
-                target_relative_detector_id(2).unwrap(),
+                DemTarget::relative_detector_id(0).unwrap(),
+                DemTarget::relative_detector_id(1).unwrap(),
+                DemTarget::separator(),
+                DemTarget::relative_detector_id(2).unwrap(),
             ],
             "",
         )
@@ -632,8 +628,8 @@ mod tests {
             "error",
             [0.01],
             [
-                target_relative_detector_id(0).unwrap(),
-                target_logical_observable_id(0).unwrap(),
+                DemTarget::relative_detector_id(0).unwrap(),
+                DemTarget::logical_observable_id(0).unwrap(),
             ],
             "",
         )
@@ -645,19 +641,19 @@ mod tests {
             split.target_groups(),
             vec![
                 vec![
-                    DemInstructionTarget::from(target_relative_detector_id(0).unwrap()),
-                    DemInstructionTarget::from(target_relative_detector_id(1).unwrap())
+                    DemInstructionTarget::from(DemTarget::relative_detector_id(0).unwrap()),
+                    DemInstructionTarget::from(DemTarget::relative_detector_id(1).unwrap())
                 ],
                 vec![DemInstructionTarget::from(
-                    target_relative_detector_id(2).unwrap()
+                    DemTarget::relative_detector_id(2).unwrap()
                 )],
             ]
         );
         assert_eq!(
             single.target_groups(),
             vec![vec![
-                DemInstructionTarget::from(target_relative_detector_id(0).unwrap()),
-                DemInstructionTarget::from(target_logical_observable_id(0).unwrap()),
+                DemInstructionTarget::from(DemTarget::relative_detector_id(0).unwrap()),
+                DemInstructionTarget::from(DemTarget::logical_observable_id(0).unwrap()),
             ]]
         );
         assert_eq!(empty.target_groups(), vec![Vec::new()]);
@@ -684,7 +680,7 @@ mod tests {
         let instruction = DemInstruction::new(
             "error",
             [0.125],
-            [target_relative_detector_id(5).unwrap()],
+            [DemTarget::relative_detector_id(5).unwrap()],
             "test-tag",
         )
         .unwrap();
@@ -744,14 +740,14 @@ mod tests {
         let low = DemInstruction::new(
             "error",
             [0.1],
-            [target_relative_detector_id(0).unwrap()],
+            [DemTarget::relative_detector_id(0).unwrap()],
             "",
         )
         .unwrap();
         let high = DemInstruction::new(
             "error",
             [0.2],
-            [target_relative_detector_id(0).unwrap()],
+            [DemTarget::relative_detector_id(0).unwrap()],
             "",
         )
         .unwrap();

@@ -20,10 +20,7 @@ pub use dem_append_operation::DemAppendOperation;
 pub use dem_instruction::{DemInstruction, DemInstructionTarget};
 pub use dem_item::DemItem;
 pub use dem_repeat_block::DemRepeatBlock;
-pub use dem_target::{
-    DemTarget, DemTargetWithCoords, target_logical_observable_id, target_relative_detector_id,
-    target_separator,
-};
+pub use dem_target::{DemTarget, DemTargetWithCoords};
 
 /// An error model built out of independent error mechanisms, describing how faults
 /// trigger detectors and logical observables.
@@ -307,16 +304,6 @@ impl DetectorErrorModel {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let original: stim::DetectorErrorModel = "error(0.1) D0 D1".parse().unwrap();
-    /// let copy = original.copy();
-    /// assert_eq!(copy, original);
-    /// ```
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
-
     /// Checks whether two detector error models are approximately equal,
     /// using an absolute tolerance on numeric arguments such as probabilities.
     ///
@@ -768,7 +755,7 @@ impl DetectorErrorModel {
     ///
     /// ```
     /// let mut dem = stim::DetectorErrorModel::new();
-    /// dem.append("error", [0.125], [stim::target_relative_detector_id(1).unwrap()], "")
+    /// dem.append("error", [0.125], [stim::DemTarget::relative_detector_id(1).unwrap()], "")
     ///     .unwrap();
     /// dem.append(
     ///     "shift_detectors",
@@ -1269,10 +1256,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::SystemTime;
 
-    use crate::{
-        Circuit, DemInstructionTarget, DemRepeatBlock, target_logical_observable_id,
-        target_relative_detector_id, target_separator,
-    };
+    use crate::{Circuit, DemInstructionTarget, DemRepeatBlock, DemTarget};
 
     fn unique_temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -1434,7 +1418,7 @@ mod tests {
                 DemInstruction::new(
                     "error",
                     [0.125],
-                    [target_relative_detector_id(0).unwrap()],
+                    [DemTarget::relative_detector_id(0).unwrap()],
                     ""
                 )
                 .unwrap()
@@ -1458,7 +1442,7 @@ mod tests {
                 DemInstruction::new(
                     "detector",
                     [],
-                    [target_relative_detector_id(5).unwrap()],
+                    [DemTarget::relative_detector_id(5).unwrap()],
                     ""
                 )
                 .unwrap()
@@ -1506,7 +1490,7 @@ mod tests {
                 DemInstruction::new(
                     "error",
                     [0.125],
-                    [target_relative_detector_id(0).unwrap()],
+                    [DemTarget::relative_detector_id(0).unwrap()],
                     "",
                 )
                 .unwrap(),
@@ -1522,7 +1506,7 @@ mod tests {
                 DemInstruction::new(
                     "logical_observable",
                     [],
-                    [target_logical_observable_id(0).unwrap()],
+                    [DemTarget::logical_observable_id(0).unwrap()],
                     "",
                 )
                 .unwrap(),
@@ -1552,7 +1536,7 @@ mod tests {
                 DemInstruction::new(
                     "error",
                     [0.125],
-                    [target_relative_detector_id(0).unwrap()],
+                    [DemTarget::relative_detector_id(0).unwrap()],
                     "",
                 )
                 .unwrap(),
@@ -1579,7 +1563,7 @@ mod tests {
                 DemInstruction::new(
                     "error",
                     [0.125],
-                    [target_relative_detector_id(0).unwrap()],
+                    [DemTarget::relative_detector_id(0).unwrap()],
                     "",
                 )
                 .unwrap(),
@@ -1597,7 +1581,7 @@ mod tests {
                 DemInstruction::new(
                     "logical_observable",
                     [],
-                    [target_logical_observable_id(0).unwrap()],
+                    [DemTarget::logical_observable_id(0).unwrap()],
                     "",
                 )
                 .unwrap(),
@@ -1643,7 +1627,7 @@ mod tests {
             .append(
                 "error",
                 [0.125],
-                [target_relative_detector_id(1).unwrap()],
+                [DemTarget::relative_detector_id(1).unwrap()],
                 "",
             )
             .unwrap();
@@ -1652,10 +1636,10 @@ mod tests {
                 "error",
                 [0.25],
                 [
-                    target_relative_detector_id(1).unwrap(),
-                    target_separator(),
-                    target_relative_detector_id(2).unwrap(),
-                    target_logical_observable_id(3).unwrap(),
+                    DemTarget::relative_detector_id(1).unwrap(),
+                    DemTarget::separator(),
+                    DemTarget::relative_detector_id(2).unwrap(),
+                    DemTarget::logical_observable_id(3).unwrap(),
                 ],
                 "test-tag",
             )
@@ -1683,7 +1667,7 @@ mod tests {
             .append(
                 "error",
                 [0.125],
-                [target_relative_detector_id(1).unwrap()],
+                [DemTarget::relative_detector_id(1).unwrap()],
                 "",
             )
             .unwrap();
@@ -1695,7 +1679,7 @@ mod tests {
         let first = DemInstruction::new(
             "error",
             [0.125],
-            [target_relative_detector_id(1).unwrap()],
+            [DemTarget::relative_detector_id(1).unwrap()],
             "",
         )
         .unwrap();
@@ -1911,7 +1895,7 @@ mod tests {
         let model = DetectorErrorModel::from_str("error(0.25) D2 D3\nlogical_observable L0")
             .expect("detector error model should parse");
 
-        let copy = model.copy();
+        let copy = model.clone();
         let clone = model.clone();
         let roundtrip = DetectorErrorModel::from_str(&model.to_string())
             .expect("display output should parse back into an equivalent model");

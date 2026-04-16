@@ -18,21 +18,21 @@ const TARGET_SWEEP_BIT: u32 = 1u32 << 26;
 /// `GateTarget` can represent any of the following target kinds:
 ///
 /// - **Qubit target** — a plain qubit index such as `5`, created with
-///   [`GateTarget::new`] or [`GateTarget::qubit`]. Qubit targets can be optionally
+///   [`GateTarget::from`] or [`GateTarget::qubit`]. Qubit targets can be optionally
 ///   inverted with a `!` prefix (e.g. `!5`), which flips the measurement result.
 /// - **Pauli X / Y / Z target** — a qubit index tagged with a Pauli basis, such as
 ///   `X3`, `Y7`, or `!Z2`. These are used by instructions that operate on
 ///   Pauli-product targets, like `CORRELATED_ERROR` and `MPP`. Created with
-///   [`GateTarget::x`], [`GateTarget::y`], [`GateTarget::z`], [`target_x`],
-///   [`target_y`], [`target_z`], or [`target_pauli`].
+///   [`GateTarget::x`], [`GateTarget::y`], [`GateTarget::z`], or
+///   [`GateTarget::pauli`].
 /// - **Measurement-record target** — a backward reference into the measurement record
-///   such as `rec[-1]` (the most recent measurement). Created with [`GateTarget::rec`]
-///   or [`target_rec`].
+///   such as `rec[-1]` (the most recent measurement). Created with
+///   [`GateTarget::rec`].
 /// - **Sweep-bit target** — an index into a per-shot configuration bitstring such as
-///   `sweep[4]`. Created with [`GateTarget::sweep_bit`] or [`target_sweep_bit`].
+///   `sweep[4]`. Created with [`GateTarget::sweep_bit`].
 /// - **Combiner** — the special `*` token that separates factors of a Pauli product
 ///   inside `MPP` instructions (e.g. `MPP X0*Y1*Z2`). Created with
-///   [`GateTarget::combiner`] or [`target_combiner`].
+///   [`GateTarget::combiner`].
 ///
 /// `GateTarget` values are cheap to copy (they are a single `u32` internally) and
 /// support equality, ordering, and hashing. They can be parsed from Stim text syntax
@@ -43,19 +43,19 @@ const TARGET_SWEEP_BIT: u32 = 1u32 << 26;
 ///
 /// ```
 /// // Qubit target
-/// let qubit = stim::GateTarget::new(5u32);
+/// let qubit = stim::GateTarget::from(5u32);
 /// assert!(qubit.is_qubit_target());
 ///
 /// // Pauli target
-/// let pauli_x = stim::target_x(3u32, false).unwrap();
+/// let pauli_x = stim::GateTarget::x(3u32, false).unwrap();
 /// assert!(pauli_x.is_x_target());
 ///
 /// // Measurement-record target
-/// let record = stim::target_rec(-1).unwrap();
+/// let record = stim::GateTarget::rec(-1).unwrap();
 /// assert!(record.is_measurement_record_target());
 ///
 /// // Combiner
-/// let combiner = stim::target_combiner();
+/// let combiner = stim::GateTarget::combiner();
 /// assert!(combiner.is_combiner());
 /// ```
 pub struct GateTarget {
@@ -67,23 +67,6 @@ impl GateTarget {
     /// type that implements `Into<GateTarget>`.
     ///
     /// When given a `u32`, this creates a plain (non-inverted) qubit target. When
-    /// given an existing `GateTarget`, it simply returns a copy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let qubit = stim::GateTarget::new(5u32);
-    /// assert_eq!(qubit.to_string(), "5");
-    ///
-    /// // Passing an existing GateTarget returns a copy.
-    /// let copy = stim::GateTarget::new(qubit);
-    /// assert_eq!(copy, qubit);
-    /// ```
-    #[must_use]
-    pub fn new(value: impl Into<Self>) -> Self {
-        value.into()
-    }
-
     #[must_use]
     pub(crate) const fn from_raw_data(data: u32) -> Self {
         Self { data }
@@ -108,11 +91,11 @@ impl GateTarget {
     /// ```
     /// assert_eq!(
     ///     stim::GateTarget::from_target_str("rec[-4]").unwrap(),
-    ///     stim::target_rec(-4).unwrap()
+    ///     stim::GateTarget::rec(-4).unwrap()
     /// );
     /// assert_eq!(
     ///     stim::GateTarget::from_target_str("!Z3").unwrap(),
-    ///     stim::target_z(3u32, true).unwrap()
+    ///     stim::GateTarget::z(3u32, true).unwrap()
     /// );
     /// ```
     pub fn from_target_str(text: &str) -> Result<Self> {
@@ -285,8 +268,8 @@ impl GateTarget {
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::GateTarget::new(5u32).qubit_value(), Some(5));
-    /// assert_eq!(stim::target_rec(-2).unwrap().qubit_value(), None);
+    /// assert_eq!(stim::GateTarget::from(5u32).qubit_value(), Some(5));
+    /// assert_eq!(stim::GateTarget::rec(-2).unwrap().qubit_value(), None);
     /// ```
     #[must_use]
     pub fn qubit_value(self) -> Option<u32> {
@@ -386,7 +369,7 @@ impl GateTarget {
     /// # Examples
     ///
     /// ```
-    /// let target = stim::GateTarget::new(7u32);
+    /// let target = stim::GateTarget::from(7u32);
     /// assert_eq!(target.inverted().unwrap().to_string(), "!7");
     /// ```
     pub fn inverted(self) -> Result<Self> {
@@ -440,17 +423,62 @@ impl From<u32> for GateTarget {
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
-    use super::{
-        GateTarget, target_combined_paulis, target_combiner, target_inv, target_pauli, target_rec,
-        target_sweep_bit, target_x, target_y, target_z,
-    };
+    use super::{GateTarget, target_combined_paulis};
     use std::collections::{BTreeSet, HashSet};
+
+    fn target_rec(lookback_index: i32) -> crate::Result<GateTarget> {
+        GateTarget::rec(lookback_index)
+    }
+
+    fn target_inv(target: impl Into<GateTarget>) -> crate::Result<GateTarget> {
+        target.into().inverted()
+    }
+
+    fn target_to_pauli(target: GateTarget, pauli: char, invert: bool) -> crate::Result<GateTarget> {
+        if !target.is_qubit_target() {
+            return Err(crate::StimError::new(format!(
+                "result of stim::target_{}({target}) is not defined",
+                pauli.to_ascii_lowercase()
+            )));
+        }
+        GateTarget::pauli(
+            target
+                .qubit_value()
+                .expect("qubit target should have value"),
+            pauli,
+            target.is_inverted_result_target() ^ invert,
+        )
+    }
+
+    fn target_x(target: impl Into<GateTarget>, invert: bool) -> crate::Result<GateTarget> {
+        target_to_pauli(target.into(), 'X', invert)
+    }
+
+    fn target_y(target: impl Into<GateTarget>, invert: bool) -> crate::Result<GateTarget> {
+        target_to_pauli(target.into(), 'Y', invert)
+    }
+
+    fn target_z(target: impl Into<GateTarget>, invert: bool) -> crate::Result<GateTarget> {
+        target_to_pauli(target.into(), 'Z', invert)
+    }
+
+    fn target_combiner() -> GateTarget {
+        GateTarget::combiner()
+    }
+
+    fn target_sweep_bit(index: u32) -> crate::Result<GateTarget> {
+        GateTarget::sweep_bit(index)
+    }
+
+    fn target_pauli(qubit_index: u32, pauli: char, invert: bool) -> crate::Result<GateTarget> {
+        GateTarget::pauli(qubit_index, pauli, invert)
+    }
 
     #[test]
     fn gate_target_supports_equality_order_hash_and_representation() {
-        let qubit_five = GateTarget::new(5u32);
-        let same_qubit_five = GateTarget::new(qubit_five);
-        let qubit_six = GateTarget::new(6u32);
+        let qubit_five = GateTarget::from(5u32);
+        let same_qubit_five = GateTarget::from(qubit_five);
+        let qubit_six = GateTarget::from(6u32);
         let x_five = target_x(5u32, false).expect("X target should build");
         let inverted_qubit_five = target_inv(5u32).expect("inverted qubit target should build");
         let record = target_rec(-4).expect("record target should build");
@@ -477,24 +505,39 @@ mod tests {
         assert!(hashed.contains(&qubit_six));
 
         assert_eq!(qubit_five.to_string(), "5");
-        assert_eq!(format!("{qubit_five:?}"), "stim::GateTarget(5)");
+        assert_eq!(
+            format!("{qubit_five:?}"),
+            "stim::GateTarget::qubit(5, false).unwrap()"
+        );
         assert_eq!(inverted_qubit_five.to_string(), "!5");
-        assert_eq!(format!("{inverted_qubit_five:?}"), "stim::target_inv(5)");
+        assert_eq!(
+            format!("{inverted_qubit_five:?}"),
+            "stim::GateTarget::qubit(5, true).unwrap()"
+        );
         assert_eq!(record.to_string(), "rec[-4]");
-        assert_eq!(format!("{record:?}"), "stim::target_rec(-4)");
+        assert_eq!(format!("{record:?}"), "stim::GateTarget::rec(-4).unwrap()");
         assert_eq!(sweep.to_string(), "sweep[6]");
-        assert_eq!(format!("{sweep:?}"), "stim::target_sweep_bit(6)");
+        assert_eq!(
+            format!("{sweep:?}"),
+            "stim::GateTarget::sweep_bit(6).unwrap()"
+        );
         assert_eq!(combiner.to_string(), "*");
-        assert_eq!(format!("{combiner:?}"), "stim::target_combiner()");
+        assert_eq!(format!("{combiner:?}"), "stim::GateTarget::combiner()");
         assert_eq!(x_five.to_string(), "X5");
-        assert_eq!(format!("{x_five:?}"), "stim::target_x(5)");
+        assert_eq!(
+            format!("{x_five:?}"),
+            "stim::GateTarget::x(5, false).unwrap()"
+        );
         assert_eq!(inverted_z.to_string(), "!Z3");
-        assert_eq!(format!("{inverted_z:?}"), "stim::target_z(3, true)");
+        assert_eq!(
+            format!("{inverted_z:?}"),
+            "stim::GateTarget::z(3, true).unwrap()"
+        );
     }
 
     #[test]
     fn gate_target_exposes_value_qubit_value_and_classification() {
-        let qubit = GateTarget::new(5u32);
+        let qubit = GateTarget::from(5u32);
         let inverted_qubit = target_inv(5u32).expect("inverted qubit target should build");
         let measurement_record = target_rec(-4).expect("record target should build");
         let combiner = target_combiner();
@@ -551,7 +594,7 @@ mod tests {
         assert_eq!(
             "7".parse::<GateTarget>()
                 .expect("qubit target should parse"),
-            GateTarget::new(7u32)
+            GateTarget::from(7u32)
         );
         assert_eq!(
             "!7".parse::<GateTarget>()
@@ -600,7 +643,7 @@ mod tests {
         assert_eq!(latest.qubit_value(), None);
         assert_eq!(latest.pauli_type(), 'I');
         assert_eq!(latest.to_string(), "rec[-1]");
-        assert_eq!(format!("{latest:?}"), "stim::target_rec(-1)");
+        assert_eq!(format!("{latest:?}"), "stim::GateTarget::rec(-1).unwrap()");
 
         assert_eq!(older.value(), -15);
         assert_eq!(older.to_string(), "rec[-15]");
@@ -636,7 +679,10 @@ mod tests {
         assert_eq!(first.qubit_value(), None);
         assert_eq!(first.pauli_type(), 'I');
         assert_eq!(first.to_string(), "sweep[0]");
-        assert_eq!(format!("{first:?}"), "stim::target_sweep_bit(0)");
+        assert_eq!(
+            format!("{first:?}"),
+            "stim::GateTarget::sweep_bit(0).unwrap()"
+        );
 
         assert_eq!(indexed.to_string(), "sweep[9]");
         assert_eq!(
@@ -673,7 +719,7 @@ mod tests {
         assert_eq!(combiner.value(), 0);
         assert_eq!(combiner.qubit_value(), None);
         assert_eq!(combiner.to_string(), "*");
-        assert_eq!(format!("{combiner:?}"), "stim::target_combiner()");
+        assert_eq!(format!("{combiner:?}"), "stim::GateTarget::combiner()");
         assert_eq!(
             "*".parse::<GateTarget>().expect("combiner should parse"),
             combiner
@@ -683,7 +729,7 @@ mod tests {
         assert_eq!(inverted.to_string(), "!7");
         assert_eq!(
             target_inv(inverted).expect("double inversion should unwrap"),
-            GateTarget::new(7)
+            GateTarget::from(7)
         );
 
         let rec_error = target_inv(target_rec(-2).expect("record target should build"))
@@ -852,7 +898,7 @@ mod tests {
             "unexpected identity error: {identity}"
         );
 
-        let qubit = target_combined_paulis(&[GateTarget::new(5u32)], false)
+        let qubit = target_combined_paulis(&[GateTarget::from(5u32)], false)
             .expect_err("plain qubit targets are not pauli targets");
         assert!(
             qubit.message().contains("expected pauli targets"),
@@ -890,32 +936,41 @@ impl Display for GateTarget {
 impl fmt::Debug for GateTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self.is_combiner() {
-            return f.write_str("stim::target_combiner()");
+            return f.write_str("stim::GateTarget::combiner()");
         }
         if self.is_qubit_target() && !self.is_inverted_result_target() {
-            return write!(f, "stim::GateTarget({})", self.value());
+            return write!(
+                f,
+                "stim::GateTarget::qubit({}, false).unwrap()",
+                self.value()
+            );
         }
         if self.is_qubit_target() && self.is_inverted_result_target() {
-            return write!(f, "stim::target_inv({})", self.value());
+            return write!(
+                f,
+                "stim::GateTarget::qubit({}, true).unwrap()",
+                self.value()
+            );
         }
         if self.is_measurement_record_target() {
-            return write!(f, "stim::target_rec({})", self.value());
+            return write!(f, "stim::GateTarget::rec({}).unwrap()", self.value());
         }
         if self.is_sweep_bit_target() {
-            return write!(f, "stim::target_sweep_bit({})", self.value());
+            return write!(f, "stim::GateTarget::sweep_bit({}).unwrap()", self.value());
         }
 
         let prefix = match self.pauli_type() {
-            'X' => "target_x",
-            'Y' => "target_y",
-            'Z' => "target_z",
+            'X' => "x",
+            'Y' => "y",
+            'Z' => "z",
             _ => unreachable!(),
         };
-        if self.is_inverted_result_target() {
-            write!(f, "stim::{prefix}({}, true)", self.value())
-        } else {
-            write!(f, "stim::{prefix}({})", self.value())
-        }
+        write!(
+            f,
+            "stim::GateTarget::{prefix}({}, {}).unwrap()",
+            self.value(),
+            self.is_inverted_result_target()
+        )
     }
 }
 
@@ -928,64 +983,6 @@ impl FromStr for GateTarget {
 }
 
 /// Creates a measurement-record target like `rec[-k]`.
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(stim::target_rec(-4).unwrap().to_string(), "rec[-4]");
-/// ```
-pub fn target_rec(lookback_index: i32) -> Result<GateTarget> {
-    GateTarget::rec(lookback_index)
-}
-
-/// Inverts a qubit or Pauli target.
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(stim::target_inv(stim::GateTarget::new(7u32)).unwrap().to_string(), "!7");
-/// ```
-pub fn target_inv(target: impl Into<GateTarget>) -> Result<GateTarget> {
-    target.into().inverted()
-}
-
-/// Creates an X-basis target.
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(stim::target_x(5u32, false).unwrap().to_string(), "X5");
-/// ```
-pub fn target_x(target: impl Into<GateTarget>, invert: bool) -> Result<GateTarget> {
-    target_to_pauli(target.into(), 'X', invert)
-}
-
-/// Creates a Y-basis target.
-pub fn target_y(target: impl Into<GateTarget>, invert: bool) -> Result<GateTarget> {
-    target_to_pauli(target.into(), 'Y', invert)
-}
-
-/// Creates a Z-basis target.
-pub fn target_z(target: impl Into<GateTarget>, invert: bool) -> Result<GateTarget> {
-    target_to_pauli(target.into(), 'Z', invert)
-}
-
-/// Returns the target combiner used inside `MPP` products.
-#[must_use]
-pub fn target_combiner() -> GateTarget {
-    GateTarget::combiner()
-}
-
-/// Creates a `sweep[k]` target.
-pub fn target_sweep_bit(index: u32) -> Result<GateTarget> {
-    GateTarget::sweep_bit(index)
-}
-
-/// Creates a Pauli target from a qubit index and Pauli letter.
-pub fn target_pauli(qubit_index: u32, pauli: char, invert: bool) -> Result<GateTarget> {
-    GateTarget::pauli(qubit_index, pauli, invert)
-}
-
 /// Builds a combined Pauli product target list suitable for `MPP`.
 ///
 /// # Examples
@@ -993,8 +990,8 @@ pub fn target_pauli(qubit_index: u32, pauli: char, invert: bool) -> Result<GateT
 /// ```
 /// let targets = stim::target_combined_paulis(
 ///     &[
-///         stim::target_x(1u32, false).unwrap(),
-///         stim::target_z(2u32, false).unwrap(),
+///         stim::GateTarget::x(1u32, false).unwrap(),
+///         stim::GateTarget::z(2u32, false).unwrap(),
 ///     ],
 ///     false,
 /// )
@@ -1051,20 +1048,4 @@ fn parse_u24(text: &str) -> Result<u32> {
         .map_err(|_| StimError::new(format!("expected integer target value, got {text:?}")))?;
     ensure_target_value_range(value)?;
     Ok(value)
-}
-
-fn target_to_pauli(target: GateTarget, pauli: char, invert: bool) -> Result<GateTarget> {
-    if !target.is_qubit_target() {
-        return Err(StimError::new(format!(
-            "result of stim::target_{}({target}) is not defined",
-            pauli.to_ascii_lowercase()
-        )));
-    }
-    GateTarget::pauli(
-        target
-            .qubit_value()
-            .expect("qubit target should have value"),
-        pauli,
-        target.is_inverted_result_target() ^ invert,
-    )
 }

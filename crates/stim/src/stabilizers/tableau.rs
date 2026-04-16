@@ -45,8 +45,8 @@ type TableauNumpyPacked = (
 ///   (it negates anticommuting generators), and can be converted to a tableau via
 ///   [`PauliString::to_tableau`](crate::PauliString::to_tableau).
 /// - **[`Circuit`](crate::Circuit)**: A Clifford circuit can be compiled into a single
-///   tableau via [`Tableau::from_circuit`], and a tableau can be decomposed back into a
-///   circuit via [`Tableau::to_circuit`].
+///   tableau via [`Circuit::to_tableau`](crate::Circuit::to_tableau), and a tableau can
+///   be decomposed back into a circuit via [`Tableau::to_circuit`].
 /// - **[`GateData`](crate::GateData)**: The tableau for any named Clifford gate known to
 ///   Stim (e.g. `"H"`, `"CNOT"`, `"S"`) can be retrieved with [`Tableau::from_named_gate`].
 ///
@@ -163,8 +163,6 @@ impl Tableau {
     /// `ignore_*` flag is set to `true`, in which case those operations are skipped
     /// over as if they were not present.
     ///
-    /// This is a convenience wrapper around [`Circuit::to_tableau`](crate::Circuit::to_tableau).
-    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -176,22 +174,13 @@ impl Tableau {
     ///
     /// ```
     /// let circuit: stim::Circuit = "H 0\nCNOT 0 1".parse().unwrap();
-    /// let tableau = stim::Tableau::from_circuit(&circuit, false, false, false).unwrap();
+    /// let tableau = circuit.to_tableau(false, false, false).unwrap();
     /// assert_eq!(tableau.num_qubits(), 2);
     /// assert_eq!(
     ///     tableau.x_output(0),
     ///     stim::PauliString::from_text("+Z_").unwrap(),
     /// );
     /// ```
-    pub fn from_circuit(
-        circuit: &crate::Circuit,
-        ignore_noise: bool,
-        ignore_measurement: bool,
-        ignore_reset: bool,
-    ) -> crate::Result<Self> {
-        circuit.to_tableau(ignore_noise, ignore_measurement, ignore_reset)
-    }
-
     /// Returns the tableau of a named Clifford gate known to Stim.
     ///
     /// Stim has a built-in library of common Clifford gates, including single-qubit
@@ -1459,12 +1448,6 @@ impl Tableau {
             .map(|pair| crate::Complex32::new(pair[0], pair[1]))
             .collect())
     }
-
-    /// Returns an owned copy of the tableau.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
 }
 
 impl Display for Tableau {
@@ -2010,7 +1993,7 @@ mod circuit_interop_tests {
     #[test]
     fn tableau_copy_matches_documented_behavior() {
         let t1 = Tableau::new(3);
-        let t2 = t1.copy();
+        let t2 = t1.clone();
 
         assert_eq!(t1, t2);
         assert_ne!((&t1 as *const Tableau), (&t2 as *const Tableau));
@@ -2332,7 +2315,7 @@ mod circuit_interop_tests {
     #[test]
     fn from_circuit_delegates_to_the_same_conversion_path() {
         let circuit = Circuit::from_str("H 0\nCNOT 0 1").unwrap();
-        let via_tableau = Tableau::from_circuit(&circuit, false, false, false).unwrap();
+        let via_tableau = circuit.to_tableau(false, false, false).unwrap();
         let via_circuit = circuit.to_tableau(false, false, false).unwrap();
 
         assert_eq!(via_tableau, via_circuit);
@@ -2567,7 +2550,7 @@ mod circuit_interop_tests {
     fn tableau_inverse_outputs_and_copy_match_documented_behavior() {
         let t = Tableau::from_named_gate("CNOT").unwrap();
         let t_inv = t.inverse(false);
-        let copied = t.copy();
+        let copied = t.clone();
         let px = t.inverse_x_output(0, false);
         let py = t.inverse_y_output(0, false);
         let pz = t.inverse_z_output(0, false);
@@ -2577,7 +2560,7 @@ mod circuit_interop_tests {
         assert_eq!(px, t_inv.x_output(0));
         assert_eq!(py, t_inv.y_output(0));
         assert_eq!(pz, t_inv.z_output(0));
-        assert_eq!(px.copy(), px);
+        assert_eq!(px.clone(), px);
     }
 
     #[test]

@@ -174,7 +174,7 @@ impl Circuit {
     ///
     /// * `decompose_errors` - When `true`, composite error mechanisms (such as
     ///   depolarization) are decomposed into simpler graphlike errors separated by
-    ///   `stim::target_separator()`. Decomposition fails if large errors cannot be
+    ///   `stim::DemTarget::separator()`. Decomposition fails if large errors cannot be
     ///   split into components affecting at most two detectors.
     /// * `flatten_loops` - When `true`, the output will not contain any `repeat`
     ///   blocks. When `false`, the analysis watches for periodic steady states in
@@ -287,7 +287,7 @@ impl Circuit {
     /// ```
     /// let circuit: stim::Circuit = "H 0\nS 0".parse().unwrap();
     /// let tableau = circuit.to_tableau(false, false, false).unwrap();
-    /// assert_eq!(tableau, stim::Tableau::from_circuit(&circuit, false, false, false).unwrap());
+    /// assert_eq!(tableau, circuit.to_tableau(false, false, false).unwrap());
     /// ```
     pub fn to_tableau(
         &self,
@@ -704,9 +704,9 @@ impl Circuit {
     ///     .append_gate_targets(
     ///         "CORRELATED_ERROR",
     ///         &[
-    ///             stim::target_x(0_u32, false).unwrap(),
-    ///             stim::target_y(1_u32, false).unwrap(),
-    ///             stim::target_z(2_u32, false).unwrap(),
+    ///             stim::GateTarget::x(0_u32, false).unwrap(),
+    ///             stim::GateTarget::y(1_u32, false).unwrap(),
+    ///             stim::GateTarget::z(2_u32, false).unwrap(),
     ///         ],
     ///         &[0.125],
     ///     )
@@ -1551,12 +1551,6 @@ impl Circuit {
         fs::write(path, format!("{self}\n")).map_err(|error| StimError::new(error.to_string()))
     }
 
-    /// Returns an owned copy of the circuit.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
-
     /// Generates a named example circuit using Stim's built-in generators.
     ///
     /// # Examples
@@ -1823,7 +1817,7 @@ mod api_tests {
 
     use ndarray::Array2;
 
-    use crate::{Circuit, all_gate_data, gate_data};
+    use crate::{Circuit, GateData, all_gate_data};
 
     fn unique_temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -2040,7 +2034,7 @@ mod api_tests {
     fn copy_returns_an_independent_clone() {
         let original = Circuit::from_str("H 0").expect("circuit should parse");
 
-        let copy = original.copy();
+        let copy = original.clone();
 
         assert_eq!(copy, original);
         assert_ne!((&copy as *const Circuit), (&original as *const Circuit));
@@ -2597,7 +2591,7 @@ mod api_tests {
 
     #[test]
     fn gate_data_lookup_exposes_basic_metadata() {
-        let gate = gate_data("cnot").expect("gate should exist");
+        let gate = GateData::new("cnot").expect("gate should exist");
 
         assert_eq!(gate.name(), "CX");
         assert!(gate.aliases().contains(&"CNOT".to_string()));
@@ -2609,11 +2603,11 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_more_metadata_flags() {
-        let h = gate_data("H").expect("gate should exist");
-        let x_error = gate_data("X_ERROR").expect("gate should exist");
-        let m = gate_data("M").expect("gate should exist");
-        let r = gate_data("R").expect("gate should exist");
-        let detector = gate_data("DETECTOR").expect("gate should exist");
+        let h = GateData::new("H").expect("gate should exist");
+        let x_error = GateData::new("X_ERROR").expect("gate should exist");
+        let m = GateData::new("M").expect("gate should exist");
+        let r = GateData::new("R").expect("gate should exist");
+        let detector = GateData::new("DETECTOR").expect("gate should exist");
 
         assert!(h.is_single_qubit_gate());
         assert!(!h.is_noisy_gate());
@@ -2635,10 +2629,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_inverse_relationships() {
-        let h = gate_data("H").expect("gate should exist");
-        let s = gate_data("S").expect("gate should exist");
-        let x_error = gate_data("X_ERROR").expect("gate should exist");
-        let r = gate_data("R").expect("gate should exist");
+        let h = GateData::new("H").expect("gate should exist");
+        let s = GateData::new("S").expect("gate should exist");
+        let x_error = GateData::new("X_ERROR").expect("gate should exist");
+        let r = GateData::new("R").expect("gate should exist");
 
         assert_eq!(h.inverse().expect("H has inverse").name(), "H");
         assert_eq!(s.inverse().expect("S has inverse").name(), "S_DAG");
@@ -2650,9 +2644,9 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_hadamard_conjugation() {
-        let x = gate_data("X").expect("gate should exist");
-        let cx = gate_data("CX").expect("gate should exist");
-        let ry = gate_data("RY").expect("gate should exist");
+        let x = GateData::new("X").expect("gate should exist");
+        let cx = GateData::new("CX").expect("gate should exist");
+        let ry = GateData::new("RY").expect("gate should exist");
 
         assert_eq!(
             x.hadamard_conjugated(false)
@@ -2677,10 +2671,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_symmetric_gate_property() {
-        let cx = gate_data("CX").expect("gate should exist");
-        let cz = gate_data("CZ").expect("gate should exist");
-        let h = gate_data("H").expect("gate should exist");
-        let detector = gate_data("DETECTOR").expect("gate should exist");
+        let cx = GateData::new("CX").expect("gate should exist");
+        let cz = GateData::new("CZ").expect("gate should exist");
+        let h = GateData::new("H").expect("gate should exist");
+        let detector = GateData::new("DETECTOR").expect("gate should exist");
 
         assert!(!cx.is_symmetric_gate());
         assert!(cz.is_symmetric_gate());
@@ -2690,10 +2684,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_supports_identity_traits() {
-        let canonical = gate_data("CX").expect("gate should exist");
-        let alias = gate_data("cnot").expect("alias should resolve");
+        let canonical = GateData::new("CX").expect("gate should exist");
+        let alias = GateData::new("cnot").expect("alias should resolve");
         let cloned = alias.clone();
-        let other = gate_data("H").expect("other gate should exist");
+        let other = GateData::new("H").expect("other gate should exist");
 
         assert_eq!(canonical, alias);
         assert_eq!(cloned, canonical);
@@ -2702,18 +2696,18 @@ mod api_tests {
 
     #[test]
     fn gate_data_display_and_debug_use_canonical_names() {
-        let gate = gate_data("mpp").expect("gate should exist");
-        let alias = gate_data("cnot").expect("alias should resolve");
+        let gate = GateData::new("mpp").expect("gate should exist");
+        let alias = GateData::new("cnot").expect("alias should resolve");
 
         assert_eq!(gate.to_string(), "MPP");
-        assert_eq!(format!("{gate:?}"), "stim::gate_data(\"MPP\")");
+        assert_eq!(format!("{gate:?}"), "stim::GateData::new(\"MPP\")");
         assert_eq!(alias.to_string(), "CX");
-        assert_eq!(format!("{alias:?}"), "stim::gate_data(\"CX\")");
+        assert_eq!(format!("{alias:?}"), "stim::GateData::new(\"CX\")");
     }
 
     #[test]
     fn gate_data_lookup_reports_unknown_gates() {
-        let error = gate_data("definitely_not_a_gate").expect_err("unknown gate should fail");
+        let error = GateData::new("definitely_not_a_gate").expect_err("unknown gate should fail");
 
         assert!(error.message().contains("definitely_not_a_gate"));
     }
@@ -2730,7 +2724,10 @@ mod api_tests {
         assert!(!inventory.contains_key("NOT_A_GATE"));
 
         let cx = inventory.get("CX").expect("CX should be present");
-        assert_eq!(cx, &gate_data("cnot").expect("lookup should resolve alias"));
+        assert_eq!(
+            cx,
+            &GateData::new("cnot").expect("lookup should resolve alias")
+        );
         assert_eq!(cx.name(), "CX");
         assert!(cx.aliases().contains(&"CNOT".to_string()));
 
@@ -2738,7 +2735,7 @@ mod api_tests {
             assert_eq!(gate.name(), *name);
             assert_eq!(
                 gate,
-                &gate_data(name).expect("inventory key should roundtrip")
+                &GateData::new(name).expect("inventory key should roundtrip")
             );
             assert_eq!(gate.to_string(), *name);
         }
@@ -2753,8 +2750,8 @@ mod residual_api_tests {
     use super::Circuit;
     use crate::DetectingRegionFilter;
     use crate::{
-        CircuitInstruction, CircuitItem, CircuitRepeatBlock, DetectorErrorModel, Flow, GateTarget,
-        PauliString, target_logical_observable_id, target_relative_detector_id,
+        CircuitInstruction, CircuitItem, CircuitRepeatBlock, DemTarget, DetectorErrorModel, Flow,
+        GateTarget, PauliString,
     };
     #[test]
     fn circuit_get_detector_coordinates_matches_documented_examples() {
@@ -2930,16 +2927,20 @@ mod residual_api_tests {
             .append_gate_targets(
                 "CX",
                 &[
-                    GateTarget::new(0_u32),
-                    GateTarget::new(1_u32),
-                    GateTarget::new(2_u32),
-                    GateTarget::new(3_u32),
+                    GateTarget::from(0_u32),
+                    GateTarget::from(1_u32),
+                    GateTarget::from(2_u32),
+                    GateTarget::from(3_u32),
                 ],
                 &[],
             )
             .expect("qubit targets should append");
         circuit
-            .append_gate_targets("H", &[GateTarget::new(4_u32), GateTarget::new(5_u32)], &[])
+            .append_gate_targets(
+                "H",
+                &[GateTarget::from(4_u32), GateTarget::from(5_u32)],
+                &[],
+            )
             .expect("single-qubit targets should append");
 
         assert_eq!(
@@ -2959,9 +2960,9 @@ mod residual_api_tests {
             .append_gate_targets(
                 "CORRELATED_ERROR",
                 &[
-                    crate::target_x(0_u32, false).expect("X target should construct"),
-                    crate::target_y(1_u32, false).expect("Y target should construct"),
-                    crate::target_pauli(2, 'Z', false).expect("Z target should construct"),
+                    crate::GateTarget::x(0_u32, false).expect("X target should construct"),
+                    crate::GateTarget::y(1_u32, false).expect("Y target should construct"),
+                    crate::GateTarget::pauli(2, 'Z', false).expect("Z target should construct"),
                 ],
                 &[0.125],
             )
@@ -2974,14 +2975,18 @@ mod residual_api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append_gate_targets("M", &[GateTarget::new(0_u32), GateTarget::new(1_u32)], &[])
+            .append_gate_targets(
+                "M",
+                &[GateTarget::from(0_u32), GateTarget::from(1_u32)],
+                &[],
+            )
             .expect("measurements should append");
         circuit
             .append_gate_targets(
                 "CX",
                 &[
-                    crate::target_rec(-1).expect("record target should construct"),
-                    GateTarget::new(5_u32),
+                    crate::GateTarget::rec(-1).expect("record target should construct"),
+                    GateTarget::from(5_u32),
                 ],
                 &[],
             )
@@ -2990,8 +2995,8 @@ mod residual_api_tests {
             .append_gate_targets(
                 "DETECTOR",
                 &[
-                    crate::target_rec(-1).expect("record target should construct"),
-                    crate::target_rec(-2).expect("record target should construct"),
+                    crate::GateTarget::rec(-1).expect("record target should construct"),
+                    crate::GateTarget::rec(-2).expect("record target should construct"),
                 ],
                 &[],
             )
@@ -3000,8 +3005,8 @@ mod residual_api_tests {
             .append_gate_targets(
                 "OBSERVABLE_INCLUDE",
                 &[
-                    crate::target_rec(-1).expect("record target should construct"),
-                    crate::target_rec(-2).expect("record target should construct"),
+                    crate::GateTarget::rec(-1).expect("record target should construct"),
+                    crate::GateTarget::rec(-2).expect("record target should construct"),
                 ],
                 &[3.0],
             )
@@ -3024,20 +3029,20 @@ mod residual_api_tests {
 
         let mut targets = crate::target_combined_paulis(
             &[
-                crate::target_x(1_u32, false).expect("X target should construct"),
-                crate::target_y(2_u32, false).expect("Y target should construct"),
-                crate::target_z(3_u32, false).expect("Z target should construct"),
+                crate::GateTarget::x(1_u32, false).expect("X target should construct"),
+                crate::GateTarget::y(2_u32, false).expect("Y target should construct"),
+                crate::GateTarget::z(3_u32, false).expect("Z target should construct"),
             ],
             false,
         )
         .expect("combined pauli product should construct");
-        targets.push(crate::target_y(4_u32, false).expect("single Y target should construct"));
-        targets.push(crate::target_z(5_u32, false).expect("single Z target should construct"));
+        targets.push(crate::GateTarget::y(4_u32, false).expect("single Y target should construct"));
+        targets.push(crate::GateTarget::z(5_u32, false).expect("single Z target should construct"));
         targets.extend(
             crate::target_combined_paulis(
                 &[
-                    crate::target_x(1_u32, false).expect("X target should construct"),
-                    crate::target_x(2_u32, false).expect("X target should construct"),
+                    crate::GateTarget::x(1_u32, false).expect("X target should construct"),
+                    crate::GateTarget::x(2_u32, false).expect("X target should construct"),
                 ],
                 true,
             )
@@ -3671,7 +3676,7 @@ mod residual_api_tests {
         ticks.insert(2, PauliString::from_text("+XX").unwrap());
 
         let mut expected = BTreeMap::new();
-        expected.insert(target_relative_detector_id(0).unwrap(), ticks);
+        expected.insert(DemTarget::relative_detector_id(0).unwrap(), ticks);
 
         assert_eq!(actual, expected);
     }
@@ -3693,7 +3698,7 @@ mod residual_api_tests {
 
         let filtered = circuit
             .detecting_regions_with_options(
-                Some(&[target_relative_detector_id(0).unwrap()]),
+                Some(&[DemTarget::relative_detector_id(0).unwrap()]),
                 Some(&[1]),
                 false,
             )
@@ -3702,18 +3707,18 @@ mod residual_api_tests {
         let mut ticks = BTreeMap::new();
         ticks.insert(1, PauliString::from_text("+X").unwrap());
         let mut expected = BTreeMap::new();
-        expected.insert(target_relative_detector_id(0).unwrap(), ticks);
+        expected.insert(DemTarget::relative_detector_id(0).unwrap(), ticks);
         assert_eq!(filtered, expected);
 
         let observable_only = circuit
             .detecting_regions_with_options(
-                Some(&[target_logical_observable_id(0).unwrap()]),
+                Some(&[DemTarget::logical_observable_id(0).unwrap()]),
                 None,
                 false,
             )
             .unwrap();
         assert_eq!(observable_only.len(), 1);
-        assert!(observable_only.contains_key(&target_logical_observable_id(0).unwrap()));
+        assert!(observable_only.contains_key(&DemTarget::logical_observable_id(0).unwrap()));
     }
 
     #[test]
@@ -3744,14 +3749,14 @@ mod residual_api_tests {
         let by_target = circuit
             .detecting_regions_with_filters(
                 &[DetectingRegionFilter::Target(
-                    target_relative_detector_id(0).unwrap(),
+                    DemTarget::relative_detector_id(0).unwrap(),
                 )],
                 Some(&[1]),
                 false,
             )
             .unwrap();
         assert_eq!(by_target.len(), 1);
-        assert!(by_target.contains_key(&target_relative_detector_id(0).unwrap()));
+        assert!(by_target.contains_key(&DemTarget::relative_detector_id(0).unwrap()));
 
         let by_coords = circuit
             .detecting_regions_with_filters(
@@ -3761,7 +3766,7 @@ mod residual_api_tests {
             )
             .unwrap();
         assert_eq!(by_coords.len(), 1);
-        assert!(by_coords.contains_key(&target_relative_detector_id(0).unwrap()));
+        assert!(by_coords.contains_key(&DemTarget::relative_detector_id(0).unwrap()));
     }
 
     #[test]
@@ -3930,7 +3935,7 @@ mod residual_api_tests {
                 Some((1, 1)),
                 None,
                 &[DetectingRegionFilter::Target(
-                    target_relative_detector_id(0).unwrap(),
+                    DemTarget::relative_detector_id(0).unwrap(),
                 )],
             )
             .unwrap();
@@ -3942,7 +3947,7 @@ mod residual_api_tests {
                 Some((1, 1)),
                 Some(1),
                 &[DetectingRegionFilter::Target(
-                    target_logical_observable_id(0).unwrap(),
+                    DemTarget::logical_observable_id(0).unwrap(),
                 )],
             )
             .unwrap();

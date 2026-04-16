@@ -12,9 +12,41 @@ from tools.stim_rust_parity_audit import (
 
 
 class StimRustParityAuditTests(unittest.TestCase):
-    def test_repo_surface_does_not_expose_removed_circuit_flattened_operations(self) -> None:
+    def test_repo_surface_does_not_expose_removed_duplicate_helpers(self) -> None:
         surface = collect_surface_from_source(Path("crates/stim/src"))
-        self.assertNotIn("stim::Circuit::flattened_operations", surface)
+        removed = {
+            "stim::Circuit::flattened_operations",
+            "stim::Circuit::copy",
+            "stim::DetectorErrorModel::copy",
+            "stim::Tableau::copy",
+            "stim::CliffordString::copy",
+            "stim::PauliString::copy",
+            "stim::TableauSimulator::copy",
+            "stim::FlipSimulator::copy",
+            "stim::CompiledMeasurementSampler",
+            "stim::CompiledDetectorSampler",
+            "stim::CompiledDemSampler",
+            "stim::CompiledMeasurementsToDetectionEventsConverter",
+            "stim::MeasurementSampler::new",
+            "stim::DetectorSampler::new",
+            "stim::MeasurementsToDetectionEventsConverter::new",
+            "stim::gate_data",
+            "stim::GateTarget::new",
+            "stim::DemTarget::new",
+            "stim::target_rec",
+            "stim::target_inv",
+            "stim::target_x",
+            "stim::target_y",
+            "stim::target_z",
+            "stim::target_combiner",
+            "stim::target_sweep_bit",
+            "stim::target_pauli",
+            "stim::target_relative_detector_id",
+            "stim::target_logical_observable_id",
+            "stim::target_separator",
+            "stim::Tableau::from_circuit",
+        }
+        self.assertTrue(removed.isdisjoint(surface), removed & surface)
 
     def test_collect_surface_from_source_detects_structs_methods_and_traits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

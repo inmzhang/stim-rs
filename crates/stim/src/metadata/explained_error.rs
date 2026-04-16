@@ -39,19 +39,19 @@ use crate::{CircuitErrorLocation, DemTargetWithCoords};
 ///
 /// let explained = ExplainedError::new(
 ///     vec![DemTargetWithCoords::new(
-///         stim::target_logical_observable_id(0).expect("valid id"),
+///         stim::DemTarget::logical_observable_id(0).expect("valid id"),
 ///         vec![],
 ///     )],
 ///     vec![CircuitErrorLocation::new(
 ///         1,
 ///         vec![GateTargetWithCoords::new(
-///             stim::target_y(0u32, false).expect("valid target"),
+///             stim::GateTarget::y(0u32, false).expect("valid target"),
 ///             vec![],
 ///         )],
 ///         None,
 ///         CircuitTargetsInsideInstruction::new(
 ///             "Y_ERROR", "", vec![0.125], 0, 1,
-///             vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+///             vec![GateTargetWithCoords::new(GateTarget::from(0u32), vec![])],
 ///         ),
 ///         vec![CircuitErrorLocationStackFrame::new(2, 0, 0)],
 ///         "",
@@ -212,15 +212,14 @@ mod tests {
     use super::ExplainedError;
     use crate::{
         CircuitErrorLocation, CircuitErrorLocationStackFrame, CircuitTargetsInsideInstruction,
-        DemTargetWithCoords, GateTarget, GateTargetWithCoords, target_logical_observable_id,
-        target_relative_detector_id, target_y,
+        DemTarget, DemTargetWithCoords, GateTarget, GateTargetWithCoords,
     };
 
     fn sample_circuit_error_location() -> CircuitErrorLocation {
         CircuitErrorLocation::new(
             5,
             vec![GateTargetWithCoords::new(
-                target_y(6, false).expect("pauli target should build"),
+                GateTarget::y(6, false).expect("pauli target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             None,
@@ -231,9 +230,9 @@ mod tests {
                 2,
                 5,
                 vec![
-                    GateTargetWithCoords::new(GateTarget::new(5), vec![1.0, 2.0]),
-                    GateTargetWithCoords::new(GateTarget::new(6), vec![1.0, 3.0]),
-                    GateTargetWithCoords::new(GateTarget::new(7), vec![]),
+                    GateTargetWithCoords::new(GateTarget::from(5), vec![1.0, 2.0]),
+                    GateTargetWithCoords::new(GateTarget::from(6), vec![1.0, 3.0]),
+                    GateTargetWithCoords::new(GateTarget::from(7), vec![]),
                 ],
             ),
             vec![
@@ -247,11 +246,11 @@ mod tests {
     #[test]
     fn explained_error_constructor_and_accessors_preserve_values() {
         let detector = DemTargetWithCoords::new(
-            target_relative_detector_id(5).expect("detector target should build"),
+            DemTarget::relative_detector_id(5).expect("detector target should build"),
             vec![1.0, -2.5],
         );
         let logical = DemTargetWithCoords::new(
-            target_logical_observable_id(2).expect("logical target should build"),
+            DemTarget::logical_observable_id(2).expect("logical target should build"),
             vec![],
         );
         let location = sample_circuit_error_location();
@@ -268,11 +267,11 @@ mod tests {
     #[test]
     fn explained_error_supports_equality_hash_and_order() {
         let detector = DemTargetWithCoords::new(
-            target_relative_detector_id(5).expect("detector target should build"),
+            DemTarget::relative_detector_id(5).expect("detector target should build"),
             vec![1.0],
         );
         let logical = DemTargetWithCoords::new(
-            target_logical_observable_id(0).expect("logical target should build"),
+            DemTarget::logical_observable_id(0).expect("logical target should build"),
             vec![],
         );
         let location = sample_circuit_error_location();
@@ -310,14 +309,14 @@ mod tests {
     fn explained_error_display_and_debug_have_stable_shapes() {
         let empty = ExplainedError::new(
             vec![DemTargetWithCoords::new(
-                target_relative_detector_id(5).expect("detector target should build"),
+                DemTarget::relative_detector_id(5).expect("detector target should build"),
                 vec![1.0, 2.0, 3.0],
             )],
             vec![],
         );
         let populated = ExplainedError::new(
             vec![DemTargetWithCoords::new(
-                target_relative_detector_id(5).expect("detector target should build"),
+                DemTarget::relative_detector_id(5).expect("detector target should build"),
                 vec![1.0, -2.5],
             )],
             vec![sample_circuit_error_location()],
@@ -349,11 +348,11 @@ mod tests {
         let explained = ExplainedError::new(
             vec![
                 DemTargetWithCoords::new(
-                    target_logical_observable_id(0).expect("logical target should build"),
+                    DemTarget::logical_observable_id(0).expect("logical target should build"),
                     vec![],
                 ),
                 DemTargetWithCoords::new(
-                    target_relative_detector_id(5).expect("detector target should build"),
+                    DemTarget::relative_detector_id(5).expect("detector target should build"),
                     vec![1.0],
                 ),
             ],

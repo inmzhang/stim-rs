@@ -30,7 +30,7 @@ use crate::GateTargetWithCoords;
 /// let flipped = FlippedMeasurement::new(
 ///     Some(5),
 ///     vec![GateTargetWithCoords::new(
-///         stim::target_z(10u32, false).expect("valid target"),
+///         stim::GateTarget::z(10u32, false).expect("valid target"),
 ///         vec![],
 ///     )],
 /// );
@@ -56,8 +56,8 @@ impl FlippedMeasurement {
     /// - `observable` -- the Pauli observable of the measurement,
     ///   represented as a sequence of
     ///   [`GateTargetWithCoords`](crate::GateTargetWithCoords). For a
-    ///   simple `M 10` instruction this would be `[target_z(10)]`; for
-    ///   `MX 5` it would be `[target_x(5)]`.
+    ///   simple `M 10` instruction this would be `[GateTarget::z(10)]`; for
+    ///   `MX 5` it would be `[GateTarget::x(5)]`.
     #[must_use]
     pub fn new(
         record_index: Option<u64>,
@@ -163,18 +163,19 @@ impl fmt::Debug for FlippedMeasurement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GateTarget;
     use std::collections::{BTreeSet, HashSet};
-
-    use crate::target_x;
 
     #[test]
     fn constructor_and_accessors_preserve_record_index_and_observable() {
         let first = GateTargetWithCoords::new(
-            target_x(5, false).expect("X target should build"),
+            GateTarget::x(5, false).expect("X target should build"),
             vec![1.0],
         );
-        let second =
-            GateTargetWithCoords::new(target_x(7, false).expect("X target should build"), vec![]);
+        let second = GateTargetWithCoords::new(
+            GateTarget::x(7, false).expect("X target should build"),
+            vec![],
+        );
 
         let flipped = FlippedMeasurement::new(Some(5), [first.clone(), second.clone()]);
 
@@ -187,21 +188,21 @@ mod tests {
         let first = FlippedMeasurement::new(
             Some(2),
             [GateTargetWithCoords::new(
-                target_x(5, false).expect("X target should build"),
+                GateTarget::x(5, false).expect("X target should build"),
                 vec![1.0],
             )],
         );
         let same = FlippedMeasurement::new(
             Some(2),
             [GateTargetWithCoords::new(
-                target_x(5, false).expect("X target should build"),
+                GateTarget::x(5, false).expect("X target should build"),
                 vec![1.0],
             )],
         );
         let different_observable = FlippedMeasurement::new(
             Some(2),
             [GateTargetWithCoords::new(
-                target_x(5, false).expect("X target should build"),
+                GateTarget::x(5, false).expect("X target should build"),
                 vec![2.0],
             )],
         );
@@ -246,14 +247,14 @@ mod tests {
         let flipped = FlippedMeasurement::new(
             Some(5),
             [GateTargetWithCoords::new(
-                target_x(5, false).expect("X target should build"),
+                GateTarget::x(5, false).expect("X target should build"),
                 vec![1.0, -2.5],
             )],
         );
 
         let expected = "stim::FlippedMeasurement(
     record_index=5,
-    observable=(stim::GateTargetWithCoords(stim::target_x(5), [1.0, -2.5]),),
+    observable=(stim::GateTargetWithCoords(stim::GateTarget::x(5, false).unwrap(), [1.0, -2.5]),),
 )";
         assert_eq!(flipped.to_string(), expected);
         assert_eq!(format!("{flipped:?}"), expected);
@@ -279,14 +280,14 @@ mod tests {
         let left = FlippedMeasurement::new(
             None,
             [GateTargetWithCoords::new(
-                target_x(0, false).unwrap(),
+                GateTarget::x(0, false).unwrap(),
                 vec![0.0],
             )],
         );
         let right = FlippedMeasurement::new(
             None,
             [GateTargetWithCoords::new(
-                target_x(1, false).unwrap(),
+                GateTarget::x(1, false).unwrap(),
                 vec![0.0],
             )],
         );

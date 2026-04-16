@@ -203,23 +203,6 @@ pub struct FlipSimulator {
     pub(crate) inner: stim_cxx::FlipSimulator,
 }
 
-/// Alias for [`MeasurementSampler`] matching the Python naming convention
-/// `stim.CompiledMeasurementSampler`, typically obtained via
-/// [`Circuit::compile_sampler`](crate::Circuit::compile_sampler).
-pub type CompiledMeasurementSampler = MeasurementSampler;
-/// Alias for [`DetectorSampler`] matching the Python naming convention
-/// `stim.CompiledDetectorSampler`, typically obtained via
-/// [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler).
-pub type CompiledDetectorSampler = DetectorSampler;
-/// Alias for [`DemSampler`] matching the Python naming convention
-/// `stim.CompiledDemSampler`, typically obtained via
-/// [`DetectorErrorModel::compile_sampler`](crate::DetectorErrorModel::compile_sampler).
-pub type CompiledDemSampler = DemSampler;
-/// Alias for [`MeasurementsToDetectionEventsConverter`] matching the Python
-/// naming convention `stim.CompiledMeasurementsToDetectionEventsConverter`,
-/// typically obtained via
-/// [`Circuit::compile_m2d_converter`](crate::Circuit::compile_m2d_converter).
-pub type CompiledMeasurementsToDetectionEventsConverter = MeasurementsToDetectionEventsConverter;
 type UnpackedBitMatrix = Array2<bool>;
 type PackedObservablePair = (Vec<u8>, Vec<u8>);
 type UnpackedObservablePair = (UnpackedBitMatrix, UnpackedBitMatrix);
@@ -334,16 +317,6 @@ impl MeasurementSampler {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let circuit: stim::Circuit = "X 0\nM 0".parse().unwrap();
-    /// let mut sampler = stim::MeasurementSampler::new(&circuit, false, 0);
-    /// assert_eq!(sampler.sample(2), ndarray::array![[true], [true]]);
-    /// ```
-    #[must_use]
-    pub fn new(circuit: &crate::Circuit, skip_reference_sample: bool, seed: u64) -> Self {
-        circuit.compile_sampler_with_seed(skip_reference_sample, seed)
-    }
-
     /// Returns the number of measurement bits produced per shot.
     ///
     /// This equals the total number of `M` (and similar measurement)
@@ -457,14 +430,6 @@ impl TableauSimulator {
         Self {
             inner: stim_cxx::TableauSimulator::new(0, seed),
         }
-    }
-
-    /// Returns an owned copy of the simulator, including its full tableau
-    /// state and measurement record. The copy's PRNG is reseeded, so
-    /// subsequent random outcomes will differ from the original.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
     }
 
     /// Returns the number of qubits currently tracked by the simulator.
@@ -1254,13 +1219,6 @@ impl FlipSimulator {
         }
     }
 
-    /// Returns an owned copy of the flip simulator, including its full state.
-    /// The copy's PRNG is reseeded.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        self.clone()
-    }
-
     /// Returns the number of parallel instances (shots) tracked by the simulator.
     #[must_use]
     pub fn batch_size(&self) -> usize {
@@ -1787,16 +1745,6 @@ impl DetectorSampler {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let circuit: stim::Circuit = "X 0\nM 0\nDETECTOR rec[-1]".parse().unwrap();
-    /// let mut sampler = stim::DetectorSampler::new(&circuit, 0);
-    /// assert_eq!(sampler.sample(2), ndarray::array![[false], [false]]);
-    /// ```
-    #[must_use]
-    pub fn new(circuit: &crate::Circuit, seed: u64) -> Self {
-        circuit.compile_detector_sampler_with_seed(seed)
-    }
-
     /// Returns the number of detector bits produced per shot.
     ///
     /// Equals the number of `DETECTOR` instructions in the circuit.
@@ -2315,14 +2263,6 @@ impl MeasurementsToDetectionEventsConverter {
     /// # Arguments
     ///
     /// * `circuit` - The circuit whose detector definitions drive the conversion.
-    /// * `skip_reference_sample` - When `true`, the reference sample is all
-    ///   zeros instead of being collected from the circuit. Only use this when
-    ///   the all-zero result is a valid noiseless outcome.
-    #[must_use]
-    pub fn new(circuit: &crate::Circuit, skip_reference_sample: bool) -> Self {
-        circuit.compile_m2d_converter(skip_reference_sample)
-    }
-
     /// Converts measurement data into detection events (and optionally observable flips).
     ///
     /// This is the primary conversion entry point, combining the behavior of
@@ -2818,7 +2758,7 @@ mod tests {
         let circuit =
             Circuit::from_str("X 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]").unwrap();
 
-        let mut measurement_sampler = MeasurementSampler::new(&circuit, false, 0);
+        let mut measurement_sampler = circuit.compile_sampler_with_seed(false, 0);
         assert_eq!(measurement_sampler.num_measurements(), 1);
         assert_eq!(measurement_sampler.sample_bit_packed(2), vec![1, 1]);
         assert_eq!(
@@ -2827,7 +2767,7 @@ mod tests {
         );
         assert!(format!("{measurement_sampler:?}").contains("MeasurementSampler"));
 
-        let mut detector_sampler = super::DetectorSampler::new(&circuit, 0);
+        let mut detector_sampler = circuit.compile_detector_sampler_with_seed(0);
         assert_eq!(detector_sampler.num_detectors(), 1);
         assert_eq!(detector_sampler.num_observables(), 1);
         assert_eq!(detector_sampler.sample_bit_packed(2), vec![0, 0]);
@@ -2861,7 +2801,7 @@ mod tests {
         assert!(s.measure(0));
         assert_eq!(s.current_measurement_record(), vec![false, true]);
 
-        let mut s2 = s.copy();
+        let mut s2 = s.clone();
         assert_eq!(s2.current_inverse_tableau(), s.current_inverse_tableau());
         s2.set_num_qubits(3);
         assert_eq!(s2.num_qubits(), 3);
@@ -2969,7 +2909,7 @@ mod tests {
         sim.y_error(&[1], 0.25).unwrap();
         sim.z_error(&[2], 0.25).unwrap();
 
-        let copy = sim.copy();
+        let copy = sim.clone();
         assert_eq!(copy.num_qubits(), sim.num_qubits());
         assert!(format!("{copy:?}").contains("measurement_record_len"));
     }
@@ -3795,7 +3735,7 @@ mod tests {
         assert_eq!(packed.len(), 7);
         assert_eq!(packed[6] & 0b1110_0000, 0);
 
-        let copy = sim.copy();
+        let copy = sim.clone();
         assert_eq!(copy.batch_size(), sim.batch_size());
 
         sim.clear();
@@ -3905,7 +3845,7 @@ mod tests {
         }
 
         let sweep_circuit = sweep_m2d_circuit();
-        let mut converter = MeasurementsToDetectionEventsConverter::new(&sweep_circuit, false);
+        let mut converter = sweep_circuit.compile_m2d_converter(false);
         assert_eq!(
             converter
                 .convert(
@@ -3948,7 +3888,7 @@ mod tests {
         let measurements_path = unique_temp_path("m2d-no-sweep-measurements");
         let detections_path = unique_temp_path("m2d-no-sweep-detections");
         fs::write(&measurements_path, "0\n1\n").unwrap();
-        let mut converter = MeasurementsToDetectionEventsConverter::new(&m2d_circuit(), false);
+        let mut converter = m2d_circuit().compile_m2d_converter(false);
         converter
             .convert_file(
                 &measurements_path,

@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(
             parsed,
             std::collections::BTreeMap::from([(
-                crate::target_relative_detector_id(0).unwrap(),
+                crate::DemTarget::relative_detector_id(0).unwrap(),
                 std::collections::BTreeMap::from([(
                     4,
                     crate::PauliString::from_text("+X").unwrap()
@@ -168,7 +168,7 @@ mod tests {
                     target_range_start: 0,
                     target_range_end: 1,
                     targets_in_range: vec![stim_cxx::GateTargetWithCoordsData {
-                        raw_target: crate::GateTarget::new(0u32).raw_data(),
+                        raw_target: crate::GateTarget::from(0u32).raw_data(),
                         coords: vec![0.0],
                     }],
                 },

@@ -23,11 +23,11 @@
 //! - [`FlipSimulator`] -- a batched simulator that tracks Pauli flips and
 //!   classical flip records, requiring only O(1) work per gate.
 //! - [`MeasurementSampler`] -- fast repeated measurement sampling from a
-//!   compiled circuit (also available as [`CompiledMeasurementSampler`]).
+//!   compiled circuit.
 //! - [`DetectorSampler`] -- fast repeated detector-event sampling from a
-//!   compiled circuit (also available as [`CompiledDetectorSampler`]).
+//!   compiled circuit.
 //! - [`DemSampler`] -- fast repeated sampling from a compiled detector error
-//!   model (also available as [`CompiledDemSampler`]).
+//!   model.
 //! - [`MeasurementsToDetectionEventsConverter`] -- converts raw measurement
 //!   results into detection events using a compiled circuit.
 //!
@@ -87,20 +87,16 @@ pub use ndarray::{Array1, Array2};
 
 pub use dem::{
     DemAppendOperation, DemInstruction, DemInstructionTarget, DemItem, DemRepeatBlock, DemTarget,
-    DemTargetWithCoords, DetectorErrorModel, target_logical_observable_id,
-    target_relative_detector_id, target_separator,
+    DemTargetWithCoords, DetectorErrorModel,
 };
 pub use metadata::{
     ExplainedError, FlippedMeasurement, GateData, GateTarget, GateTargetWithCoords, all_gate_data,
-    gate_data, target_combined_paulis, target_combiner, target_inv, target_pauli, target_rec,
-    target_sweep_bit, target_x, target_y, target_z,
+    target_combined_paulis,
 };
 pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{
-    CompiledDemSampler, CompiledDetectorSampler, CompiledMeasurementSampler,
-    CompiledMeasurementsToDetectionEventsConverter, ConvertedMeasurements, DemSampler,
-    DetectorSampler, FlipSimulator, MeasurementSampler, MeasurementsToDetectionEventsConverter,
-    TableauSimulator,
+    ConvertedMeasurements, DemSampler, DetectorSampler, FlipSimulator, MeasurementSampler,
+    MeasurementsToDetectionEventsConverter, TableauSimulator,
 };
 pub use stabilizers::{
     CliffordString, Flow, PauliPhase, PauliString, PauliStringConjugation, PauliStringIterator,

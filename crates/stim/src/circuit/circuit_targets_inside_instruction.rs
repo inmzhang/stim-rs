@@ -38,7 +38,7 @@ pub use crate::GateTargetWithCoords;
 ///     vec![0.25],
 ///     0,
 ///     1,
-///     vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+///     vec![GateTargetWithCoords::new(GateTarget::from(0u32), vec![])],
 /// );
 ///
 /// assert_eq!(inside.gate(), "X_ERROR");
@@ -101,7 +101,7 @@ impl CircuitTargetsInsideInstruction {
     /// # use stim::*;
     /// let inside = CircuitTargetsInsideInstruction::new(
     ///     "Y_ERROR", "", vec![0.125], 0, 1,
-    ///     vec![GateTargetWithCoords::new(GateTarget::new(0u32), vec![])],
+    ///     vec![GateTargetWithCoords::new(GateTarget::from(0u32), vec![])],
     /// );
     /// assert_eq!(inside.gate(), "Y_ERROR");
     /// ```
@@ -261,12 +261,12 @@ mod tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
 
-    use crate::{GateTarget, target_x};
+    use crate::GateTarget;
 
     #[test]
     fn constructor_and_field_accessors_preserve_values() {
-        let first = GateTargetWithCoords::new(GateTarget::new(5), vec![1.0, 2.0]);
-        let second = GateTargetWithCoords::new(target_x(6, false).unwrap(), vec![3.5]);
+        let first = GateTargetWithCoords::new(GateTarget::from(5), vec![1.0, 2.0]);
+        let second = GateTargetWithCoords::new(GateTarget::x(6, false).unwrap(), vec![3.5]);
 
         let inside = CircuitTargetsInsideInstruction::new(
             "X_ERROR",
@@ -293,7 +293,7 @@ mod tests {
             vec![0.25],
             0,
             1,
-            vec![GateTargetWithCoords::new(GateTarget::new(5), vec![1.0])],
+            vec![GateTargetWithCoords::new(GateTarget::from(5), vec![1.0])],
         );
         let same = CircuitTargetsInsideInstruction::new(
             "X_ERROR",
@@ -301,7 +301,7 @@ mod tests {
             vec![0.25],
             0,
             1,
-            vec![GateTargetWithCoords::new(GateTarget::new(5), vec![1.0])],
+            vec![GateTargetWithCoords::new(GateTarget::from(5), vec![1.0])],
         );
         let different = CircuitTargetsInsideInstruction::new(
             "Z_ERROR",
@@ -309,7 +309,7 @@ mod tests {
             vec![0.125],
             0,
             1,
-            vec![GateTargetWithCoords::new(GateTarget::new(5), vec![1.0])],
+            vec![GateTargetWithCoords::new(GateTarget::from(5), vec![1.0])],
         );
 
         assert_eq!(first, same);
@@ -335,9 +335,9 @@ mod tests {
             3,
             5,
             vec![
-                GateTargetWithCoords::new(target_x(2, false).unwrap(), vec![1.0, 2.0]),
+                GateTargetWithCoords::new(GateTarget::x(2, false).unwrap(), vec![1.0, 2.0]),
                 GateTargetWithCoords::new(GateTarget::combiner(), vec![]),
-                GateTargetWithCoords::new(GateTarget::new(3), vec![]),
+                GateTargetWithCoords::new(GateTarget::from(3), vec![]),
             ],
         );
 
@@ -347,7 +347,7 @@ mod tests {
         );
         assert_eq!(
             format!("{inside:?}"),
-            "stim::CircuitTargetsInsideInstruction(gate=\"MPP\", tag=\"annotated\", args=[0.5, 1.5], target_range_start=3, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::target_x(2), [1.0, 2.0]), stim::GateTargetWithCoords(stim::target_combiner(), []), stim::GateTargetWithCoords(stim::GateTarget(3), [])))"
+            "stim::CircuitTargetsInsideInstruction(gate=\"MPP\", tag=\"annotated\", args=[0.5, 1.5], target_range_start=3, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::GateTarget::x(2, false).unwrap(), [1.0, 2.0]), stim::GateTargetWithCoords(stim::GateTarget::combiner(), []), stim::GateTargetWithCoords(stim::GateTarget::qubit(3, false).unwrap(), [])))"
         );
     }
 }
