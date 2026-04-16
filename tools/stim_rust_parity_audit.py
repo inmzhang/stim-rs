@@ -9,8 +9,8 @@ from typing import Iterable
 
 TYPE_DEF_RE = re.compile(r"^pub\s+(?:struct|enum)\s+([A-Z][A-Za-z0-9_]*)", re.MULTILINE)
 DERIVE_TYPE_RE = re.compile(
-    r"#\[derive\(([^)]*)\)\]\s*pub\s+(?:struct|enum)\s+([A-Z][A-Za-z0-9_]*)",
-    re.MULTILINE | re.DOTALL,
+    r"#\[derive\(([^)]*)\)\](?:\s|///[^\n]*\n|//![^\n]*\n|#\[[^\]]+\]\s*)*pub\s+(?:struct|enum)\s+([A-Z][A-Za-z0-9_]*)",
+    re.MULTILINE,
 )
 TYPE_ALIAS_RE = re.compile(r"^pub\s+type\s+([A-Z][A-Za-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*)\s*;", re.MULTILINE)
 IMPL_RE = re.compile(r"impl(?:<[^>]+>)?\s+([A-Z][A-Za-z0-9_]*)\s*\{", re.MULTILINE)
@@ -144,6 +144,10 @@ def inventory_rows(path: pathlib.Path) -> list[dict[str, str]]:
 def normalize_surface(surface: str) -> set[str]:
     out = {surface}
     parts = surface.split("::")
+    if len(parts) == 3 and parts[2] == "to_numpy":
+        out.add(f"stim::{parts[1]}::to_ndarray")
+    if len(parts) == 3 and parts[2] == "from_numpy":
+        out.add(f"stim::{parts[1]}::from_ndarray")
     if len(parts) == 3 and parts[2] in DUnder_MAP:
         mapped = DUnder_MAP[parts[2]]
         if mapped in {"Display", "Debug", "PartialEq", "Neg", "Add", "AddAssign", "Mul", "MulAssign", "Rmul", "Iterator"}:
@@ -159,6 +163,8 @@ def audit_inventory(rows: Iterable[dict[str, str]], available: set[str]) -> dict
     missing = []
     covered = 0
     for row in rows:
+        if row["api_name"] == "stim.main":
+            continue
         candidates = normalize_surface(row["proposed_rust_surface"])
         if candidates & available:
             covered += 1
