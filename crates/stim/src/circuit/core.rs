@@ -2756,6 +2756,25 @@ mod residual_api_tests {
     }
 
     #[test]
+    fn circuit_flattened_operations_accept_spaced_paren_args() {
+        let operations = Circuit::from_str(
+            "\
+            QUBIT_COORDS(1, 2) 0
+            M 0
+            DETECTOR(2, 0, 0) rec[-1]",
+        )
+        .unwrap()
+        .flattened_operations()
+        .unwrap();
+
+        assert_eq!(operations.len(), 3);
+        assert_eq!(operations[0].name(), "QUBIT_COORDS");
+        assert_eq!(operations[0].gate_args_copy(), vec![1.0, 2.0]);
+        assert_eq!(operations[2].name(), "DETECTOR");
+        assert_eq!(operations[2].gate_args_copy(), vec![2.0, 0.0, 0.0]);
+    }
+
+    #[test]
     fn circuit_missing_detectors_matches_documented_examples() {
         assert_eq!(
             Circuit::from_str("R 0\nM 0")

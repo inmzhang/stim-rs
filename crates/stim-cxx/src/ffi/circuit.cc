@@ -840,6 +840,14 @@ rust::Vec<std::uint8_t> DetectorSamplerHandle::sample_observables_bit_packed(std
   return result;
 }
 
+DetectorSampleBatch DetectorSamplerHandle::sample_bit_packed_separate_observables(std::uint64_t shots) {
+  auto result_pair = stim::sample_batch_detection_events<stim::MAX_BITWORD_WIDTH>(circuit_, shots, rng_);
+  return DetectorSampleBatch{
+      .detectors = sample_table_to_packed_bytes(result_pair.first, circuit_.count_detectors(), shots),
+      .observables = sample_table_to_packed_bytes(result_pair.second, circuit_.count_observables(), shots),
+  };
+}
+
 void DetectorSamplerHandle::sample_write(
     std::uint64_t shots,
     rust::Str filepath,
@@ -3389,6 +3397,12 @@ rust::Vec<std::uint8_t> detector_sampler_sample_observables_bit_packed(
     DetectorSamplerHandle &handle,
     std::uint64_t shots) {
   return handle.sample_observables_bit_packed(shots);
+}
+
+DetectorSampleBatch detector_sampler_sample_bit_packed_separate_observables(
+    DetectorSamplerHandle &handle,
+    std::uint64_t shots) {
+  return handle.sample_bit_packed_separate_observables(shots);
 }
 
 DemSampleBatch dem_sampler_sample_bit_packed(

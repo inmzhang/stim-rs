@@ -35,6 +35,7 @@ struct FlippedMeasurementData;
 struct CircuitErrorLocationData;
 struct ExplainedErrorData;
 struct DemSampleBatch;
+struct DetectorSampleBatch;
 struct TableauMeasureKickbackData;
 struct BitTableData;
 
@@ -186,6 +187,7 @@ class DetectorSamplerHandle final {
   std::uint64_t num_observables() const;
   rust::Vec<std::uint8_t> sample_bit_packed(std::uint64_t shots);
   rust::Vec<std::uint8_t> sample_observables_bit_packed(std::uint64_t shots);
+  DetectorSampleBatch sample_bit_packed_separate_observables(std::uint64_t shots);
   void sample_write(
       std::uint64_t shots,
       rust::Str filepath,
@@ -834,6 +836,9 @@ rust::Vec<std::uint8_t> detector_sampler_sample_bit_packed(
     DetectorSamplerHandle &handle,
     std::uint64_t shots);
 rust::Vec<std::uint8_t> detector_sampler_sample_observables_bit_packed(
+    DetectorSamplerHandle &handle,
+    std::uint64_t shots);
+DetectorSampleBatch detector_sampler_sample_bit_packed_separate_observables(
     DetectorSamplerHandle &handle,
     std::uint64_t shots);
 DemSampleBatch dem_sampler_sample_bit_packed(

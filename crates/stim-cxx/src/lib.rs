@@ -185,6 +185,15 @@ impl DetectorSampler {
         ffi::detector_sampler_sample_observables_bit_packed(self.inner.pin_mut(), shots)
     }
 
+    #[must_use]
+    pub fn sample_bit_packed_separate_observables(&mut self, shots: u64) -> (Vec<u8>, Vec<u8>) {
+        let batch = ffi::detector_sampler_sample_bit_packed_separate_observables(
+            self.inner.pin_mut(),
+            shots,
+        );
+        (batch.detectors, batch.observables)
+    }
+
     pub fn sample_write(
         &mut self,
         shots: u64,
@@ -2152,6 +2161,11 @@ mod ffi {
         errors: Vec<u8>,
     }
 
+    struct DetectorSampleBatch {
+        detectors: Vec<u8>,
+        observables: Vec<u8>,
+    }
+
     struct TableauMeasureKickbackData {
         result: bool,
         has_kickback: bool,
@@ -2914,6 +2928,10 @@ mod ffi {
             handle: Pin<&mut DetectorSamplerHandle>,
             shots: u64,
         ) -> Vec<u8>;
+        fn detector_sampler_sample_bit_packed_separate_observables(
+            handle: Pin<&mut DetectorSamplerHandle>,
+            shots: u64,
+        ) -> DetectorSampleBatch;
         fn dem_sampler_sample_bit_packed(
             handle: Pin<&mut DemSamplerHandle>,
             shots: u64,

@@ -211,9 +211,7 @@ impl CircuitInstruction {
             ));
         }
 
-        let (head, tail) = normalized
-            .split_once(' ')
-            .map_or((normalized.as_str(), ""), |(head, tail)| (head, tail));
+        let (head, tail) = split_head_and_tail(&normalized);
         let (name, tag, gate_args) = parse_head(head)?;
         let targets = parse_targets(tail)?;
         Self::new(name, targets, gate_args, tag)
@@ -529,7 +527,8 @@ fn parse_head(head: &str) -> Result<(String, String, Vec<f64>)> {
             gate_args = raw_args
                 .split(',')
                 .map(|arg| {
-                    arg.parse::<f64>()
+                    arg.trim()
+                        .parse::<f64>()
                         .map_err(|_| StimError::new(format!("invalid gate arg: {arg}")))
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -537,6 +536,24 @@ fn parse_head(head: &str) -> Result<(String, String, Vec<f64>)> {
     }
 
     Ok((name.to_string(), tag, gate_args))
+}
+
+fn split_head_and_tail(text: &str) -> (&str, &str) {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for (index, ch) in text.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ' ' if paren_depth == 0 && bracket_depth == 0 => {
+                return (&text[..index], &text[index + 1..]);
+            }
+            _ => {}
+        }
+    }
+    (text, "")
 }
 
 fn parse_targets(targets_text: &str) -> Result<Vec<GateTarget>> {
@@ -606,6 +623,22 @@ mod tests {
                 target_x(6u32, false).unwrap(),
             ]
         );
+    }
+
+    #[test]
+    fn parser_accepts_spaced_paren_args_emitted_by_stim() {
+        let qubit_coords =
+            CircuitInstruction::from_str("QUBIT_COORDS(1, 2) 0").expect("instruction should parse");
+        let detector = CircuitInstruction::from_str("DETECTOR(2, 0, 0) rec[-24]")
+            .expect("instruction should parse");
+
+        assert_eq!(qubit_coords.name(), "QUBIT_COORDS");
+        assert_eq!(qubit_coords.gate_args_copy(), vec![1.0, 2.0]);
+        assert_eq!(qubit_coords.targets_copy(), vec![GateTarget::new(0u32)]);
+
+        assert_eq!(detector.name(), "DETECTOR");
+        assert_eq!(detector.gate_args_copy(), vec![2.0, 0.0, 0.0]);
+        assert_eq!(detector.targets_copy(), vec![target_rec(-24).unwrap()]);
     }
 
     #[test]

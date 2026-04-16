@@ -1954,10 +1954,7 @@ impl DetectorSampler {
     /// ```
     #[must_use]
     pub fn sample_bit_packed_separate_observables(&mut self, shots: u64) -> (Vec<u8>, Vec<u8>) {
-        (
-            self.sample_bit_packed(shots),
-            self.sample_observables_bit_packed(shots),
-        )
+        self.inner.sample_bit_packed_separate_observables(shots)
     }
 
     /// Samples detector and observable data separately as unpacked boolean matrices.
@@ -3239,6 +3236,20 @@ mod tests {
         for path in [shots_path, dets_path, obs_path] {
             fs::remove_file(path).expect("temp file should delete");
         }
+    }
+
+    #[test]
+    fn detector_sampler_separate_observables_stay_shot_paired() {
+        let circuit = Circuit::from_str(
+            "X_ERROR(0.5) 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]",
+        )
+        .expect("circuit should parse");
+        let shots = 16;
+
+        let mut separate = circuit.compile_detector_sampler_with_seed(7);
+        let (detectors, observables) = separate.sample_separate_observables(shots);
+
+        assert_eq!(detectors, observables);
     }
 
     fn m2d_circuit() -> Circuit {
