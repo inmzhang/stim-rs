@@ -855,25 +855,6 @@ impl Circuit {
         Self::from_inner(self.inner.flattened())
     }
 
-    /// Returns the flattened operations of the circuit as a list of
-    /// [`CircuitInstruction`] values.
-    ///
-    /// This is like [`Circuit::flattened`], but returns individual instruction
-    /// objects rather than a new circuit. This is useful when you need to
-    /// iterate over every instruction that would be executed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any instruction text fails to parse (should not
-    /// happen for well-formed circuits).
-    pub fn flattened_operations(&self) -> Result<Vec<CircuitInstruction>> {
-        self.inner
-            .flattened_operation_texts()
-            .into_iter()
-            .map(|text| CircuitInstruction::from_stim_program_text(&text))
-            .collect()
-    }
-
     /// Returns an equivalent circuit with gates decomposed into (mostly) the
     /// {H, S, CX, M, R} gate set.
     ///
@@ -2839,59 +2820,6 @@ mod residual_api_tests {
             circuit.get_final_qubit_coordinates().unwrap(),
             BTreeMap::from([(0, vec![1.0, 2.0, 9.0, 8.0]), (1, vec![3.0])])
         );
-    }
-
-    #[test]
-    fn circuit_flattened_operations_match_documented_examples() {
-        let actual = Circuit::from_str(
-            r"
-            H 0
-            REPEAT 3 {
-                X_ERROR(0.125) 1
-            }
-            CORRELATED_ERROR(0.25) X3 Y4 Z5
-            M 0 !1
-            DETECTOR rec[-1]
-        ",
-        )
-        .unwrap()
-        .flattened_operations()
-        .unwrap()
-        .into_iter()
-        .map(|instruction| instruction.to_string())
-        .collect::<Vec<_>>();
-
-        assert_eq!(
-            actual,
-            vec![
-                "H 0",
-                "X_ERROR(0.125) 1",
-                "X_ERROR(0.125) 1",
-                "X_ERROR(0.125) 1",
-                "E(0.25) X3 Y4 Z5",
-                "M 0 !1",
-                "DETECTOR rec[-1]",
-            ]
-        );
-    }
-
-    #[test]
-    fn circuit_flattened_operations_accept_spaced_paren_args() {
-        let operations = Circuit::from_str(
-            "\
-            QUBIT_COORDS(1, 2) 0
-            M 0
-            DETECTOR(2, 0, 0) rec[-1]",
-        )
-        .unwrap()
-        .flattened_operations()
-        .unwrap();
-
-        assert_eq!(operations.len(), 3);
-        assert_eq!(operations[0].name(), "QUBIT_COORDS");
-        assert_eq!(operations[0].gate_args_copy(), vec![1.0, 2.0]);
-        assert_eq!(operations[2].name(), "DETECTOR");
-        assert_eq!(operations[2].gate_args_copy(), vec![2.0, 0.0, 0.0]);
     }
 
     #[test]

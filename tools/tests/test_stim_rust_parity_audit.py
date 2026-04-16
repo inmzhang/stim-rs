@@ -12,6 +12,10 @@ from tools.stim_rust_parity_audit import (
 
 
 class StimRustParityAuditTests(unittest.TestCase):
+    def test_repo_surface_does_not_expose_removed_circuit_flattened_operations(self) -> None:
+        surface = collect_surface_from_source(Path("crates/stim/src"))
+        self.assertNotIn("stim::Circuit::flattened_operations", surface)
+
     def test_collect_surface_from_source_detects_structs_methods_and_traits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
