@@ -19,7 +19,7 @@ The Rust API uses `ndarray` to provide an experience similar to working with Num
 The `stim` crate also includes a small layer of Rust-native utilities that do not
 come from upstream Stim directly:
 
-* `stim::UniformDepolarizing` and `stim::Si1000`: ready-made pure-Rust noise models
+* `stim::noise::UniformDepolarizing` and `stim::noise::Si1000`: ready-made pure-Rust noise models
 * `stim::Circuit::with_noise(...)`: a convenience method for applying those models
   to an existing circuit
 

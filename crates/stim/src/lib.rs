@@ -39,7 +39,7 @@
 //!
 //! # Rust-only utilities
 //!
-//! - [`UniformDepolarizing`] and [`Si1000`] -- pure-Rust stabilizer noise
+//! - [`noise::UniformDepolarizing`] and [`noise::Si1000`] -- pure-Rust stabilizer noise
 //!   model presets that can be applied with [`Circuit::with_noise`].
 //!
 //! # Error handling
@@ -70,7 +70,7 @@ mod circuit;
 mod common;
 mod dem;
 mod metadata;
-mod noise;
+pub mod noise;
 mod simulators;
 mod stabilizers;
 
@@ -96,7 +96,6 @@ pub use dem::{
 pub use metadata::{
     ExplainedError, FlippedMeasurement, Gate, GateData, GateTarget, GateTargetWithCoords,
 };
-pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{
     ConvertedMeasurements, DemSampler, DetectorSampler, FlipSimulator, MeasurementSampler,
     MeasurementsToDetectionEventsConverter, TableauSimulator,

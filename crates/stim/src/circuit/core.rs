@@ -14,10 +14,11 @@ use super::{
 use crate::common::bit_packing::unpack_bits;
 use crate::common::parse::{coordinate_entries_to_map, decode_measurement_solution};
 use crate::common::slicing::{compute_slice_indices, normalize_index};
+use crate::noise::NoiseModel;
 use crate::{
     DemTarget, DetectorErrorModel, DetectorSampler, ExplainedError, Flow, Gate, GateTarget,
-    MeasurementSampler, MeasurementsToDetectionEventsConverter, NoiseModel, OpenQasmVersion,
-    PauliString, Result, SatProblemFormat, StimError, Tableau,
+    MeasurementSampler, MeasurementsToDetectionEventsConverter, OpenQasmVersion, PauliString,
+    Result, SatProblemFormat, StimError, Tableau,
 };
 
 /// Diagram style accepted by [`Circuit::diagram`] and related helpers.
@@ -862,9 +863,9 @@ impl Circuit {
         Self::from_inner(self.inner.without_noise())
     }
 
-    /// Returns a noisy copy of the circuit using a Rust-side [`NoiseModel`].
+    /// Returns a noisy copy of the circuit using a Rust-side [`noise::NoiseModel`](crate::noise::NoiseModel).
     ///
-    /// This is a convenience wrapper around [`NoiseModel::noisy_circuit`].
+    /// This is a convenience wrapper around [`noise::NoiseModel::noisy_circuit`](crate::noise::NoiseModel::noisy_circuit).
     ///
     /// # Errors
     ///
@@ -875,7 +876,7 @@ impl Circuit {
     /// ```
     /// let circuit: stim::Circuit = "H 0\nTICK\nM 0".parse().unwrap();
     /// let noisy = circuit
-    ///     .with_noise(stim::UniformDepolarizing::new(0.001).unwrap())
+    ///     .with_noise(stim::noise::UniformDepolarizing::new(0.001).unwrap())
     ///     .unwrap();
     /// assert_eq!(
     ///     noisy.to_string(),
@@ -1991,7 +1992,7 @@ mod api_tests {
         let circuit = Circuit::from_str("H 0\nTICK\nM 0").expect("circuit should parse");
 
         let noisy = circuit
-            .with_noise(crate::UniformDepolarizing::new(0.001).unwrap())
+            .with_noise(crate::noise::UniformDepolarizing::new(0.001).unwrap())
             .unwrap();
 
         assert_eq!(
