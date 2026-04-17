@@ -9,5 +9,5 @@ pub use clifford_string::CliffordString;
 pub use flow::Flow;
 pub use pauli_string::{PauliPhase, PauliString, PauliStringConjugation, PauliValue};
 pub use pauli_string_iterator::PauliStringIterator;
-pub use tableau::Tableau;
+pub use tableau::{Tableau, TableauSynthesisMethod};
 pub use tableau_iterator::TableauIterator;

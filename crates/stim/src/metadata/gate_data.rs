@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
+use std::str::FromStr;
 
 use ndarray::Array2;
 
@@ -13,8 +14,8 @@ use crate::{Flow, Result, StimError, Tableau};
 /// that exposes its canonical name, aliases, stabilizer flows, Clifford tableau,
 /// unitary matrix, inverse relationships, and various Boolean classification flags.
 ///
-/// Obtain a `GateData` through [`GateData::new`], the free function [`gate_data`], or
-/// the bulk inventory [`all_gate_data`].
+/// Obtain a `GateData` through [`GateData::new`] or the bulk inventory
+/// [`all_gate_data`].
 ///
 /// Two `GateData` values are equal when they refer to the same canonical gate,
 /// regardless of which alias was used to look them up.
@@ -36,6 +37,9 @@ use crate::{Flow, Result, StimError, Tableau};
 pub struct GateData {
     pub(crate) inner: stim_cxx::GateData,
 }
+
+/// A typed Stim gate handle validated against the built-in gate catalog.
+pub type Gate = GateData;
 
 impl GateData {
     /// Looks up metadata for a gate by name or alias.
@@ -354,8 +358,8 @@ impl GateData {
     /// assert_eq!(
     ///     stim::GateData::new("H").unwrap().flows().unwrap(),
     ///     vec![
-    ///         stim::Flow::from_text("X -> Z").unwrap(),
-    ///         stim::Flow::from_text("Z -> X").unwrap(),
+    ///         stim::Flow::new("X -> Z").unwrap(),
+    ///         stim::Flow::new("Z -> X").unwrap(),
     ///     ]
     /// );
     /// ```
@@ -418,9 +422,7 @@ impl GateData {
     #[must_use]
     pub fn unitary_matrix(&self) -> Option<Array2<crate::Complex32>> {
         self.tableau().map(|tableau| {
-            let matrix = tableau
-                .to_unitary_matrix("big")
-                .expect("unitary gate tableaux should convert into unitary matrices");
+            let matrix = tableau.to_unitary_matrix(crate::Endian::Big);
             let nrows = matrix.len();
             let ncols = matrix.first().map_or(0, Vec::len);
             Array2::from_shape_vec((nrows, ncols), matrix.into_iter().flatten().collect())
@@ -567,6 +569,14 @@ impl Clone for GateData {
         Self {
             inner: self.inner.clone(),
         }
+    }
+}
+
+impl FromStr for GateData {
+    type Err = StimError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::new(s)
     }
 }
 
@@ -756,10 +766,7 @@ mod tests {
     fn gate_data_flows_match_documented_examples() {
         assert_eq!(
             GateData::new("H").unwrap().flows().unwrap(),
-            vec![
-                Flow::from_text("X -> Z").unwrap(),
-                Flow::from_text("Z -> X").unwrap(),
-            ]
+            vec![Flow::new("X -> Z").unwrap(), Flow::new("Z -> X").unwrap(),]
         );
 
         let iswap_flows: Vec<String> = GateData::new("ISWAP")

@@ -16,5 +16,5 @@ pub use circuit_instruction::CircuitInstruction;
 pub use circuit_item::CircuitItem;
 pub use circuit_repeat_block::CircuitRepeatBlock;
 pub use circuit_targets_inside_instruction::CircuitTargetsInsideInstruction;
-pub use core::Circuit;
+pub use core::{Circuit, CircuitDiagramType};
 pub use detecting_region_filter::DetectingRegionFilter;

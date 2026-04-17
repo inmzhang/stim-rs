@@ -75,23 +75,26 @@ mod simulators;
 mod stabilizers;
 
 pub use circuit::{
-    Circuit, CircuitErrorLocation, CircuitErrorLocationStackFrame, CircuitInsertOperation,
-    CircuitInstruction, CircuitItem, CircuitRepeatBlock, CircuitTargetsInsideInstruction,
-    DetectingRegionFilter,
+    Circuit, CircuitDiagramType, CircuitErrorLocation, CircuitErrorLocationStackFrame,
+    CircuitInsertOperation, CircuitInstruction, CircuitItem, CircuitRepeatBlock,
+    CircuitTargetsInsideInstruction, DetectingRegionFilter,
 };
 pub(crate) use common::bit_packing::{pack_bits, unpack_bits};
 pub(crate) use common::slicing::{compute_slice_indices, normalize_index};
 pub use common::upstream_commit;
-pub use common::{Complex32, Result, StimError, read_shot_data_file, write_shot_data_file};
+pub use common::{
+    Complex32, Endian, OpenQasmVersion, Result, SatProblemFormat, StimError, read_shot_data_file,
+    write_shot_data_file,
+};
 pub use ndarray::{Array1, Array2};
 
 pub use dem::{
     DemAppendOperation, DemInstruction, DemInstructionTarget, DemItem, DemRepeatBlock, DemTarget,
-    DemTargetWithCoords, DetectorErrorModel,
+    DemTargetWithCoords, DetectorErrorModel, DetectorErrorModelDiagramType,
 };
 pub use metadata::{
-    ExplainedError, FlippedMeasurement, GateData, GateTarget, GateTargetWithCoords, all_gate_data,
-    target_combined_paulis,
+    ExplainedError, FlippedMeasurement, Gate, GateData, GateTarget, GateTargetWithCoords,
+    all_gate_data, target_combined_paulis,
 };
 pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{
@@ -100,7 +103,7 @@ pub use simulators::{
 };
 pub use stabilizers::{
     CliffordString, Flow, PauliPhase, PauliString, PauliStringConjugation, PauliStringIterator,
-    PauliValue, Tableau, TableauIterator,
+    PauliValue, Tableau, TableauIterator, TableauSynthesisMethod,
 };
 
 #[cfg(test)]

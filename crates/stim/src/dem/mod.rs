@@ -14,13 +14,56 @@ use std::str::FromStr;
 
 use crate::common::parse::coordinate_entries_to_map;
 use crate::common::slicing::{compute_slice_indices, normalize_index};
-use crate::{DemSampler, Result, StimError};
+use crate::{DemSampler, Result, SatProblemFormat, StimError};
 
 pub use dem_append_operation::DemAppendOperation;
 pub use dem_instruction::{DemInstruction, DemInstructionTarget};
 pub use dem_item::DemItem;
 pub use dem_repeat_block::DemRepeatBlock;
 pub use dem_target::{DemTarget, DemTargetWithCoords};
+
+/// Diagram style accepted by [`DetectorErrorModel::diagram`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DetectorErrorModelDiagramType {
+    MatchGraphSvg,
+    MatchGraphSvgHtml,
+    MatchGraph3d,
+    MatchGraph3dHtml,
+}
+
+impl DetectorErrorModelDiagramType {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MatchGraphSvg => "matchgraph-svg",
+            Self::MatchGraphSvgHtml => "matchgraph-svg-html",
+            Self::MatchGraph3d => "matchgraph-3d",
+            Self::MatchGraph3dHtml => "matchgraph-3d-html",
+        }
+    }
+}
+
+impl Display for DetectorErrorModelDiagramType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for DetectorErrorModelDiagramType {
+    type Err = StimError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "matchgraph-svg" | "match-graph-svg" => Ok(Self::MatchGraphSvg),
+            "matchgraph-svg-html" | "match-graph-svg-html" => Ok(Self::MatchGraphSvgHtml),
+            "matchgraph-3d" | "match-graph-3d" => Ok(Self::MatchGraph3d),
+            "matchgraph-3d-html" | "match-graph-3d-html" => Ok(Self::MatchGraph3dHtml),
+            _ => Err(StimError::new(format!(
+                "unknown detector error model diagram type: {s}"
+            ))),
+        }
+    }
+}
 
 /// An error model built out of independent error mechanisms, describing how faults
 /// trigger detectors and logical observables.
@@ -558,8 +601,8 @@ impl DetectorErrorModel {
     ///
     /// Returns an error if the model cannot be converted to a SAT problem
     /// (e.g. it contains no observables).
-    pub fn shortest_error_sat_problem(&self) -> Result<String> {
-        self.shortest_error_sat_problem_with_format("WDIMACS")
+    pub fn shortest_error_sat_problem(&self) -> String {
+        self.shortest_error_sat_problem_with_format(SatProblemFormat::Wdimacs)
     }
 
     /// Encodes the shortest-error search as a maxSAT problem in the specified
@@ -572,10 +615,10 @@ impl DetectorErrorModel {
     ///
     /// Returns an error if `format_name` is not a recognised format string, or
     /// if the model cannot be converted to a SAT problem.
-    pub fn shortest_error_sat_problem_with_format(&self, format_name: &str) -> Result<String> {
+    pub fn shortest_error_sat_problem_with_format(&self, format_name: SatProblemFormat) -> String {
         self.inner
-            .shortest_error_sat_problem(format_name)
-            .map_err(StimError::from)
+            .shortest_error_sat_problem(format_name.as_str())
+            .expect("typed sat problem format should be accepted by stim-cxx")
     }
 
     /// Encodes the likeliest-error search as a weighted partial maxSAT problem
@@ -603,7 +646,7 @@ impl DetectorErrorModel {
     ///
     /// Returns an error if the model cannot be converted to a SAT problem.
     pub fn likeliest_error_sat_problem(&self) -> Result<String> {
-        self.likeliest_error_sat_problem_with_options(100, "WDIMACS")
+        self.likeliest_error_sat_problem_with_options(100, SatProblemFormat::Wdimacs)
     }
 
     /// Encodes the likeliest-error search as a maxSAT problem with explicit
@@ -628,16 +671,18 @@ impl DetectorErrorModel {
     ///
     /// ```
     /// let dem: stim::DetectorErrorModel = "error(0.125) D0\nerror(0.25) D0 L0".parse().unwrap();
-    /// let sat = dem.likeliest_error_sat_problem_with_options(100, "WDIMACS").unwrap();
+    /// let sat = dem
+    ///     .likeliest_error_sat_problem_with_options(100, stim::SatProblemFormat::Wdimacs)
+    ///     .unwrap();
     /// assert!(sat.contains("p wcnf") || sat.contains("p cnf"));
     /// ```
     pub fn likeliest_error_sat_problem_with_options(
         &self,
         quantization: i32,
-        format_name: &str,
+        format_name: SatProblemFormat,
     ) -> Result<String> {
         self.inner
-            .likeliest_error_sat_problem(quantization, format_name)
+            .likeliest_error_sat_problem(quantization, format_name.as_str())
             .map_err(StimError::from)
     }
 
@@ -724,11 +769,13 @@ impl DetectorErrorModel {
     /// let dem = circuit
     ///     .detector_error_model_with_options(true, false, false, 0.0, false, false)
     ///     .unwrap();
-    /// let svg = dem.diagram("matchgraph-svg").unwrap();
+    /// let svg = dem.diagram(stim::DetectorErrorModelDiagramType::MatchGraphSvg);
     /// assert!(svg.contains("<svg"));
     /// ```
-    pub fn diagram(&self, type_name: &str) -> Result<String> {
-        self.inner.diagram(type_name).map_err(StimError::from)
+    pub fn diagram(&self, type_name: DetectorErrorModelDiagramType) -> String {
+        self.inner
+            .diagram(type_name.as_str())
+            .expect("typed detector error model diagram kind should be accepted by stim-cxx")
     }
 
     /// Appends a new detector error model instruction built from its
@@ -1384,13 +1431,13 @@ mod tests {
     fn detector_error_model_sat_problem_helpers_match_upstream_examples() {
         let dem: DetectorErrorModel = "error(0.1) L0".parse().unwrap();
         assert_eq!(
-            dem.shortest_error_sat_problem().unwrap(),
+            dem.shortest_error_sat_problem(),
             "p wcnf 1 2 3\n1 -1 0\n3 1 0\n"
         );
 
         let dem: DetectorErrorModel = "error(0.1) D0 L0\nerror(0.1) D0".parse().unwrap();
         assert_eq!(
-            dem.likeliest_error_sat_problem_with_options(100, "WDIMACS")
+            dem.likeliest_error_sat_problem_with_options(100, crate::SatProblemFormat::Wdimacs)
                 .unwrap(),
             "p wcnf 3 8 801\n100 -1 0\n801 1 2 -3 0\n801 1 -2 3 0\n801 -1 2 3 0\n801 -1 -2 -3 0\n100 -2 0\n801 -3 0\n801 1 0\n"
         );
@@ -1923,11 +1970,11 @@ mod tests {
             .detector_error_model_with_options(true, false, false, 0.0, false, false)
             .expect("detector error model");
 
-        let svg = dem.diagram("matchgraph-svg").expect("svg");
-        let svg_alias = dem.diagram("match-graph-svg").expect("svg alias");
-        let svg_html = dem.diagram("match-graph-svg-html").expect("svg html");
-        let gltf = dem.diagram("matchgraph-3d").expect("gltf");
-        let gltf_html = dem.diagram("matchgraph-3d-html").expect("gltf html");
+        let svg = dem.diagram(crate::DetectorErrorModelDiagramType::MatchGraphSvg);
+        let svg_alias = dem.diagram("match-graph-svg".parse().unwrap());
+        let svg_html = dem.diagram("match-graph-svg-html".parse().unwrap());
+        let gltf = dem.diagram(crate::DetectorErrorModelDiagramType::MatchGraph3d);
+        let gltf_html = dem.diagram(crate::DetectorErrorModelDiagramType::MatchGraph3dHtml);
 
         assert!(svg.contains("<svg"));
         assert_eq!(svg, svg_alias);
@@ -1940,11 +1987,15 @@ mod tests {
     fn detector_error_model_diagram_rejects_unknown_types() {
         let circuit =
             Circuit::generated("repetition_code:memory", 3, 2).expect("generated circuit");
-        let dem = circuit
+        let _dem = circuit
             .detector_error_model_with_options(true, false, false, 0.0, false, false)
             .expect("detector error model");
 
-        assert!(dem.diagram("not-a-diagram").is_err());
+        assert!(
+            "not-a-diagram"
+                .parse::<crate::DetectorErrorModelDiagramType>()
+                .is_err()
+        );
     }
 
     #[test]

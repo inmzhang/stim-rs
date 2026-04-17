@@ -42,15 +42,15 @@ use std::str::FromStr;
 /// use stim::Flow;
 ///
 /// // A CNOT gate has the flow X__ -> X_X (X on control propagates to target).
-/// let flow = Flow::from_text("__X__ -> __X_X").unwrap();
+/// let flow = Flow::new("__X__ -> __X_X").unwrap();
 /// assert_eq!(flow.to_string(), "__X__ -> __X_X");
 ///
 /// // Flows involving measurements use `xor rec[-k]` syntax.
-/// let flow = Flow::from_text("X -> rec[-1]").unwrap();
+/// let flow = Flow::new("X -> rec[-1]").unwrap();
 /// assert_eq!(flow.measurements_copy(), vec![-1]);
 ///
 /// // Flows involving observables use `xor obs[k]` syntax.
-/// let flow = Flow::from_text("X -> Y xor obs[3]").unwrap();
+/// let flow = Flow::new("X -> Y xor obs[3]").unwrap();
 /// assert_eq!(flow.included_observables_copy(), vec![3]);
 /// ```
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,12 +65,11 @@ impl Flow {
 
     /// Creates a flow by parsing and canonicalizing Stim flow shorthand text.
     ///
-    /// This is a convenience alias for [`Flow::from_text`]. The input string
-    /// is parsed according to Stim's flow shorthand format, where `->` separates
-    /// the input Pauli string from the output, and `xor` joins measurement
-    /// records or observable indices. The text is canonicalized: qubit-indexed
-    /// Pauli terms like `X2` are expanded to explicit underscore-padded strings,
-    /// and duplicate terms cancel.
+    /// The input string is parsed according to Stim's flow shorthand format,
+    /// where `->` separates the input Pauli string from the output, and `xor`
+    /// joins measurement records or observable indices. The text is
+    /// canonicalized: qubit-indexed Pauli terms like `X2` are expanded to
+    /// explicit underscore-padded strings, and duplicate terms cancel.
     ///
     /// # Errors
     ///
@@ -83,40 +82,6 @@ impl Flow {
     /// assert_eq!(flow.to_string(), "__X -> obs[3]");
     /// ```
     pub fn new(text: &str) -> crate::Result<Self> {
-        Self::from_text(text)
-    }
-
-    /// Parses and canonicalizes Stim flow shorthand text.
-    ///
-    /// The flow text format uses `->` to separate the input Pauli string from the
-    /// output side, and `xor` to combine the output Pauli string with measurement
-    /// record lookbacks (`rec[-k]`) and observable references (`obs[k]`).
-    ///
-    /// Canonicalization normalizes the representation: qubit-indexed terms like
-    /// `X2` become underscore-padded explicit strings like `__X`, Pauli products
-    /// are combined, and duplicate `xor` terms cancel (since XOR is
-    /// self-inverse). For example, `xor rec[-2] xor rec[-2]` disappears, and
-    /// `Y2*Y2` becomes identity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `text` is not valid Stim flow shorthand.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let flow = stim::Flow::from_text("X2 -> -Y2*Z4 xor rec[-1]").unwrap();
-    /// assert_eq!(flow.to_string(), "__X -> -__Y_Z xor rec[-1]");
-    ///
-    /// // Identity output "1" is elided when measurements are present.
-    /// let flow = stim::Flow::from_text("Z -> 1 xor rec[-1]").unwrap();
-    /// assert_eq!(flow.to_string(), "Z -> rec[-1]");
-    ///
-    /// // Duplicate terms cancel.
-    /// let flow = stim::Flow::from_text("X2 -> Y2*Y2 xor rec[-2] xor rec[-2]").unwrap();
-    /// assert_eq!(flow.to_string(), "__X -> ___");
-    /// ```
-    pub fn from_text(text: &str) -> crate::Result<Self> {
         stim_cxx::canonicalize_flow_text(text)
             .map(Self::from_canonical_text)
             .map_err(crate::StimError::from)
@@ -135,11 +100,11 @@ impl Flow {
     /// # Examples
     ///
     /// ```
-    /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
+    /// let flow = stim::Flow::new("X -> Y xor obs[3]").unwrap();
     /// assert_eq!(flow.input_copy(), stim::PauliString::from_text("X").unwrap());
     ///
     /// // Preparation flows have an empty input.
-    /// let flow = stim::Flow::from_text("1 -> X xor rec[-1] xor obs[2]").unwrap();
+    /// let flow = stim::Flow::new("1 -> X xor rec[-1] xor obs[2]").unwrap();
     /// assert_eq!(flow.input_copy(), stim::PauliString::new(0));
     /// ```
     #[must_use]
@@ -161,11 +126,11 @@ impl Flow {
     /// # Examples
     ///
     /// ```
-    /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
+    /// let flow = stim::Flow::new("X -> Y xor obs[3]").unwrap();
     /// assert_eq!(flow.output_copy(), stim::PauliString::from_text("Y").unwrap());
     ///
     /// // Measurement-only flows have an empty output.
-    /// let flow = stim::Flow::from_text("X -> rec[-1]").unwrap();
+    /// let flow = stim::Flow::new("X -> rec[-1]").unwrap();
     /// assert_eq!(flow.output_copy(), stim::PauliString::new(0));
     /// ```
     #[must_use]
@@ -187,15 +152,15 @@ impl Flow {
     /// # Examples
     ///
     /// ```
-    /// let flow = stim::Flow::from_text("X -> rec[-1]").unwrap();
+    /// let flow = stim::Flow::new("X -> rec[-1]").unwrap();
     /// assert_eq!(flow.measurements_copy(), vec![-1]);
     ///
     /// // Multiple measurement records are listed in order.
-    /// let flow = stim::Flow::from_text("X -> rec[-2] xor rec[-1]").unwrap();
+    /// let flow = stim::Flow::new("X -> rec[-2] xor rec[-1]").unwrap();
     /// assert_eq!(flow.measurements_copy(), vec![-2, -1]);
     ///
     /// // A flow with no measurements returns an empty list.
-    /// let flow = stim::Flow::from_text("X -> Y").unwrap();
+    /// let flow = stim::Flow::new("X -> Y").unwrap();
     /// assert!(flow.measurements_copy().is_empty());
     /// ```
     #[must_use]
@@ -218,15 +183,15 @@ impl Flow {
     /// # Examples
     ///
     /// ```
-    /// let flow = stim::Flow::from_text("X -> Y xor obs[3]").unwrap();
+    /// let flow = stim::Flow::new("X -> Y xor obs[3]").unwrap();
     /// assert_eq!(flow.included_observables_copy(), vec![3]);
     ///
     /// // Duplicate observable references cancel (XOR is self-inverse).
-    /// let flow = stim::Flow::from_text("X -> Y xor obs[3] xor obs[3] xor obs[3]").unwrap();
+    /// let flow = stim::Flow::new("X -> Y xor obs[3] xor obs[3] xor obs[3]").unwrap();
     /// assert_eq!(flow.included_observables_copy(), vec![3]);
     ///
     /// // A flow with no observables returns an empty list.
-    /// let flow = stim::Flow::from_text("X -> Y").unwrap();
+    /// let flow = stim::Flow::new("X -> Y").unwrap();
     /// assert!(flow.included_observables_copy().is_empty());
     /// ```
     #[must_use]
@@ -240,7 +205,7 @@ impl FromStr for Flow {
     type Err = crate::StimError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_text(s)
+        Self::new(s)
     }
 }
 
@@ -276,17 +241,16 @@ impl fmt::Debug for Flow {
 /// use stim::Flow;
 ///
 /// // Pauli products: X * Z = Y (up to phase).
-/// let xy = Flow::from_text("X -> X").unwrap() * Flow::from_text("Z -> Z").unwrap();
-/// assert_eq!(xy, Flow::from_text("Y -> Y").unwrap());
+/// let xy = Flow::new("X -> X").unwrap() * Flow::new("Z -> Z").unwrap();
+/// assert_eq!(xy, Flow::new("Y -> Y").unwrap());
 ///
 /// // Anti-commuting outputs acquire a sign flip.
-/// let yy = Flow::from_text("1 -> XX").unwrap() * Flow::from_text("1 -> ZZ").unwrap();
-/// assert_eq!(yy, Flow::from_text("1 -> -YY").unwrap());
+/// let yy = Flow::new("1 -> XX").unwrap() * Flow::new("1 -> ZZ").unwrap();
+/// assert_eq!(yy, Flow::new("1 -> -YY").unwrap());
 ///
 /// // Measurement records are XOR-combined.
-/// let combined = Flow::from_text("X -> rec[-1]").unwrap()
-///     * Flow::from_text("X -> rec[-2]").unwrap();
-/// assert_eq!(combined, Flow::from_text("_ -> rec[-2] xor rec[-1]").unwrap());
+/// let combined = Flow::new("X -> rec[-1]").unwrap() * Flow::new("X -> rec[-2]").unwrap();
+/// assert_eq!(combined, Flow::new("_ -> rec[-2] xor rec[-1]").unwrap());
 /// ```
 impl Mul for Flow {
     type Output = Self;
@@ -352,23 +316,21 @@ mod tests {
     #[test]
     fn flow_from_text_canonicalizes_documented_examples() {
         assert_eq!(
-            Flow::from_text("X2 -> -Y2*Z4 xor rec[-1]")
-                .unwrap()
-                .to_string(),
+            Flow::new("X2 -> -Y2*Z4 xor rec[-1]").unwrap().to_string(),
             "__X -> -__Y_Z xor rec[-1]"
         );
         assert_eq!(
-            Flow::from_text("Z -> 1 xor rec[-1]").unwrap().to_string(),
+            Flow::new("Z -> 1 xor rec[-1]").unwrap().to_string(),
             "Z -> rec[-1]"
         );
         assert_eq!(
-            Flow::from_text("X2 -> Y2*Y2 xor rec[-2] xor rec[-2]")
+            Flow::new("X2 -> Y2*Y2 xor rec[-2] xor rec[-2]")
                 .unwrap()
                 .to_string(),
             "__X -> ___"
         );
         assert_eq!(
-            Flow::from_text("X -> Y xor obs[3] xor obs[3] xor obs[3]")
+            Flow::new("X -> Y xor obs[3] xor obs[3] xor obs[3]")
                 .unwrap()
                 .to_string(),
             "X -> Y xor obs[3]"
@@ -386,22 +348,22 @@ mod tests {
     #[test]
     fn flow_mul_matches_documented_examples() {
         assert_eq!(
-            Flow::from_text("X -> X").unwrap() * Flow::from_text("Z -> Z").unwrap(),
-            Flow::from_text("Y -> Y").unwrap()
+            Flow::new("X -> X").unwrap() * Flow::new("Z -> Z").unwrap(),
+            Flow::new("Y -> Y").unwrap()
         );
         assert_eq!(
-            Flow::from_text("1 -> XX").unwrap() * Flow::from_text("1 -> ZZ").unwrap(),
-            Flow::from_text("1 -> -YY").unwrap()
+            Flow::new("1 -> XX").unwrap() * Flow::new("1 -> ZZ").unwrap(),
+            Flow::new("1 -> -YY").unwrap()
         );
         assert_eq!(
-            Flow::from_text("X -> rec[-1]").unwrap() * Flow::from_text("X -> rec[-2]").unwrap(),
-            Flow::from_text("_ -> rec[-2] xor rec[-1]").unwrap()
+            Flow::new("X -> rec[-1]").unwrap() * Flow::new("X -> rec[-2]").unwrap(),
+            Flow::new("_ -> rec[-2] xor rec[-1]").unwrap()
         );
     }
 
     #[test]
     fn flow_copy_accessors_match_documented_examples() {
-        let flow = Flow::from_text("X -> Y xor obs[3]").unwrap();
+        let flow = Flow::new("X -> Y xor obs[3]").unwrap();
         assert_eq!(
             flow.input_copy(),
             crate::PauliString::from_text("X").unwrap()
@@ -412,11 +374,11 @@ mod tests {
         );
         assert_eq!(flow.included_observables_copy(), vec![3]);
 
-        let flow = Flow::from_text("X -> rec[-1]").unwrap();
+        let flow = Flow::new("X -> rec[-1]").unwrap();
         assert_eq!(flow.output_copy(), crate::PauliString::new(0));
         assert_eq!(flow.measurements_copy(), vec![-1]);
 
-        let flow = Flow::from_text("1 -> X xor rec[-1] xor obs[2]").unwrap();
+        let flow = Flow::new("1 -> X xor rec[-1] xor obs[2]").unwrap();
         assert_eq!(flow.input_copy(), crate::PauliString::new(0));
         assert_eq!(
             flow.output_copy(),

@@ -68,6 +68,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --doc -p stim
+env RUSTDOCFLAGS=-Dwarnings cargo doc -p stim --no-deps
 python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
 ```
 

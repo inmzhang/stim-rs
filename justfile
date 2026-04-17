@@ -18,10 +18,13 @@ test:
 test-doc:
     cargo test --doc -p stim
 
+doc-check:
+    env RUSTDOCFLAGS=-Dwarnings cargo doc -p stim --no-deps
+
 python-verify:
     python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
 
-verify: fmt-check clippy test test-doc python-verify
+verify: fmt-check clippy test test-doc doc-check python-verify
 
 pre-commit-install:
     pre-commit install

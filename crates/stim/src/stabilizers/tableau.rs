@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul};
 use std::pin::Pin;
+use std::str::FromStr;
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
@@ -20,6 +21,49 @@ type TableauNumpyPacked = (
     Array1<u8>,
     Array1<u8>,
 );
+
+/// Circuit synthesis strategy used when converting a tableau back into a circuit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TableauSynthesisMethod {
+    Elimination,
+    GraphState,
+    MppState,
+    MppStateUnsigned,
+}
+
+impl TableauSynthesisMethod {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Elimination => "elimination",
+            Self::GraphState => "graph_state",
+            Self::MppState => "mpp_state",
+            Self::MppStateUnsigned => "mpp_state_unsigned",
+        }
+    }
+}
+
+impl Display for TableauSynthesisMethod {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TableauSynthesisMethod {
+    type Err = crate::StimError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "elimination" => Ok(Self::Elimination),
+            "graph_state" => Ok(Self::GraphState),
+            "mpp_state" => Ok(Self::MppState),
+            "mpp_state_unsigned" => Ok(Self::MppStateUnsigned),
+            _ => Err(crate::StimError::new(
+                "tableau synthesis method not in ['elimination', 'graph_state', 'mpp_state', 'mpp_state_unsigned']",
+            )),
+        }
+    }
+}
 
 /// A stabilizer tableau representing a Clifford operation.
 ///
@@ -208,7 +252,13 @@ impl Tableau {
     /// assert_eq!(cnot.x_output(0), stim::PauliString::from_text("+XX").unwrap());
     /// ```
     pub fn from_named_gate(name: &str) -> crate::Result<Self> {
-        stim_cxx::Tableau::from_named_gate(name)
+        let gate = crate::GateData::new(name)?;
+        Self::from_gate(&gate)
+    }
+
+    /// Returns the tableau of a validated Clifford gate handle.
+    pub fn from_gate(gate: &crate::Gate) -> crate::Result<Self> {
+        stim_cxx::Tableau::from_named_gate(&gate.name())
             .map(|inner| Self { inner })
             .map_err(crate::StimError::from)
     }
@@ -241,7 +291,7 @@ impl Tableau {
     ///         stim::Complex32::new(0.5_f32.sqrt(), 0.0),
     ///         stim::Complex32::new(0.0, 0.5_f32.sqrt()),
     ///     ],
-    ///     "little",
+    ///     stim::Endian::Little,
     /// )
     /// .unwrap();
     /// assert_eq!(
@@ -255,14 +305,14 @@ impl Tableau {
     /// ```
     pub fn from_state_vector(
         state_vector: &[crate::Complex32],
-        endian: &str,
+        endian: crate::Endian,
     ) -> crate::Result<Self> {
         let mut flat = Vec::with_capacity(state_vector.len() * 2);
         for amp in state_vector {
             flat.push(amp.re);
             flat.push(amp.im);
         }
-        stim_cxx::Tableau::from_state_vector_data(flat, endian)
+        stim_cxx::Tableau::from_state_vector_data(flat, endian.as_str())
             .map(|inner| Self { inner })
             .map_err(crate::StimError::from)
     }
@@ -301,7 +351,7 @@ impl Tableau {
     ///         vec![stim::Complex32::new(1.0, 0.0), stim::Complex32::new(0.0, 0.0)],
     ///         vec![stim::Complex32::new(0.0, 0.0), stim::Complex32::new(0.0, 1.0)],
     ///     ],
-    ///     "little",
+    ///     stim::Endian::Little,
     /// )
     /// .unwrap();
     /// assert_eq!(
@@ -315,7 +365,7 @@ impl Tableau {
     /// ```
     pub fn from_unitary_matrix(
         matrix: &[Vec<crate::Complex32>],
-        endian: &str,
+        endian: crate::Endian,
     ) -> crate::Result<Self> {
         let n = matrix.len();
         if matrix.iter().any(|row| row.len() != n) {
@@ -328,7 +378,7 @@ impl Tableau {
                 flat.push(cell.im);
             }
         }
-        stim_cxx::Tableau::from_unitary_matrix_data(flat, endian)
+        stim_cxx::Tableau::from_unitary_matrix_data(flat, endian.as_str())
             .map(|inner| Self { inner })
             .map_err(crate::StimError::from)
     }
@@ -1307,13 +1357,16 @@ impl Tableau {
 
     /// Converts the tableau into a circuit using the default decomposition method.
     pub fn to_circuit(&self) -> crate::Result<crate::Circuit> {
-        self.to_circuit_with_method("elimination")
+        self.to_circuit_with_method(TableauSynthesisMethod::Elimination)
     }
 
     /// Converts the tableau into a circuit with a specific decomposition method.
-    pub fn to_circuit_with_method(&self, method: &str) -> crate::Result<crate::Circuit> {
+    pub fn to_circuit_with_method(
+        &self,
+        method: TableauSynthesisMethod,
+    ) -> crate::Result<crate::Circuit> {
         self.inner
-            .to_circuit(method)
+            .to_circuit(method.as_str())
             .map(crate::Circuit::from_inner)
             .map_err(crate::StimError::from)
     }
@@ -1327,17 +1380,17 @@ impl Tableau {
     }
 
     /// Converts the tableau into a unitary matrix.
-    pub fn to_unitary_matrix(&self, endian: &str) -> crate::Result<Vec<Vec<crate::Complex32>>> {
+    pub fn to_unitary_matrix(&self, endian: crate::Endian) -> Vec<Vec<crate::Complex32>> {
         let flat = self
             .inner
-            .to_unitary_matrix_data(endian)
-            .map_err(crate::StimError::from)?;
+            .to_unitary_matrix_data(endian.as_str())
+            .expect("typed endian should be accepted by stim-cxx");
         let n = 1usize << self.num_qubits();
-        if flat.len() != n * n * 2 {
-            return Err(crate::StimError::new(
-                "unexpected flat unitary matrix size from stim-cxx",
-            ));
-        }
+        assert_eq!(
+            flat.len(),
+            n * n * 2,
+            "unexpected flat unitary matrix size from stim-cxx"
+        );
         let mut result = vec![vec![crate::Complex32::new(0.0, 0.0); n]; n];
         for (row_index, row) in result.iter_mut().enumerate() {
             for (col_index, cell) in row.iter_mut().enumerate() {
@@ -1345,7 +1398,7 @@ impl Tableau {
                 *cell = crate::Complex32::new(flat[k], flat[k + 1]);
             }
         }
-        Ok(result)
+        result
     }
 
     /// Exports the tableau into unpacked boolean matrices.
@@ -1426,27 +1479,26 @@ impl Tableau {
     /// ```
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// assert_eq!(
-    ///     h.to_state_vector("little").unwrap(),
+    ///     h.to_state_vector(stim::Endian::Little),
     ///     vec![
     ///         stim::Complex32::new(0.5_f32.sqrt(), 0.0),
     ///         stim::Complex32::new(0.5_f32.sqrt(), 0.0),
     ///     ]
     /// );
     /// ```
-    pub fn to_state_vector(&self, endian: &str) -> crate::Result<Vec<crate::Complex32>> {
+    pub fn to_state_vector(&self, endian: crate::Endian) -> Vec<crate::Complex32> {
         let flat = self
             .inner
-            .to_state_vector_data(endian)
-            .map_err(crate::StimError::from)?;
-        if flat.len() % 2 != 0 {
-            return Err(crate::StimError::new(
-                "unexpected flat state vector size from stim-cxx",
-            ));
-        }
-        Ok(flat
-            .chunks_exact(2)
+            .to_state_vector_data(endian.as_str())
+            .expect("typed endian should be accepted by stim-cxx");
+        assert_eq!(
+            flat.len() % 2,
+            0,
+            "unexpected flat state vector size from stim-cxx"
+        );
+        flat.chunks_exact(2)
             .map(|pair| crate::Complex32::new(pair[0], pair[1]))
-            .collect())
+            .collect()
     }
 }
 
@@ -1507,7 +1559,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            cnot.to_unitary_matrix("big").unwrap(),
+            cnot.to_unitary_matrix(crate::Endian::Big),
             vec![
                 vec![
                     Complex32::new(1.0, 0.0),
@@ -1539,11 +1591,7 @@ mod tests {
 
     #[test]
     fn tableau_to_unitary_matrix_reports_documented_error_shapes() {
-        let err = Tableau::from_named_gate("H")
-            .unwrap()
-            .to_unitary_matrix("middle")
-            .unwrap_err();
-        assert!(err.message().contains("endian"));
+        assert!("middle".parse::<crate::Endian>().is_err());
     }
 
     #[test]
@@ -1553,7 +1601,7 @@ mod tests {
         let h = Tableau::from_named_gate("H").unwrap();
 
         assert_eq!(
-            (x.clone() + i2.clone()).to_state_vector("little").unwrap(),
+            (x.clone() + i2.clone()).to_state_vector(crate::Endian::Little),
             vec![
                 Complex32::new(0.0, 0.0),
                 Complex32::new(1.0, 0.0),
@@ -1562,7 +1610,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            (i2.clone() + x.clone()).to_state_vector("little").unwrap(),
+            (i2.clone() + x.clone()).to_state_vector(crate::Endian::Little),
             vec![
                 Complex32::new(0.0, 0.0),
                 Complex32::new(0.0, 0.0),
@@ -1571,7 +1619,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            (i2 + x).to_state_vector("big").unwrap(),
+            (i2 + x).to_state_vector(crate::Endian::Big),
             vec![
                 Complex32::new(0.0, 0.0),
                 Complex32::new(1.0, 0.0),
@@ -1580,7 +1628,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            (h.clone() + h).to_state_vector("little").unwrap(),
+            (h.clone() + h).to_state_vector(crate::Endian::Little),
             vec![
                 Complex32::new(0.5, 0.0),
                 Complex32::new(0.5, 0.0),
@@ -1592,11 +1640,7 @@ mod tests {
 
     #[test]
     fn tableau_to_state_vector_reports_documented_error_shapes() {
-        let err = Tableau::from_named_gate("H")
-            .unwrap()
-            .to_state_vector("middle")
-            .unwrap_err();
-        assert!(err.message().contains("endian"));
+        assert!("middle".parse::<crate::Endian>().is_err());
     }
 
     #[test]
@@ -1607,7 +1651,7 @@ mod tests {
                     Complex32::new(0.5f32.sqrt(), 0.0),
                     Complex32::new(0.0, 0.5f32.sqrt()),
                 ],
-                "little",
+                crate::Endian::Little,
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
@@ -1625,7 +1669,7 @@ mod tests {
                     Complex32::new(0.0, 0.0),
                     Complex32::new(0.5f32.sqrt(), 0.0),
                 ],
-                "little",
+                crate::Endian::Little,
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
@@ -1644,9 +1688,7 @@ mod tests {
 
     #[test]
     fn tableau_from_state_vector_reports_documented_error_shapes() {
-        let bad_endian =
-            Tableau::from_state_vector(&[Complex32::new(1.0, 0.0)], "middle").unwrap_err();
-        assert!(bad_endian.message().contains("endian"));
+        assert!("middle".parse::<crate::Endian>().is_err());
 
         let not_stabilizer = Tableau::from_state_vector(
             &[
@@ -1654,7 +1696,7 @@ mod tests {
                 Complex32::new(1.0, 0.0),
                 Complex32::new(1.0, 0.0),
             ],
-            "little",
+            crate::Endian::Little,
         )
         .unwrap_err();
         assert!(
@@ -1671,7 +1713,7 @@ mod tests {
                     vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                     vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 1.0)],
                 ],
-                "little",
+                crate::Endian::Little,
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
@@ -1709,7 +1751,7 @@ mod tests {
                         Complex32::new(0.0, 0.0),
                     ],
                 ],
-                "little",
+                crate::Endian::Little,
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
@@ -1732,14 +1774,17 @@ mod tests {
             Tableau::from_named_gate("H").unwrap(),
             Tableau::from_named_gate("CNOT").unwrap(),
         ] {
-            let little = tableau.to_unitary_matrix("little").unwrap();
+            let little = tableau.to_unitary_matrix(crate::Endian::Little);
             assert_eq!(
-                Tableau::from_unitary_matrix(&little, "little").unwrap(),
+                Tableau::from_unitary_matrix(&little, crate::Endian::Little).unwrap(),
                 tableau
             );
 
-            let big = tableau.to_unitary_matrix("big").unwrap();
-            assert_eq!(Tableau::from_unitary_matrix(&big, "big").unwrap(), tableau);
+            let big = tableau.to_unitary_matrix(crate::Endian::Big);
+            assert_eq!(
+                Tableau::from_unitary_matrix(&big, crate::Endian::Big).unwrap(),
+                tableau
+            );
         }
     }
 
@@ -1750,21 +1795,19 @@ mod tests {
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
         )
         .unwrap_err();
         assert!(not_square.message().contains("square"));
 
-        let bad_endian =
-            Tableau::from_unitary_matrix(&[vec![Complex32::new(1.0, 0.0)]], "middle").unwrap_err();
-        assert!(bad_endian.message().contains("endian"));
+        assert!("middle".parse::<crate::Endian>().is_err());
 
         let not_clifford = Tableau::from_unitary_matrix(
             &[
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
         )
         .unwrap_err();
         assert!(not_clifford.message().contains("Clifford"));
@@ -2265,7 +2308,9 @@ mod circuit_interop_tests {
 
         assert_eq!(
             tableau.to_circuit().unwrap(),
-            tableau.to_circuit_with_method("elimination").unwrap()
+            tableau
+                .to_circuit_with_method(crate::TableauSynthesisMethod::Elimination)
+                .unwrap()
         );
         assert_eq!(
             tableau.to_circuit().unwrap().to_string(),
@@ -2273,29 +2318,27 @@ mod circuit_interop_tests {
         );
         assert_eq!(
             tableau
-                .to_circuit_with_method("graph_state")
+                .to_circuit_with_method(crate::TableauSynthesisMethod::GraphState)
                 .unwrap()
                 .to_string(),
             "RX 0 1 2 3\nTICK\nCZ 0 3 1 2 1 3\nTICK\nX 0 1\nZ 2\nS 2 3\nH 3\nS 3"
         );
         assert_eq!(
             tableau
-                .to_circuit_with_method("mpp_state_unsigned")
+                .to_circuit_with_method(crate::TableauSynthesisMethod::MppStateUnsigned)
                 .unwrap()
                 .to_string(),
             "MPP X0*Z1*Y2*Y3 !X0*Y1*X2 !Z0*X1*X2*Z3 X0*X1*Z2"
         );
         assert_eq!(
             tableau
-                .to_circuit_with_method("mpp_state")
+                .to_circuit_with_method(crate::TableauSynthesisMethod::MppState)
                 .unwrap()
                 .to_string(),
             "MPP X0*Z1*Y2*Y3 !X0*Y1*X2 !Z0*X1*X2*Z3 X0*X1*Z2\nCX rec[-3] 2 rec[-1] 2\nCY rec[-4] 0 rec[-3] 0 rec[-3] 3 rec[-2] 3 rec[-1] 0\nCZ rec[-4] 1 rec[-1] 1"
         );
 
-        let err = tableau.to_circuit_with_method("nope").unwrap_err();
-        assert!(err.to_string().contains("Unknown method"));
-        assert!(err.to_string().contains("mpp_state_unsigned"));
+        assert!("nope".parse::<crate::TableauSynthesisMethod>().is_err());
     }
 
     #[test]

@@ -15,10 +15,96 @@ use crate::common::bit_packing::unpack_bits;
 use crate::common::parse::{coordinate_entries_to_map, decode_measurement_solution};
 use crate::common::slicing::{compute_slice_indices, normalize_index};
 use crate::{
-    DemTarget, DetectorErrorModel, DetectorSampler, ExplainedError, Flow, GateTarget,
-    MeasurementSampler, MeasurementsToDetectionEventsConverter, NoiseModel, PauliString, Result,
-    StimError, Tableau,
+    DemTarget, DetectorErrorModel, DetectorSampler, ExplainedError, Flow, Gate, GateTarget,
+    MeasurementSampler, MeasurementsToDetectionEventsConverter, NoiseModel, OpenQasmVersion,
+    PauliString, Result, SatProblemFormat, StimError, Tableau,
 };
+
+/// Diagram style accepted by [`Circuit::diagram`] and related helpers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CircuitDiagramType {
+    TimelineText,
+    TimelineSvg,
+    TimelineSvgHtml,
+    Timeline3d,
+    Timeline3dHtml,
+    DetSliceText,
+    DetSliceSvg,
+    TimeSliceSvg,
+    DetSliceWithOpsSvg,
+    MatchGraphSvg,
+    MatchGraphSvgHtml,
+    MatchGraph3d,
+    MatchGraph3dHtml,
+    Interactive,
+    InteractiveHtml,
+}
+
+impl CircuitDiagramType {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TimelineText => "timeline-text",
+            Self::TimelineSvg => "timeline-svg",
+            Self::TimelineSvgHtml => "timeline-svg-html",
+            Self::Timeline3d => "timeline-3d",
+            Self::Timeline3dHtml => "timeline-3d-html",
+            Self::DetSliceText => "detslice-text",
+            Self::DetSliceSvg => "detslice-svg",
+            Self::TimeSliceSvg => "timeslice-svg",
+            Self::DetSliceWithOpsSvg => "detslice-with-ops-svg",
+            Self::MatchGraphSvg => "matchgraph-svg",
+            Self::MatchGraphSvgHtml => "matchgraph-svg-html",
+            Self::MatchGraph3d => "matchgraph-3d",
+            Self::MatchGraph3dHtml => "matchgraph-3d-html",
+            Self::Interactive => "interactive",
+            Self::InteractiveHtml => "interactive-html",
+        }
+    }
+}
+
+impl Display for CircuitDiagramType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for CircuitDiagramType {
+    type Err = StimError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "timeline-text" => Ok(Self::TimelineText),
+            "timeline-svg" | "timeline" => Ok(Self::TimelineSvg),
+            "timeline-svg-html" | "timeline-html" => Ok(Self::TimelineSvgHtml),
+            "timeline-3d" => Ok(Self::Timeline3d),
+            "timeline-3d-html" => Ok(Self::Timeline3dHtml),
+            "detslice-text" | "detector-slice-text" => Ok(Self::DetSliceText),
+            "detslice-svg" | "detslice" | "detslice-html" | "detslice-svg-html"
+            | "detector-slice-svg" | "detector-slice" => Ok(Self::DetSliceSvg),
+            "timeslice-svg"
+            | "time-slice-svg"
+            | "timeslice"
+            | "time-slice"
+            | "timeslice-html"
+            | "time-slice-html"
+            | "timeslice-svg-html"
+            | "time-slice-svg-html" => Ok(Self::TimeSliceSvg),
+            "detslice-with-ops-svg"
+            | "detslice-with-ops"
+            | "detslice-with-ops-html"
+            | "detslice-with-ops-svg-html"
+            | "time+detector-slice-svg" => Ok(Self::DetSliceWithOpsSvg),
+            "matchgraph-svg" | "match-graph-svg" => Ok(Self::MatchGraphSvg),
+            "matchgraph-svg-html" | "match-graph-svg-html" => Ok(Self::MatchGraphSvgHtml),
+            "matchgraph-3d" | "match-graph-3d" => Ok(Self::MatchGraph3d),
+            "matchgraph-3d-html" | "match-graph-3d-html" => Ok(Self::MatchGraph3dHtml),
+            "interactive" => Ok(Self::Interactive),
+            "interactive-html" => Ok(Self::InteractiveHtml),
+            _ => Err(StimError::new(format!("unknown circuit diagram type: {s}"))),
+        }
+    }
+}
 
 /// A mutable stabilizer circuit.
 ///
@@ -60,8 +146,10 @@ use crate::{
 ///
 /// // Build a circuit imperatively.
 /// let mut circuit = stim::Circuit::new();
-/// circuit.append("X", &[0], &[]).unwrap();
-/// circuit.append("M", &[0], &[]).unwrap();
+/// let x = stim::Gate::new("X").unwrap();
+/// let m = stim::Gate::new("M").unwrap();
+/// circuit.append(&x, &[0], &[]).unwrap();
+/// circuit.append(&m, &[0], &[]).unwrap();
 /// let mut sampler = circuit.compile_sampler(false);
 /// assert_eq!(sampler.sample(1), ndarray::array![[true]]);
 ///
@@ -669,15 +757,17 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit = stim::Circuit::new();
-    /// circuit.append("X", &[0, 2], &[]).unwrap();
+    /// let x = stim::Gate::new("X").unwrap();
+    /// circuit.append(&x, &[0, 2], &[]).unwrap();
     /// assert_eq!(circuit.to_string(), "X 0 2");
     ///
-    /// circuit.append("X_ERROR", &[0], &[0.125]).unwrap();
+    /// let x_error = stim::Gate::new("X_ERROR").unwrap();
+    /// circuit.append(&x_error, &[0], &[0.125]).unwrap();
     /// assert_eq!(circuit.to_string(), "X 0 2\nX_ERROR(0.125) 0");
     /// ```
-    pub fn append(&mut self, gate_name: &str, targets: &[u32], args: &[f64]) -> Result<()> {
+    pub fn append(&mut self, gate: &Gate, targets: &[u32], args: &[f64]) -> Result<()> {
         self.inner
-            .append_with_tag(gate_name, targets, args, "")
+            .append_with_tag(&gate.name(), targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -701,9 +791,10 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit = stim::Circuit::new();
+    /// let correlated_error = stim::Gate::new("CORRELATED_ERROR").unwrap();
     /// circuit
     ///     .append_gate_targets(
-    ///         "CORRELATED_ERROR",
+    ///         &correlated_error,
     ///         &[
     ///             stim::GateTarget::x(0_u32, false).unwrap(),
     ///             stim::GateTarget::y(1_u32, false).unwrap(),
@@ -716,13 +807,13 @@ impl Circuit {
     /// ```
     pub fn append_gate_targets(
         &mut self,
-        gate_name: &str,
+        gate: &Gate,
         targets: &[GateTarget],
         args: &[f64],
     ) -> Result<()> {
         let raw_targets: Vec<u32> = targets.iter().map(|target| target.raw_data()).collect();
         self.inner
-            .append_with_tag(gate_name, &raw_targets, args, "")
+            .append_with_tag(&gate.name(), &raw_targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -919,9 +1010,13 @@ impl Circuit {
     ///
     /// Returns an error if the circuit uses features that cannot be represented
     /// in the requested OpenQASM version.
-    pub fn to_qasm(&self, open_qasm_version: i32, skip_dets_and_obs: bool) -> Result<String> {
+    pub fn to_qasm(
+        &self,
+        open_qasm_version: OpenQasmVersion,
+        skip_dets_and_obs: bool,
+    ) -> Result<String> {
         self.inner
-            .to_qasm(open_qasm_version, skip_dets_and_obs)
+            .to_qasm(open_qasm_version.as_i32(), skip_dets_and_obs)
             .map_err(StimError::from)
     }
 
@@ -990,45 +1085,47 @@ impl Circuit {
     ///
     /// ```
     /// let circuit: stim::Circuit = "H 0\nCNOT 0 1".parse().unwrap();
-    /// let timeline = circuit.diagram("timeline-text").unwrap();
+    /// let timeline = circuit.diagram(stim::CircuitDiagramType::TimelineText).unwrap();
     /// assert!(timeline.contains("q0:"));
     /// assert!(timeline.contains("q1:"));
     /// ```
-    pub fn diagram(&self, type_name: &str) -> Result<String> {
-        self.inner.diagram(type_name).map_err(StimError::from)
+    pub fn diagram(&self, type_name: CircuitDiagramType) -> Result<String> {
+        self.inner
+            .diagram(type_name.as_str())
+            .map_err(StimError::from)
     }
 
     /// Renders a diagram focused on a single tick.
-    pub fn diagram_with_tick(&self, type_name: &str, tick: u64) -> Result<String> {
+    pub fn diagram_with_tick(&self, type_name: CircuitDiagramType, tick: u64) -> Result<String> {
         self.inner
-            .diagram_with_options(type_name, Some((tick, 1)), None)
+            .diagram_with_options(type_name.as_str(), Some((tick, 1)), None)
             .map_err(StimError::from)
     }
 
     /// Renders a diagram over a tick range.
     pub fn diagram_with_tick_range(
         &self,
-        type_name: &str,
+        type_name: CircuitDiagramType,
         tick_start: u64,
         tick_count: u64,
         rows: Option<usize>,
     ) -> Result<String> {
         self.inner
-            .diagram_with_options(type_name, Some((tick_start, tick_count)), rows)
+            .diagram_with_options(type_name.as_str(), Some((tick_start, tick_count)), rows)
             .map_err(StimError::from)
     }
 
     /// Renders a diagram filtered to selected detecting regions.
     pub fn diagram_with_filters(
         &self,
-        type_name: &str,
+        type_name: CircuitDiagramType,
         tick_range: Option<(u64, u64)>,
         rows: Option<usize>,
         filters: &[DetectingRegionFilter],
     ) -> Result<String> {
         self.inner
             .diagram_with_options_and_filters(
-                type_name,
+                type_name.as_str(),
                 tick_range,
                 rows,
                 self.encode_diagram_filters(filters)?,
@@ -1067,29 +1164,32 @@ impl Circuit {
 
     /// Returns a SAT problem encoding the shortest logical error search.
     pub fn shortest_error_sat_problem(&self) -> Result<String> {
-        self.shortest_error_sat_problem_with_format("WDIMACS")
+        self.shortest_error_sat_problem_with_format(SatProblemFormat::Wdimacs)
     }
 
     /// Returns a SAT problem encoding in the requested format.
-    pub fn shortest_error_sat_problem_with_format(&self, format_name: &str) -> Result<String> {
+    pub fn shortest_error_sat_problem_with_format(
+        &self,
+        format_name: SatProblemFormat,
+    ) -> Result<String> {
         self.inner
-            .shortest_error_sat_problem(format_name)
+            .shortest_error_sat_problem(format_name.as_str())
             .map_err(StimError::from)
     }
 
     /// Returns a SAT problem encoding the likeliest logical error search.
     pub fn likeliest_error_sat_problem(&self) -> Result<String> {
-        self.likeliest_error_sat_problem_with_options(100, "WDIMACS")
+        self.likeliest_error_sat_problem_with_options(100, SatProblemFormat::Wdimacs)
     }
 
     /// Returns a likeliest-error SAT encoding with explicit options.
     pub fn likeliest_error_sat_problem_with_options(
         &self,
         quantization: i32,
-        format_name: &str,
+        format_name: SatProblemFormat,
     ) -> Result<String> {
         self.inner
-            .likeliest_error_sat_problem(quantization, format_name)
+            .likeliest_error_sat_problem(quantization, format_name.as_str())
             .map_err(StimError::from)
     }
 
@@ -1831,6 +1931,10 @@ mod api_tests {
             .expect("rows should be rectangular")
     }
 
+    fn gate(name: &str) -> GateData {
+        name.parse().expect("gate should parse")
+    }
+
     #[test]
     fn empty_circuit_is_zeroed() {
         let circuit = Circuit::new();
@@ -2052,10 +2156,10 @@ mod api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append("X", &[0], &[])
+            .append(&gate("X"), &[0], &[])
             .expect("append should succeed");
         circuit
-            .append("M", &[0, 1], &[])
+            .append(&gate("M"), &[0, 1], &[])
             .expect("append should succeed");
 
         assert_eq!(circuit.to_string(), "X 0\nM 0 1");
@@ -2066,7 +2170,7 @@ mod api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append("X_ERROR", &[0], &[0.125])
+            .append(&gate("X_ERROR"), &[0], &[0.125])
             .expect("append should succeed");
 
         assert_eq!(circuit.to_string(), "X_ERROR(0.125) 0");
@@ -2074,10 +2178,7 @@ mod api_tests {
 
     #[test]
     fn append_reports_stim_parse_errors() {
-        let mut circuit = Circuit::new();
-        let error = circuit
-            .append("NOT_A_GATE", &[0], &[])
-            .expect_err("invalid gate should fail");
+        let error = GateData::new("NOT_A_GATE").expect_err("invalid gate should fail");
 
         assert!(error.message().contains("NOT_A_GATE"));
     }
@@ -2120,7 +2221,7 @@ mod api_tests {
         let circuit = Circuit::from_str("H 0\nM 0").expect("circuit should parse");
 
         let qasm = circuit
-            .to_qasm(3, false)
+            .to_qasm(crate::OpenQasmVersion::V3, false)
             .expect("qasm export should succeed");
 
         assert!(qasm.contains("OPENQASM 3.0;"));
@@ -2916,13 +3017,17 @@ mod residual_api_tests {
         Circuit::from_str(text).expect("circuit should parse")
     }
 
+    fn gate(name: &str) -> crate::Gate {
+        name.parse().expect("gate should parse")
+    }
+
     #[test]
     fn circuit_append_gate_targets_supports_qubit_targets() {
         let mut circuit = Circuit::new();
 
         circuit
             .append_gate_targets(
-                "CX",
+                &gate("CX"),
                 &[
                     GateTarget::from(0_u32),
                     GateTarget::from(1_u32),
@@ -2934,7 +3039,7 @@ mod residual_api_tests {
             .expect("qubit targets should append");
         circuit
             .append_gate_targets(
-                "H",
+                &gate("H"),
                 &[GateTarget::from(4_u32), GateTarget::from(5_u32)],
                 &[],
             )
@@ -2955,7 +3060,7 @@ mod residual_api_tests {
 
         circuit
             .append_gate_targets(
-                "CORRELATED_ERROR",
+                &gate("CORRELATED_ERROR"),
                 &[
                     crate::GateTarget::x(0_u32, false).expect("X target should construct"),
                     crate::GateTarget::y(1_u32, false).expect("Y target should construct"),
@@ -2973,14 +3078,14 @@ mod residual_api_tests {
 
         circuit
             .append_gate_targets(
-                "M",
+                &gate("M"),
                 &[GateTarget::from(0_u32), GateTarget::from(1_u32)],
                 &[],
             )
             .expect("measurements should append");
         circuit
             .append_gate_targets(
-                "CX",
+                &gate("CX"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     GateTarget::from(5_u32),
@@ -2990,7 +3095,7 @@ mod residual_api_tests {
             .expect("record-controlled CX should append");
         circuit
             .append_gate_targets(
-                "DETECTOR",
+                &gate("DETECTOR"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     crate::GateTarget::rec(-2).expect("record target should construct"),
@@ -3000,7 +3105,7 @@ mod residual_api_tests {
             .expect("detector targets should append");
         circuit
             .append_gate_targets(
-                "OBSERVABLE_INCLUDE",
+                &gate("OBSERVABLE_INCLUDE"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     crate::GateTarget::rec(-2).expect("record target should construct"),
@@ -3047,7 +3152,7 @@ mod residual_api_tests {
         );
 
         circuit
-            .append_gate_targets("MPP", &targets, &[])
+            .append_gate_targets(&gate("MPP"), &targets, &[])
             .expect("MPP targets should append");
 
         assert_eq!(circuit, parse_circuit("MPP X1*Y2*Z3 Y4 Z5 !X1*X2"));
@@ -3429,17 +3534,14 @@ mod residual_api_tests {
     fn circuit_flow_generators_match_documented_examples() {
         assert_eq!(
             Circuit::from_str("H 0").unwrap().flow_generators().unwrap(),
-            vec![
-                Flow::from_text("X -> Z").unwrap(),
-                Flow::from_text("Z -> X").unwrap(),
-            ]
+            vec![Flow::new("X -> Z").unwrap(), Flow::new("Z -> X").unwrap(),]
         );
 
         assert_eq!(
             Circuit::from_str("M 0").unwrap().flow_generators().unwrap(),
             vec![
-                Flow::from_text("1 -> Z xor rec[0]").unwrap(),
-                Flow::from_text("Z -> rec[0]").unwrap(),
+                Flow::new("1 -> Z xor rec[0]").unwrap(),
+                Flow::new("Z -> rec[0]").unwrap(),
             ]
         );
 
@@ -3448,7 +3550,7 @@ mod residual_api_tests {
                 .unwrap()
                 .flow_generators()
                 .unwrap(),
-            vec![Flow::from_text("1 -> X").unwrap()]
+            vec![Flow::new("1 -> X").unwrap()]
         );
 
         let flows: Vec<String> = Circuit::from_str("MXX 0 1")
@@ -3476,9 +3578,9 @@ mod residual_api_tests {
         assert!(
             !h.has_all_flows(
                 &[
-                    Flow::from_text("X -> Z").unwrap(),
-                    Flow::from_text("Y -> Y").unwrap(),
-                    Flow::from_text("Z -> X").unwrap(),
+                    Flow::new("X -> Z").unwrap(),
+                    Flow::new("Y -> Y").unwrap(),
+                    Flow::new("Z -> X").unwrap(),
                 ],
                 false,
             )
@@ -3488,9 +3590,9 @@ mod residual_api_tests {
         assert!(
             h.has_all_flows(
                 &[
-                    Flow::from_text("X -> Z").unwrap(),
-                    Flow::from_text("Y -> -Y").unwrap(),
-                    Flow::from_text("Z -> X").unwrap(),
+                    Flow::new("X -> Z").unwrap(),
+                    Flow::new("Y -> -Y").unwrap(),
+                    Flow::new("Z -> X").unwrap(),
                 ],
                 false,
             )
@@ -3500,9 +3602,9 @@ mod residual_api_tests {
         assert!(
             h.has_all_flows(
                 &[
-                    Flow::from_text("X -> Z").unwrap(),
-                    Flow::from_text("Y -> Y").unwrap(),
-                    Flow::from_text("Z -> X").unwrap(),
+                    Flow::new("X -> Z").unwrap(),
+                    Flow::new("Y -> Y").unwrap(),
+                    Flow::new("Z -> X").unwrap(),
                 ],
                 true,
             )
@@ -3513,58 +3615,43 @@ mod residual_api_tests {
     #[test]
     fn circuit_has_flow_matches_documented_examples() {
         let m = Circuit::from_str("M 0").unwrap();
+        assert!(m.has_flow(&Flow::new("Z -> Z").unwrap(), false).unwrap());
+        assert!(!m.has_flow(&Flow::new("X -> X").unwrap(), false).unwrap());
+        assert!(!m.has_flow(&Flow::new("Z -> I").unwrap(), false).unwrap());
         assert!(
-            m.has_flow(&Flow::from_text("Z -> Z").unwrap(), false)
+            m.has_flow(&Flow::new("Z -> I xor rec[-1]").unwrap(), false)
                 .unwrap()
         );
         assert!(
-            !m.has_flow(&Flow::from_text("X -> X").unwrap(), false)
-                .unwrap()
-        );
-        assert!(
-            !m.has_flow(&Flow::from_text("Z -> I").unwrap(), false)
-                .unwrap()
-        );
-        assert!(
-            m.has_flow(&Flow::from_text("Z -> I xor rec[-1]").unwrap(), false)
-                .unwrap()
-        );
-        assert!(
-            m.has_flow(&Flow::from_text("Z -> rec[-1]").unwrap(), false)
+            m.has_flow(&Flow::new("Z -> rec[-1]").unwrap(), false)
                 .unwrap()
         );
 
         let cx58 = Circuit::from_str("CX 5 8").unwrap();
         assert!(
-            cx58.has_flow(&Flow::from_text("X5 -> X5*X8").unwrap(), false)
+            cx58.has_flow(&Flow::new("X5 -> X5*X8").unwrap(), false)
                 .unwrap()
         );
         assert!(
             !cx58
-                .has_flow(&Flow::from_text("X_ -> XX").unwrap(), false)
+                .has_flow(&Flow::new("X_ -> XX").unwrap(), false)
                 .unwrap()
         );
         assert!(
-            cx58.has_flow(&Flow::from_text("_____X___ -> _____X__X").unwrap(), false)
+            cx58.has_flow(&Flow::new("_____X___ -> _____X__X").unwrap(), false)
                 .unwrap()
         );
 
         let ry = Circuit::from_str("RY 0").unwrap();
-        assert!(
-            ry.has_flow(&Flow::from_text("1 -> Y").unwrap(), false)
-                .unwrap()
-        );
-        assert!(
-            !ry.has_flow(&Flow::from_text("1 -> X").unwrap(), false)
-                .unwrap()
-        );
+        assert!(ry.has_flow(&Flow::new("1 -> Y").unwrap(), false).unwrap());
+        assert!(!ry.has_flow(&Flow::new("1 -> X").unwrap(), false).unwrap());
 
         let cx01 = Circuit::from_str("CX 0 1").unwrap();
-        let flow = Flow::from_text("+X_ -> +XX").unwrap();
+        let flow = Flow::new("+X_ -> +XX").unwrap();
         assert!(cx01.has_flow(&flow, false).unwrap());
 
         let h0 = Circuit::from_str("H 0").unwrap();
-        let y_flow = Flow::from_text("Y -> Y").unwrap();
+        let y_flow = Flow::new("Y -> Y").unwrap();
         assert!(h0.has_flow(&y_flow, true).unwrap());
         assert!(!h0.has_flow(&y_flow, false).unwrap());
     }
@@ -3574,7 +3661,7 @@ mod residual_api_tests {
         assert_eq!(
             Circuit::from_str("M 2")
                 .unwrap()
-                .solve_flow_measurements(&[Flow::from_text("Z2 -> 1").unwrap()])
+                .solve_flow_measurements(&[Flow::new("Z2 -> 1").unwrap()])
                 .unwrap(),
             vec![Some(vec![0])]
         );
@@ -3582,7 +3669,7 @@ mod residual_api_tests {
         assert_eq!(
             Circuit::from_str("M 2")
                 .unwrap()
-                .solve_flow_measurements(&[Flow::from_text("X2 -> X2").unwrap()])
+                .solve_flow_measurements(&[Flow::new("X2 -> X2").unwrap()])
                 .unwrap(),
             vec![None]
         );
@@ -3590,7 +3677,7 @@ mod residual_api_tests {
         assert_eq!(
             Circuit::from_str("MXX 0 1")
                 .unwrap()
-                .solve_flow_measurements(&[Flow::from_text("YY -> ZZ").unwrap()])
+                .solve_flow_measurements(&[Flow::new("YY -> ZZ").unwrap()])
                 .unwrap(),
             vec![Some(vec![0])]
         );
@@ -3606,10 +3693,10 @@ mod residual_api_tests {
             )
             .unwrap()
             .solve_flow_measurements(&[
-                Flow::from_text("1 -> Z0*Z4").unwrap(),
-                Flow::from_text("Z0 -> Z2").unwrap(),
-                Flow::from_text("X0*X2*X4 -> X0*X2*X4").unwrap(),
-                Flow::from_text("Y0 -> Y0").unwrap(),
+                Flow::new("1 -> Z0*Z4").unwrap(),
+                Flow::new("Z0 -> Z2").unwrap(),
+                Flow::new("X0*X2*X4 -> X0*X2*X4").unwrap(),
+                Flow::new("Y0 -> Y0").unwrap(),
             ])
             .unwrap(),
             vec![Some(vec![0, 1]), Some(vec![0]), Some(vec![]), None]
@@ -3625,28 +3712,25 @@ mod residual_api_tests {
 
         let (inv_circuit, inv_flows) = Circuit::from_str("M 0")
             .unwrap()
-            .time_reversed_for_flows(&[Flow::from_text("Z -> rec[-1]").unwrap()], false)
+            .time_reversed_for_flows(&[Flow::new("Z -> rec[-1]").unwrap()], false)
             .unwrap();
         assert_eq!(inv_circuit, Circuit::from_str("R 0").unwrap());
-        assert_eq!(inv_flows, vec![Flow::from_text("1 -> Z").unwrap()]);
+        assert_eq!(inv_flows, vec![Flow::new("1 -> Z").unwrap()]);
         assert!(inv_circuit.has_all_flows(&inv_flows, true).unwrap());
 
         let (inv_circuit, inv_flows) = Circuit::from_str("R 0")
             .unwrap()
-            .time_reversed_for_flows(&[Flow::from_text("1 -> Z").unwrap()], false)
+            .time_reversed_for_flows(&[Flow::new("1 -> Z").unwrap()], false)
             .unwrap();
         assert_eq!(inv_circuit, Circuit::from_str("M 0").unwrap());
-        assert_eq!(inv_flows, vec![Flow::from_text("Z -> rec[-1]").unwrap()]);
+        assert_eq!(inv_flows, vec![Flow::new("Z -> rec[-1]").unwrap()]);
 
         let (inv_circuit, inv_flows) = Circuit::from_str("M 0")
             .unwrap()
-            .time_reversed_for_flows(&[Flow::from_text("Z -> rec[-1]").unwrap()], true)
+            .time_reversed_for_flows(&[Flow::new("Z -> rec[-1]").unwrap()], true)
             .unwrap();
         assert_eq!(inv_circuit, Circuit::from_str("M 0").unwrap());
-        assert_eq!(
-            inv_flows,
-            vec![Flow::from_text("1 -> Z xor rec[-1]").unwrap()]
-        );
+        assert_eq!(inv_flows, vec![Flow::new("1 -> Z xor rec[-1]").unwrap()]);
     }
 
     #[test]
@@ -3845,15 +3929,27 @@ mod residual_api_tests {
         )
         .unwrap();
 
-        let timeline = circuit.diagram("timeline-text").unwrap();
+        let timeline = circuit
+            .diagram(crate::CircuitDiagramType::TimelineText)
+            .unwrap();
         assert!(timeline.contains("q0:"));
         assert!(timeline.contains("q1:"));
 
-        let svg = circuit.diagram("timeline-svg").unwrap();
-        let svg_html = circuit.diagram("timeline-svg-html").unwrap();
-        let gltf = circuit.diagram("timeline-3d").unwrap();
-        let gltf_html = circuit.diagram("timeline-3d-html").unwrap();
-        let interactive = circuit.diagram("interactive").unwrap();
+        let svg = circuit
+            .diagram(crate::CircuitDiagramType::TimelineSvg)
+            .unwrap();
+        let svg_html = circuit
+            .diagram(crate::CircuitDiagramType::TimelineSvgHtml)
+            .unwrap();
+        let gltf = circuit
+            .diagram(crate::CircuitDiagramType::Timeline3d)
+            .unwrap();
+        let gltf_html = circuit
+            .diagram(crate::CircuitDiagramType::Timeline3dHtml)
+            .unwrap();
+        let interactive = circuit
+            .diagram(crate::CircuitDiagramType::Interactive)
+            .unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg_html.contains("<svg"));
         assert!(gltf.contains("\"nodes\"") || gltf.contains("\"scenes\""));
@@ -3868,16 +3964,74 @@ mod residual_api_tests {
     OBSERVABLE_INCLUDE(0) rec[-1]",
         )
         .unwrap();
-        let match_svg = detector_circuit.diagram("matchgraph-svg").unwrap();
-        let match_svg_alias = detector_circuit.diagram("match-graph-svg").unwrap();
-        let match_svg_html = detector_circuit.diagram("matchgraph-svg-html").unwrap();
-        let match_gltf = detector_circuit.diagram("matchgraph-3d").unwrap();
-        let match_gltf_html = detector_circuit.diagram("matchgraph-3d-html").unwrap();
+        let match_svg = detector_circuit
+            .diagram(crate::CircuitDiagramType::MatchGraphSvg)
+            .unwrap();
+        let match_svg_alias = detector_circuit
+            .diagram("match-graph-svg".parse().unwrap())
+            .unwrap();
+        let match_svg_html = detector_circuit
+            .diagram(crate::CircuitDiagramType::MatchGraphSvgHtml)
+            .unwrap();
+        let match_gltf = detector_circuit
+            .diagram(crate::CircuitDiagramType::MatchGraph3d)
+            .unwrap();
+        let match_gltf_html = detector_circuit
+            .diagram(crate::CircuitDiagramType::MatchGraph3dHtml)
+            .unwrap();
         assert!(match_svg.contains("<svg"));
         assert_eq!(match_svg, match_svg_alias);
         assert!(match_svg_html.contains("iframe"));
         assert!(match_gltf.contains("\"nodes\"") || match_gltf.contains("\"scenes\""));
         assert!(match_gltf_html.contains("<html") || match_gltf_html.contains("iframe"));
+    }
+
+    #[test]
+    fn circuit_diagram_type_parses_upstream_aliases() {
+        assert_eq!(
+            "timeline".parse::<crate::CircuitDiagramType>().unwrap(),
+            crate::CircuitDiagramType::TimelineSvg
+        );
+        assert_eq!(
+            "timeline-html"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::TimelineSvgHtml
+        );
+        assert_eq!(
+            "detector-slice-text"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::DetSliceText
+        );
+        assert_eq!(
+            "detslice-svg-html"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::DetSliceSvg
+        );
+        assert_eq!(
+            "time-slice-svg"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::TimeSliceSvg
+        );
+        assert_eq!(
+            "timeslice".parse::<crate::CircuitDiagramType>().unwrap(),
+            crate::CircuitDiagramType::TimeSliceSvg
+        );
+        assert_eq!(
+            "detslice-with-ops-svg-html"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::DetSliceWithOpsSvg
+        );
+        assert_eq!(
+            "time+detector-slice-svg"
+                .parse::<crate::CircuitDiagramType>()
+                .unwrap(),
+            crate::CircuitDiagramType::DetSliceWithOpsSvg
+        );
     }
 
     #[test]
@@ -3894,18 +4048,20 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit
-                .diagram_with_tick("detslice-text", 1)
+                .diagram_with_tick(crate::CircuitDiagramType::DetSliceText, 1)
                 .unwrap()
                 .trim(),
             "q0: -Z:D0-\n     |\nq1: -Z:D0-"
         );
 
-        let detslice_svg = circuit.diagram_with_tick("detslice-svg", 1).unwrap();
+        let detslice_svg = circuit
+            .diagram_with_tick(crate::CircuitDiagramType::DetSliceSvg, 1)
+            .unwrap();
         let timeslice_svg = circuit
-            .diagram_with_tick_range("timeslice-svg", 1, 1, Some(1))
+            .diagram_with_tick_range(crate::CircuitDiagramType::TimeSliceSvg, 1, 1, Some(1))
             .unwrap();
         let with_ops_svg = circuit
-            .diagram_with_tick_range("detslice-with-ops-svg", 1, 1, Some(1))
+            .diagram_with_tick_range(crate::CircuitDiagramType::DetSliceWithOpsSvg, 1, 1, Some(1))
             .unwrap();
         assert!(detslice_svg.contains("<svg"));
         assert!(timeslice_svg.contains("<svg"));
@@ -3928,7 +4084,7 @@ mod residual_api_tests {
 
         let detector_text = circuit
             .diagram_with_filters(
-                "detslice-text",
+                crate::CircuitDiagramType::DetSliceText,
                 Some((1, 1)),
                 None,
                 &[DetectingRegionFilter::Target(
@@ -3940,7 +4096,7 @@ mod residual_api_tests {
 
         let observable_svg = circuit
             .diagram_with_filters(
-                "detslice-svg",
+                crate::CircuitDiagramType::DetSliceSvg,
                 Some((1, 1)),
                 Some(1),
                 &[DetectingRegionFilter::Target(
@@ -3952,7 +4108,7 @@ mod residual_api_tests {
 
         let coords_svg = circuit
             .diagram_with_filters(
-                "detslice-with-ops-svg",
+                crate::CircuitDiagramType::DetSliceWithOpsSvg,
                 Some((1, 1)),
                 Some(1),
                 &[DetectingRegionFilter::DetectorCoordinatePrefix(vec![2.0])],
@@ -4019,7 +4175,7 @@ mod residual_api_tests {
         );
         assert_eq!(
             circuit
-                .likeliest_error_sat_problem_with_options(100, "WDIMACS")
+                .likeliest_error_sat_problem_with_options(100, crate::SatProblemFormat::Wdimacs)
                 .unwrap(),
             "p wcnf 2 4 401\n18 -1 0\n100 -2 0\n401 -1 0\n401 2 0\n"
         );

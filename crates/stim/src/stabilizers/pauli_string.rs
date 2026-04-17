@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg};
+use std::str::FromStr;
 
 use ndarray::{Array1, ArrayView1};
 
@@ -664,12 +665,15 @@ impl PauliString {
     /// assert_eq!(
     ///     stim::PauliString::from_text("-YZ")
     ///         .unwrap()
-    ///         .to_unitary_matrix("little")
+    ///         .to_unitary_matrix(stim::Endian::Little)
     ///         .unwrap()[0][1],
     ///     stim::Complex32::new(0.0, 1.0)
     /// );
     /// ```
-    pub fn to_unitary_matrix(&self, endian: &str) -> crate::Result<Vec<Vec<crate::Complex32>>> {
+    pub fn to_unitary_matrix(
+        &self,
+        endian: crate::Endian,
+    ) -> crate::Result<Vec<Vec<crate::Complex32>>> {
         let q = self.len();
         if q >= usize::BITS as usize {
             return Err(crate::StimError::new("Too many qubits."));
@@ -682,9 +686,8 @@ impl PauliString {
                 .get(k as isize)
                 .expect("in-bounds PauliString indexing should succeed");
             let bit = match endian {
-                "little" => 1usize << k,
-                "big" => 1usize << (q - k - 1),
-                _ => return Err(crate::StimError::new("endian not in ['little', 'big']")),
+                crate::Endian::Little => 1usize << k,
+                crate::Endian::Big => 1usize << (q - k - 1),
             };
             if matches!(p, 1 | 2) {
                 x_mask |= bit;
@@ -878,20 +881,19 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let matrix = stim::PauliString::from_text("-iX").unwrap().to_unitary_matrix("little").unwrap();
-    /// let p = stim::PauliString::from_unitary_matrix(&matrix, "little", false).unwrap();
+    /// let matrix = stim::PauliString::from_text("-iX")
+    ///     .unwrap()
+    ///     .to_unitary_matrix(stim::Endian::Little)
+    ///     .unwrap();
+    /// let p = stim::PauliString::from_unitary_matrix(&matrix, stim::Endian::Little, false).unwrap();
     /// assert_eq!(p, stim::PauliString::from_text("-iX").unwrap());
     /// ```
     pub fn from_unitary_matrix(
         matrix: &[Vec<crate::Complex32>],
-        endian: &str,
+        endian: crate::Endian,
         unsigned: bool,
     ) -> crate::Result<Self> {
-        let little_endian = match endian {
-            "little" => true,
-            "big" => false,
-            _ => return Err(crate::StimError::new("endian not in ['little', 'big']")),
-        };
+        let little_endian = endian.is_little();
         let n = matrix.len();
         if n == 0 {
             return Ok(Self::new(0));
@@ -1220,6 +1222,14 @@ impl fmt::Debug for PauliString {
     }
 }
 
+impl FromStr for PauliString {
+    type Err = crate::StimError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_text(s)
+    }
+}
+
 impl Add for PauliString {
     type Output = Self;
 
@@ -1368,7 +1378,7 @@ mod tests {
         assert_eq!(
             PauliString::from_text("-YZ")
                 .unwrap()
-                .to_unitary_matrix("little")
+                .to_unitary_matrix(crate::Endian::Little)
                 .unwrap(),
             vec![
                 vec![
@@ -1401,7 +1411,7 @@ mod tests {
         assert_eq!(
             PauliString::from_text("ZYX")
                 .unwrap()
-                .to_unitary_matrix("big")
+                .to_unitary_matrix(crate::Endian::Big)
                 .unwrap(),
             vec![
                 vec![
@@ -1490,11 +1500,7 @@ mod tests {
 
     #[test]
     fn pauli_string_to_unitary_matrix_reports_documented_error_shapes() {
-        let err = PauliString::from_text("X")
-            .unwrap()
-            .to_unitary_matrix("middle")
-            .unwrap_err();
-        assert!(err.message().contains("endian"));
+        assert!("middle".parse::<crate::Endian>().is_err());
     }
 
     #[test]
@@ -1858,7 +1864,7 @@ mod tests {
         let empty = PauliString::from_text("").unwrap();
         assert!(empty.is_empty());
         assert_eq!(
-            PauliString::from_unitary_matrix(&[], "little", false).unwrap(),
+            PauliString::from_unitary_matrix(&[], crate::Endian::Little, false).unwrap(),
             empty
         );
 
@@ -1877,21 +1883,21 @@ mod tests {
         assert!(invalid_sign.to_string().contains("sign must be +1 or -1"));
 
         let too_wide = PauliString::new(usize::BITS as usize)
-            .to_unitary_matrix("little")
+            .to_unitary_matrix(crate::Endian::Little)
             .unwrap_err();
         assert!(too_wide.to_string().contains("Too many qubits"));
 
         assert_eq!(
             PauliString::from_text("-X")
                 .unwrap()
-                .to_unitary_matrix("little")
+                .to_unitary_matrix(crate::Endian::Little)
                 .unwrap()[0][1],
             Complex32::new(-1.0, 0.0)
         );
         assert_eq!(
             PauliString::from_text("-iX")
                 .unwrap()
-                .to_unitary_matrix("little")
+                .to_unitary_matrix(crate::Endian::Little)
                 .unwrap()[0][1],
             Complex32::new(0.0, -1.0)
         );
@@ -1899,9 +1905,9 @@ mod tests {
             PauliString::from_unitary_matrix(
                 &PauliString::from_text("+XZ")
                     .unwrap()
-                    .to_unitary_matrix("big")
+                    .to_unitary_matrix(crate::Endian::Big)
                     .unwrap(),
-                "big",
+                crate::Endian::Big,
                 false,
             )
             .unwrap(),
@@ -1972,7 +1978,7 @@ mod tests {
                         crate::Complex32::new(0.0, -1.0)
                     ],
                 ],
-                "little",
+                crate::Endian::Little,
                 false,
             )
             .unwrap(),
@@ -1990,7 +1996,7 @@ mod tests {
                         crate::Complex32::new(-0.98768836, -0.15643446)
                     ],
                 ],
-                "little",
+                crate::Endian::Little,
                 true,
             )
             .unwrap(),
@@ -2024,7 +2030,7 @@ mod tests {
                         crate::Complex32::new(0.0, 0.0),
                     ],
                 ],
-                "little",
+                crate::Endian::Little,
                 false,
             )
             .unwrap(),
@@ -2034,21 +2040,14 @@ mod tests {
 
     #[test]
     fn pauli_string_from_unitary_matrix_reports_remaining_error_shapes() {
-        let invalid_endian =
-            PauliString::from_unitary_matrix(&[vec![Complex32::new(1.0, 0.0)]], "middle", false)
-                .unwrap_err();
-        assert!(
-            invalid_endian
-                .to_string()
-                .contains("endian not in ['little', 'big']")
-        );
+        assert!("middle".parse::<crate::Endian>().is_err());
 
         let non_square = PauliString::from_unitary_matrix(
             &[
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();
@@ -2072,7 +2071,7 @@ mod tests {
                     Complex32::new(1.0, 0.0),
                 ],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();
@@ -2087,7 +2086,7 @@ mod tests {
                 vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();
@@ -2102,7 +2101,7 @@ mod tests {
                 vec![Complex32::new(1.0, 0.0), Complex32::new(1.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();
@@ -2117,7 +2116,7 @@ mod tests {
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();
@@ -2132,7 +2131,7 @@ mod tests {
                 vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
                 vec![Complex32::new(0.0, 0.0), Complex32::new(0.0, 1.0)],
             ],
-            "little",
+            crate::Endian::Little,
             false,
         )
         .unwrap_err();

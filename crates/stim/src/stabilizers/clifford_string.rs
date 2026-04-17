@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign};
+use std::str::FromStr;
 
 /// A replacement value accepted by [`CliffordString::set`].
 ///
@@ -582,6 +583,14 @@ impl Display for CliffordString {
 impl fmt::Debug for CliffordString {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(&self.inner.to_repr_text())
+    }
+}
+
+impl FromStr for CliffordString {
+    type Err = crate::StimError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_text(s)
     }
 }
 

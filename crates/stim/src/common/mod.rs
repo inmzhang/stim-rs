@@ -2,6 +2,7 @@ pub(crate) mod bit_packing;
 pub(crate) mod bridge;
 pub(crate) mod error;
 pub(crate) mod io;
+pub(crate) mod options;
 pub(crate) mod parse;
 pub(crate) mod slicing;
 
@@ -23,3 +24,4 @@ pub type Complex32 = num_complex::Complex<f32>;
 pub use bridge::upstream_commit;
 pub use error::{Result, StimError};
 pub use io::{read_shot_data_file, write_shot_data_file};
+pub use options::{Endian, OpenQasmVersion, SatProblemFormat};

@@ -21,6 +21,11 @@ repos:
         entry: cargo test --doc -p stim
         language: system
         pass_filenames: false
+      - id: cargo-doc-stim
+        name: cargo doc -p stim --no-deps with rustdoc warnings denied
+        entry: env RUSTDOCFLAGS=-Dwarnings cargo doc -p stim --no-deps
+        language: system
+        pass_filenames: false
       - id: python-verification
         name: python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
         entry: python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory

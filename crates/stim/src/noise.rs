@@ -417,7 +417,8 @@ impl NoiseModelConfig {
                 .copied()
                 .collect();
             if !idle_targets.is_empty() {
-                output.append("DEPOLARIZE1", &idle_targets, &[self.idle_depolarization])?;
+                let depolarize1 = crate::GateData::new("DEPOLARIZE1")?;
+                output.append(&depolarize1, &idle_targets, &[self.idle_depolarization])?;
             }
         }
 
@@ -430,8 +431,9 @@ impl NoiseModelConfig {
                 .copied()
                 .collect();
             if !waiting_targets.is_empty() {
+                let depolarize1 = crate::GateData::new("DEPOLARIZE1")?;
                 output.append(
-                    "DEPOLARIZE1",
+                    &depolarize1,
                     &waiting_targets,
                     &[self.additional_depolarization_waiting_for_measure_or_reset],
                 )?;
@@ -780,8 +782,9 @@ fn append_instruction_verbatim(
     instruction: &CircuitInstruction,
 ) -> Result<()> {
     if instruction.tag().is_empty() {
+        let gate = crate::GateData::new(instruction.name())?;
         output.append_gate_targets(
-            instruction.name(),
+            &gate,
             &instruction.targets_copy(),
             &instruction.gate_args_copy(),
         )
@@ -829,8 +832,9 @@ fn append_grouped_noise_ops(
         if targets.is_empty() {
             continue;
         }
+        let gate = crate::GateData::new(gate_name)?;
         let gate_args: Vec<f64> = args.iter().map(|arg| f64::from_bits(*arg)).collect();
-        output.append(gate_name, targets, &gate_args)?;
+        output.append(&gate, targets, &gate_args)?;
     }
     Ok(())
 }

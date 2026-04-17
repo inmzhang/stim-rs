@@ -15,8 +15,7 @@ use ndarray::{Array2, ArrayView2};
 /// deriving more samples using an error-propagation simulator.
 ///
 /// This is the Rust equivalent of Python's `stim.CompiledMeasurementSampler`.
-/// Obtain one via [`Circuit::compile_sampler`](crate::Circuit::compile_sampler)
-/// or construct directly with [`MeasurementSampler::new`].
+/// Obtain one via [`Circuit::compile_sampler`](crate::Circuit::compile_sampler).
 ///
 /// # Examples
 ///
@@ -44,8 +43,7 @@ pub struct MeasurementSampler {
 ///
 /// This is the Rust equivalent of Python's `stim.CompiledDetectorSampler`.
 /// Obtain one via
-/// [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler)
-/// or construct directly with [`DetectorSampler::new`].
+/// [`Circuit::compile_detector_sampler`](crate::Circuit::compile_detector_sampler).
 ///
 /// # Examples
 ///
@@ -109,8 +107,7 @@ pub struct DemSampler {
 /// This is the Rust equivalent of Python's
 /// `stim.CompiledMeasurementsToDetectionEventsConverter`.
 /// Obtain one via
-/// [`Circuit::compile_m2d_converter`](crate::Circuit::compile_m2d_converter)
-/// or construct directly with [`MeasurementsToDetectionEventsConverter::new`].
+/// [`Circuit::compile_m2d_converter`](crate::Circuit::compile_m2d_converter).
 ///
 /// # Examples
 ///
@@ -841,7 +838,7 @@ impl TableauSimulator {
     ///
     /// Returns a [`StimError`](crate::StimError) if the endian string is
     /// invalid.
-    pub fn state_vector(&self, endian: &str) -> crate::Result<Vec<crate::Complex32>> {
+    pub fn state_vector(&self, endian: crate::Endian) -> Vec<crate::Complex32> {
         self.current_inverse_tableau()
             .inverse(false)
             .to_state_vector(endian)
@@ -888,7 +885,7 @@ impl TableauSimulator {
     pub fn set_state_from_state_vector(
         &mut self,
         state_vector: &[crate::Complex32],
-        endian: &str,
+        endian: crate::Endian,
     ) -> crate::Result<()> {
         let tableau = crate::Tableau::from_state_vector(state_vector, endian)?;
         self.set_inverse_tableau(&tableau.inverse(false));
@@ -902,11 +899,12 @@ impl TableauSimulator {
         args: &[f64],
     ) -> crate::Result<()> {
         let mut circuit = crate::Circuit::new();
+        let gate = crate::GateData::new(gate_name)?;
         let raw_targets: Vec<u32> = targets
             .iter()
             .map(|&target| u32::try_from(target).expect("qubit index should fit into u32"))
             .collect();
-        circuit.append(gate_name, &raw_targets, args)?;
+        circuit.append(&gate, &raw_targets, args)?;
         self.do_circuit(&circuit);
         Ok(())
     }
@@ -3078,7 +3076,7 @@ mod tests {
                     crate::Complex32::new(0.5_f32.sqrt(), 0.0),
                     crate::Complex32::new(0.0, 0.5_f32.sqrt()),
                 ],
-                "little",
+                crate::Endian::Little,
             )
             .unwrap();
         assert_eq!(
@@ -3093,7 +3091,7 @@ mod tests {
         let mut s = TableauSimulator::new();
         s.h(&[0]).unwrap();
         s.h(&[1]).unwrap();
-        let state = s.state_vector("little").unwrap();
+        let state = s.state_vector(crate::Endian::Little);
         assert_eq!(state.len(), 4);
         assert_eq!(s.canonical_stabilizers().len(), 2);
     }

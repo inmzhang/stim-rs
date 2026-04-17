@@ -40,11 +40,10 @@ const SEPARATOR_SYGIL: u64 = u64::MAX;
 /// # Construction
 ///
 /// Targets can be constructed via:
-/// - [`DemTarget::relative_detector_id`] / [`target_relative_detector_id`]
-/// - [`DemTarget::logical_observable_id`] / [`target_logical_observable_id`]
-/// - [`DemTarget::separator`] / [`target_separator`]
+/// - [`DemTarget::relative_detector_id`]
+/// - [`DemTarget::logical_observable_id`]
+/// - [`DemTarget::separator`]
 /// - [`DemTarget::from_text`] (parses `"D5"`, `"L2"`, `"^"`)
-/// - [`DemTarget::new`] (from any `Into<DemTarget>` value)
 ///
 /// # Classification
 ///
