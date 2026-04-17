@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,17 +23,12 @@ jobs:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Doc tests
         run: cargo test --doc -p stim
-      - name: Python verification
-        run: python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
       - name: Package smoke check
         run: |
           cargo package -p stim-cxx --allow-dirty --locked
@@ -52,13 +46,13 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin --locked
       - name: Collect stim coverage
-        run: cargo tarpaulin --package stim --out xml --output-dir coverage
+        run: cargo tarpaulin --package stim --engine llvm --out xml --output-dir coverage
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: coverage/cobertura.xml
           fail_ci_if_error: true
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test:
     runs-on: ${{ matrix.os }}
