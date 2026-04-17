@@ -350,4 +350,12 @@ mod tests {
             "stim::CircuitTargetsInsideInstruction(gate=\"MPP\", tag=\"annotated\", args=[0.5, 1.5], target_range_start=3, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::GateTarget::x(2, false).unwrap(), [1.0, 2.0]), stim::GateTargetWithCoords(stim::GateTarget::combiner(), []), stim::GateTargetWithCoords(stim::GateTarget::qubit(3, false).unwrap(), [])))"
         );
     }
+
+    #[test]
+    fn ordering_uses_f64_bit_pattern_for_argument_slices() {
+        let low = CircuitTargetsInsideInstruction::new("X_ERROR", "", vec![0.1], 0, 1, vec![]);
+        let high = CircuitTargetsInsideInstruction::new("X_ERROR", "", vec![0.2], 0, 1, vec![]);
+
+        assert!(low < high);
+    }
 }

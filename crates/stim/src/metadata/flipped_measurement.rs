@@ -294,4 +294,13 @@ mod tests {
 
         assert!(left < right);
     }
+
+    #[test]
+    fn ordering_with_missing_record_index_sorts_after_present_record_index() {
+        let with_record = FlippedMeasurement::new(Some(1), Vec::new());
+        let without_record = FlippedMeasurement::new(None, Vec::new());
+
+        assert!(with_record < without_record);
+        assert!(without_record > with_record);
+    }
 }

@@ -553,4 +553,21 @@ mod tests {
 )), instruction_targets: stim::CircuitTargetsInsideInstruction(gate="X_ERROR", tag="", args=[0.25], target_range_start=2, target_range_end=5, targets_in_range=(stim::GateTargetWithCoords(stim::GateTarget::qubit(5, false).unwrap(), [1.0, 2.0]), stim::GateTargetWithCoords(stim::GateTarget::qubit(6, false).unwrap(), [1.0, 3.0]), stim::GateTargetWithCoords(stim::GateTarget::qubit(7, false).unwrap(), []))), stack_frames: [stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 0, instruction_repetitions_arg: 3 }, stim::CircuitErrorLocationStackFrame { instruction_offset: 1, iteration_index: 2, instruction_repetitions_arg: 0 }], noise_tag: "test-tag" }"#
         );
     }
+
+    #[test]
+    fn display_inserts_spaces_between_non_combiner_targets() {
+        let location = CircuitErrorLocation::new(
+            0,
+            vec![
+                GateTargetWithCoords::new(GateTarget::x(0u32, false).unwrap(), vec![]),
+                GateTargetWithCoords::new(GateTarget::z(1u32, false).unwrap(), vec![]),
+            ],
+            None,
+            sample_instruction_targets(),
+            vec![CircuitErrorLocationStackFrame::new(0, 0, 0)],
+            "",
+        );
+
+        assert!(location.to_string().contains("X0 Z1"));
+    }
 }

@@ -797,4 +797,29 @@ mod tests {
         .unwrap();
         assert!(low < high);
     }
+
+    #[test]
+    fn dem_instruction_type_helpers_cover_repeat_display_and_error() {
+        assert_eq!(DemInstructionType::Repeat.name(), "repeat");
+        assert_eq!(DemInstructionType::Detector.to_string(), "detector");
+        assert!(DemInstructionType::from_name("mystery").is_err());
+    }
+
+    #[test]
+    fn debug_with_multiple_targets_emits_commas_between_targets() {
+        let instruction = DemInstruction::new(
+            DemInstructionType::Error,
+            [0.25],
+            [
+                DemTarget::relative_detector_id(0).unwrap(),
+                DemTarget::relative_detector_id(1).unwrap(),
+            ],
+            "",
+        )
+        .unwrap();
+
+        assert!(
+            format!("{instruction:?}").contains("[stim::DemTarget('D0'), stim::DemTarget('D1')]")
+        );
+    }
 }

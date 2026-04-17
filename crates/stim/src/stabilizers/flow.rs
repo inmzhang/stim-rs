@@ -401,4 +401,24 @@ mod tests {
         assert_eq!(flow.measurements(), &[-1]);
         assert_eq!(flow.included_observables(), &[2]);
     }
+
+    #[test]
+    fn flow_identity_traits_delegate_to_canonical_text() {
+        let x = Flow::new("X -> Y").unwrap();
+        let z = Flow::new("Z -> Y").unwrap();
+
+        assert_eq!(x.partial_cmp(&z), Some(std::cmp::Ordering::Less));
+
+        let ordered = [z.clone(), x.clone()]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(ordered, vec![x.clone(), z.clone()]);
+
+        let hashed = [x.clone(), x, z]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(hashed.len(), 2);
+    }
 }

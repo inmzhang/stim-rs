@@ -160,3 +160,67 @@ impl FromStr for ShotDataFormat {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Endian, OpenQasmVersion, SatProblemFormat, ShotDataFormat};
+    use std::str::FromStr;
+
+    #[test]
+    fn options_display_and_parse_cover_all_variants_and_errors() {
+        assert_eq!(Endian::Little.to_string(), "little");
+        assert_eq!(Endian::Big.to_string(), "big");
+        assert!(Endian::Little.is_little());
+        assert!(!Endian::Big.is_little());
+        assert_eq!("little".parse::<Endian>().unwrap(), Endian::Little);
+        assert_eq!("big".parse::<Endian>().unwrap(), Endian::Big);
+        assert!("middle".parse::<Endian>().is_err());
+
+        assert_eq!(OpenQasmVersion::V2.as_i32(), 2);
+        assert_eq!(OpenQasmVersion::V3.as_i32(), 3);
+        assert_eq!(OpenQasmVersion::V2.to_string(), "2");
+        assert_eq!(OpenQasmVersion::V3.to_string(), "3");
+        assert_eq!(OpenQasmVersion::from_str("2").unwrap(), OpenQasmVersion::V2);
+        assert_eq!(OpenQasmVersion::from_str("3").unwrap(), OpenQasmVersion::V3);
+        assert!(OpenQasmVersion::from_str("4").is_err());
+
+        assert_eq!(SatProblemFormat::Wdimacs.as_str(), "WDIMACS");
+        assert_eq!(SatProblemFormat::Wdimacs.to_string(), "WDIMACS");
+        assert_eq!(
+            SatProblemFormat::from_str("WDIMACS").unwrap(),
+            SatProblemFormat::Wdimacs
+        );
+        assert_eq!(
+            SatProblemFormat::from_str("wdimacs").unwrap(),
+            SatProblemFormat::Wdimacs
+        );
+        assert!(SatProblemFormat::from_str("cnf").is_err());
+
+        assert_eq!(ShotDataFormat::Bits01.as_str(), "01");
+        assert_eq!(ShotDataFormat::B8.as_str(), "b8");
+        assert_eq!(ShotDataFormat::R8.as_str(), "r8");
+        assert_eq!(ShotDataFormat::Ptb64.as_str(), "ptb64");
+        assert_eq!(ShotDataFormat::Hits.as_str(), "hits");
+        assert_eq!(ShotDataFormat::Dets.as_str(), "dets");
+        assert_eq!(ShotDataFormat::Bits01.to_string(), "01");
+        assert_eq!(
+            "01".parse::<ShotDataFormat>().unwrap(),
+            ShotDataFormat::Bits01
+        );
+        assert_eq!("b8".parse::<ShotDataFormat>().unwrap(), ShotDataFormat::B8);
+        assert_eq!("r8".parse::<ShotDataFormat>().unwrap(), ShotDataFormat::R8);
+        assert_eq!(
+            "ptb64".parse::<ShotDataFormat>().unwrap(),
+            ShotDataFormat::Ptb64
+        );
+        assert_eq!(
+            "hits".parse::<ShotDataFormat>().unwrap(),
+            ShotDataFormat::Hits
+        );
+        assert_eq!(
+            "dets".parse::<ShotDataFormat>().unwrap(),
+            ShotDataFormat::Dets
+        );
+        assert!("csv".parse::<ShotDataFormat>().is_err());
+    }
+}

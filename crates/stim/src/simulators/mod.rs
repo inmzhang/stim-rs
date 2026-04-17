@@ -3929,4 +3929,29 @@ mod tests {
         fs::remove_file(measurements_path).unwrap();
         fs::remove_file(detections_path).unwrap();
     }
+
+    #[test]
+    fn flip_simulator_pauli_validation_rejects_unknown_codes_and_symbols() {
+        let mut sim = FlipSimulator::new(1, false, 1, 0);
+        let bad_code = sim
+            .set_pauli_flip(crate::PauliValue::Code(9), 0, 0)
+            .unwrap_err();
+        assert!(bad_code.to_string().contains("Need pauli"));
+
+        let bad_symbol = sim
+            .set_pauli_flip(crate::PauliValue::Symbol('Q'), 0, 0)
+            .unwrap_err();
+        assert!(bad_symbol.to_string().contains("Need pauli"));
+
+        let mask = ndarray::Array2::from_elem((1, 1), true);
+        let bad_broadcast_code = sim
+            .broadcast_pauli_errors(crate::PauliValue::Code(9), mask.view(), 0.5)
+            .unwrap_err();
+        assert!(bad_broadcast_code.to_string().contains("Need pauli"));
+
+        let bad_broadcast_symbol = sim
+            .broadcast_pauli_errors(crate::PauliValue::Symbol('Q'), mask.view(), 0.5)
+            .unwrap_err();
+        assert!(bad_broadcast_symbol.to_string().contains("Need pauli"));
+    }
 }

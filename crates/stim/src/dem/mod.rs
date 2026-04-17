@@ -2015,6 +2015,14 @@ mod tests {
     }
 
     #[test]
+    fn detector_error_model_diagram_type_display_uses_canonical_name() {
+        assert_eq!(
+            DetectorErrorModelDiagramType::MatchGraphSvg.to_string(),
+            "matchgraph-svg"
+        );
+    }
+
+    #[test]
     fn detector_error_model_from_file_reads_dem_text() {
         let path = unique_temp_path("detector-error-model-from-file");
         fs::write(&path, "error(0.25) D2 D3\nshift_detectors 4\n").expect("temp file should write");

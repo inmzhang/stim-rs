@@ -207,4 +207,10 @@ mod tests {
             "Can't repeat 0 times."
         );
     }
+
+    #[test]
+    fn display_of_empty_body_repeat_block_keeps_blank_line() {
+        let repeat = DemRepeatBlock::new(2, &DetectorErrorModel::new()).unwrap();
+        assert_eq!(repeat.to_string(), "repeat 2 {\n}");
+    }
 }

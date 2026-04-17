@@ -787,7 +787,7 @@ impl fmt::Debug for GateData {
 
 #[cfg(test)]
 mod tests {
-    use super::Gate;
+    use super::{Gate, GateData};
     use crate::{Complex32, Flow};
 
     #[test]
@@ -917,6 +917,19 @@ mod tests {
         let error = Gate::new("definitely_not_a_gate").expect_err("unknown gate should fail");
 
         assert!(error.message().contains("definitely_not_a_gate"));
+    }
+
+    #[test]
+    fn gate_data_wrapper_traits_roundtrip_through_gate() {
+        let gate_data = GateData::from(Gate::H);
+        let parsed: GateData = "H".parse().unwrap();
+
+        assert_eq!(gate_data.gate(), Gate::H);
+        assert_eq!(gate_data.name(), "H");
+        assert_eq!(gate_data, parsed);
+        assert_eq!(gate_data.clone(), parsed);
+        assert_eq!(gate_data.to_string(), "H");
+        assert_eq!(format!("{gate_data:?}"), "stim::GateData::new(\"H\")");
     }
 
     #[test]

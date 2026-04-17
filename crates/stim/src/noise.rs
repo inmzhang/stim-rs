@@ -844,12 +844,13 @@ fn append_grouped_noise_ops(
 #[cfg(test)]
 mod tests {
     use super::{
-        NoiseModel, NoiseModelConfig, NoiseOperation, NoiseRule, Si1000, UniformDepolarizing,
-        annotation_line_name, append_grouped_noise_ops, append_instruction_verbatim,
+        NoiseModel, NoiseModelConfig, NoiseOperation, NoiseRule, RuleSource, Si1000,
+        UniformDepolarizing, annotation_line_name, append_grouped_noise_ops,
+        append_instruction_verbatim, measurement_basis_for_instruction,
         occurs_in_classical_control_system, record_noise_operations, split_instruction_for_noise,
         validate_gate_args, validate_probability,
     };
-    use crate::Circuit;
+    use crate::{Circuit, Gate};
 
     #[test]
     fn uniform_depolarizing_adds_gate_and_measurement_noise() {
@@ -1044,5 +1045,41 @@ TICK"
         let invalid_sum =
             validate_gate_args("PAULI_CHANNEL_1", &[0.5, 0.5, 0.5], &[3]).unwrap_err();
         assert!(invalid_sum.to_string().contains("must sum to at most 1"));
+    }
+
+    #[test]
+    fn noise_helpers_cover_blank_lines_waiting_noise_and_resolution_edges() {
+        let circuit: Circuit = "H 0\nH 1\n\nTICK\nM 0\nTICK".parse().unwrap();
+        let model = NoiseModelConfig::new()
+            .with_additional_depolarization_waiting_for_measure_or_reset(0.125)
+            .unwrap()
+            .with_any_clifford_2q_rule(
+                NoiseRule::new().with_after("DEPOLARIZE2", &[0.01]).unwrap(),
+            );
+        let noisy = model.noisy_circuit(&circuit).unwrap();
+        assert!(noisy.to_string().contains("DEPOLARIZE1(0.125) 1"));
+
+        let resolved = model
+            .resolve_noise_rule(&"CX 0 1".parse().unwrap(), Gate::CX)
+            .unwrap()
+            .expect("two-qubit rule should resolve");
+        assert_eq!(resolved.source, RuleSource::AnyClifford2Q);
+
+        assert!(
+            model
+                .resolve_combined_measure_reset_rule(&"R 0".parse().unwrap(), Gate::R)
+                .unwrap()
+                .is_none()
+        );
+        assert!(occurs_in_classical_control_system(
+            &"DETECTOR rec[-1]".parse().unwrap()
+        ));
+        assert!(!occurs_in_classical_control_system(
+            &"CX 0 1".parse().unwrap()
+        ));
+        assert_eq!(
+            measurement_basis_for_instruction(&"H 0".parse().unwrap()),
+            None
+        );
     }
 }
