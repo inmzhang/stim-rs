@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +40,25 @@ jobs:
           cargo package -p stim-cxx --allow-dirty --locked
           cargo package -p stim --allow-dirty --locked --no-verify --list > /tmp/stim-package-list.txt
 
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+      - name: Collect stim coverage
+        run: cargo tarpaulin --package stim --out xml --output-dir coverage
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/cobertura.xml
+          fail_ci_if_error: true
+          use_oidc: true
 
   test:
     runs-on: ${{ matrix.os }}
