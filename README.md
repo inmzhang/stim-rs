@@ -37,6 +37,25 @@ cargo add stim
 
 Issues and pull requests are very welcome, whether they relate to performance, ergonomics, or bugs.
 
+### Git Hooks
+
+This repo includes a committed pre-commit hook under `.githooks/pre-commit`.
+Install it locally with:
+
+```bash
+bash tools/install-git-hooks.sh
+```
+
+The hook runs:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --doc -p stim
+python -m unittest tools.tests.test_stim_rust_parity_audit tools.tests.test_stim_api_inventory
+```
+
 ## License
 
 Licensed under Apache-2.0. The vendored upstream Stim sources under

@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn gate_target_supports_equality_order_hash_and_representation() {
         let qubit_five = GateTarget::from(5u32);
-        let same_qubit_five = GateTarget::from(qubit_five);
+        let same_qubit_five = qubit_five;
         let qubit_six = GateTarget::from(6u32);
         let x_five = target_x(5u32, false).expect("X target should build");
         let inverted_qubit_five = target_inv(5u32).expect("inverted qubit target should build");

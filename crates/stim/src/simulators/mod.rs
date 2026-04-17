@@ -2263,6 +2263,10 @@ impl MeasurementsToDetectionEventsConverter {
     /// # Arguments
     ///
     /// * `circuit` - The circuit whose detector definitions drive the conversion.
+    /// * `skip_reference_sample` - When `true`, the reference sample is all
+    ///   zeros instead of being collected from the circuit. Only use this when
+    ///   the all-zero result is a valid noiseless outcome.
+    ///
     /// Converts measurement data into detection events (and optionally observable flips).
     ///
     /// This is the primary conversion entry point, combining the behavior of
@@ -2688,7 +2692,7 @@ mod tests {
     use super::{BitTable, FlipSimulator, FlipSimulatorArrays, TableauSimulator};
     use crate::{
         Circuit, CircuitInstruction, CircuitRepeatBlock, ConvertedMeasurements, DetectorErrorModel,
-        MeasurementSampler, MeasurementsToDetectionEventsConverter, PauliString, Tableau,
+        PauliString, Tableau,
     };
 
     fn bool_matrix(rows: Vec<Vec<bool>>) -> Array2<bool> {

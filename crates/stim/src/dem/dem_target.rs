@@ -548,22 +548,10 @@ mod tests {
 
     use super::{DemTarget, DemTargetWithCoords};
 
-    fn target_relative_detector_id(index: u64) -> crate::Result<DemTarget> {
-        DemTarget::relative_detector_id(index)
-    }
-
-    fn target_logical_observable_id(index: u64) -> crate::Result<DemTarget> {
-        DemTarget::logical_observable_id(index)
-    }
-
-    fn target_separator() -> DemTarget {
-        DemTarget::separator()
-    }
-
     #[test]
     fn dem_target_supports_equality_order_hash_and_representation() {
         let det_three = DemTarget::relative_detector_id(3).expect("detector target should build");
-        let same_det_three = DemTarget::from(det_three);
+        let same_det_three = det_three;
         let det_four = DemTarget::relative_detector_id(4).expect("detector target should build");
         let obs_three =
             DemTarget::logical_observable_id(3).expect("observable target should build");
