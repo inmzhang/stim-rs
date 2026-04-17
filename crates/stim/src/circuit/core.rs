@@ -146,10 +146,8 @@ impl FromStr for CircuitDiagramType {
 ///
 /// // Build a circuit imperatively.
 /// let mut circuit = stim::Circuit::new();
-/// let x = stim::Gate::new("X").unwrap();
-/// let m = stim::Gate::new("M").unwrap();
-/// circuit.append(&x, &[0], &[]).unwrap();
-/// circuit.append(&m, &[0], &[]).unwrap();
+/// circuit.append(stim::Gate::X, &[0], &[]).unwrap();
+/// circuit.append(stim::Gate::M, &[0], &[]).unwrap();
 /// let mut sampler = circuit.compile_sampler(false);
 /// assert_eq!(sampler.sample(1), ndarray::array![[true]]);
 ///
@@ -757,17 +755,15 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit = stim::Circuit::new();
-    /// let x = stim::Gate::new("X").unwrap();
-    /// circuit.append(&x, &[0, 2], &[]).unwrap();
+    /// circuit.append(stim::Gate::X, &[0, 2], &[]).unwrap();
     /// assert_eq!(circuit.to_string(), "X 0 2");
     ///
-    /// let x_error = stim::Gate::new("X_ERROR").unwrap();
-    /// circuit.append(&x_error, &[0], &[0.125]).unwrap();
+    /// circuit.append(stim::Gate::X_ERROR, &[0], &[0.125]).unwrap();
     /// assert_eq!(circuit.to_string(), "X 0 2\nX_ERROR(0.125) 0");
     /// ```
-    pub fn append(&mut self, gate: &Gate, targets: &[u32], args: &[f64]) -> Result<()> {
+    pub fn append(&mut self, gate: Gate, targets: &[u32], args: &[f64]) -> Result<()> {
         self.inner
-            .append_with_tag(&gate.name(), targets, args, "")
+            .append_with_tag(gate.name(), targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -791,10 +787,9 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit = stim::Circuit::new();
-    /// let correlated_error = stim::Gate::new("CORRELATED_ERROR").unwrap();
     /// circuit
     ///     .append_gate_targets(
-    ///         &correlated_error,
+    ///         stim::Gate::E,
     ///         &[
     ///             stim::GateTarget::x(0_u32, false).unwrap(),
     ///             stim::GateTarget::y(1_u32, false).unwrap(),
@@ -807,13 +802,13 @@ impl Circuit {
     /// ```
     pub fn append_gate_targets(
         &mut self,
-        gate: &Gate,
+        gate: Gate,
         targets: &[GateTarget],
         args: &[f64],
     ) -> Result<()> {
         let raw_targets: Vec<u32> = targets.iter().map(|target| target.raw_data()).collect();
         self.inner
-            .append_with_tag(&gate.name(), &raw_targets, args, "")
+            .append_with_tag(gate.name(), &raw_targets, args, "")
             .map_err(StimError::from)?;
         self.invalidate_item_cache();
         Ok(())
@@ -1416,7 +1411,7 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit: stim::Circuit = "H 0\nM 0".parse().unwrap();
-    /// circuit.insert(1, stim::CircuitInstruction::from_stim_program_text("X 1").unwrap()).unwrap();
+    /// circuit.insert(1, stim::CircuitInstruction::parse("X 1").unwrap()).unwrap();
     /// assert_eq!(circuit.to_string(), "H 0\nX 1\nM 0");
     /// ```
     pub fn insert(
@@ -1433,8 +1428,9 @@ impl Circuit {
         match operation.into() {
             CircuitInsertOperation::Instruction(instruction) => {
                 let raw_targets = instruction
-                    .targets_copy()
-                    .into_iter()
+                    .targets()
+                    .iter()
+                    .copied()
                     .map(|target| target.raw_data())
                     .collect::<Vec<_>>();
                 self.inner
@@ -1442,7 +1438,7 @@ impl Circuit {
                         normalized as usize,
                         instruction.name(),
                         &raw_targets,
-                        &instruction.gate_args_copy(),
+                        instruction.gate_args(),
                         instruction.tag(),
                     )
                     .map_err(StimError::from)?;
@@ -1475,7 +1471,7 @@ impl Circuit {
     /// ```
     /// let mut circuit = stim::Circuit::new();
     /// circuit
-    ///     .append_operation(stim::CircuitInstruction::from_stim_program_text("H 0").unwrap())
+    ///     .append_operation(stim::CircuitInstruction::parse("H 0").unwrap())
     ///     .unwrap();
     /// assert_eq!(circuit.to_string(), "H 0");
     /// ```
@@ -1914,7 +1910,7 @@ mod api_tests {
 
     use ndarray::Array2;
 
-    use crate::{Circuit, GateData, all_gate_data};
+    use crate::{Circuit, Gate, all_gates};
 
     fn unique_temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -1931,7 +1927,7 @@ mod api_tests {
             .expect("rows should be rectangular")
     }
 
-    fn gate(name: &str) -> GateData {
+    fn gate(name: &str) -> Gate {
         name.parse().expect("gate should parse")
     }
 
@@ -2156,10 +2152,10 @@ mod api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append(&gate("X"), &[0], &[])
+            .append(gate("X"), &[0], &[])
             .expect("append should succeed");
         circuit
-            .append(&gate("M"), &[0, 1], &[])
+            .append(gate("M"), &[0, 1], &[])
             .expect("append should succeed");
 
         assert_eq!(circuit.to_string(), "X 0\nM 0 1");
@@ -2170,7 +2166,7 @@ mod api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append(&gate("X_ERROR"), &[0], &[0.125])
+            .append(gate("X_ERROR"), &[0], &[0.125])
             .expect("append should succeed");
 
         assert_eq!(circuit.to_string(), "X_ERROR(0.125) 0");
@@ -2178,7 +2174,7 @@ mod api_tests {
 
     #[test]
     fn append_reports_stim_parse_errors() {
-        let error = GateData::new("NOT_A_GATE").expect_err("invalid gate should fail");
+        let error = Gate::new("NOT_A_GATE").expect_err("invalid gate should fail");
 
         assert!(error.message().contains("NOT_A_GATE"));
     }
@@ -2689,7 +2685,7 @@ mod api_tests {
 
     #[test]
     fn gate_data_lookup_exposes_basic_metadata() {
-        let gate = GateData::new("cnot").expect("gate should exist");
+        let gate = Gate::new("cnot").expect("gate should exist");
 
         assert_eq!(gate.name(), "CX");
         assert!(gate.aliases().contains(&"CNOT".to_string()));
@@ -2701,11 +2697,11 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_more_metadata_flags() {
-        let h = GateData::new("H").expect("gate should exist");
-        let x_error = GateData::new("X_ERROR").expect("gate should exist");
-        let m = GateData::new("M").expect("gate should exist");
-        let r = GateData::new("R").expect("gate should exist");
-        let detector = GateData::new("DETECTOR").expect("gate should exist");
+        let h = Gate::H;
+        let x_error = Gate::X_ERROR;
+        let m = Gate::M;
+        let r = Gate::R;
+        let detector = Gate::DETECTOR;
 
         assert!(h.is_single_qubit_gate());
         assert!(!h.is_noisy_gate());
@@ -2727,10 +2723,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_inverse_relationships() {
-        let h = GateData::new("H").expect("gate should exist");
-        let s = GateData::new("S").expect("gate should exist");
-        let x_error = GateData::new("X_ERROR").expect("gate should exist");
-        let r = GateData::new("R").expect("gate should exist");
+        let h = Gate::H;
+        let s = Gate::S;
+        let x_error = Gate::X_ERROR;
+        let r = Gate::R;
 
         assert_eq!(h.inverse().expect("H has inverse").name(), "H");
         assert_eq!(s.inverse().expect("S has inverse").name(), "S_DAG");
@@ -2742,9 +2738,9 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_hadamard_conjugation() {
-        let x = GateData::new("X").expect("gate should exist");
-        let cx = GateData::new("CX").expect("gate should exist");
-        let ry = GateData::new("RY").expect("gate should exist");
+        let x = Gate::X;
+        let cx = Gate::CX;
+        let ry = Gate::RY;
 
         assert_eq!(
             x.hadamard_conjugated(false)
@@ -2769,10 +2765,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_exposes_symmetric_gate_property() {
-        let cx = GateData::new("CX").expect("gate should exist");
-        let cz = GateData::new("CZ").expect("gate should exist");
-        let h = GateData::new("H").expect("gate should exist");
-        let detector = GateData::new("DETECTOR").expect("gate should exist");
+        let cx = Gate::CX;
+        let cz = Gate::CZ;
+        let h = Gate::H;
+        let detector = Gate::DETECTOR;
 
         assert!(!cx.is_symmetric_gate());
         assert!(cz.is_symmetric_gate());
@@ -2782,10 +2778,10 @@ mod api_tests {
 
     #[test]
     fn gate_data_supports_identity_traits() {
-        let canonical = GateData::new("CX").expect("gate should exist");
-        let alias = GateData::new("cnot").expect("alias should resolve");
-        let cloned = alias.clone();
-        let other = GateData::new("H").expect("other gate should exist");
+        let canonical = Gate::CX;
+        let alias = Gate::new("cnot").expect("alias should resolve");
+        let cloned = alias;
+        let other = Gate::H;
 
         assert_eq!(canonical, alias);
         assert_eq!(cloned, canonical);
@@ -2794,48 +2790,46 @@ mod api_tests {
 
     #[test]
     fn gate_data_display_and_debug_use_canonical_names() {
-        let gate = GateData::new("mpp").expect("gate should exist");
-        let alias = GateData::new("cnot").expect("alias should resolve");
+        let gate = Gate::new("mpp").expect("gate should exist");
+        let alias = Gate::new("cnot").expect("alias should resolve");
 
         assert_eq!(gate.to_string(), "MPP");
-        assert_eq!(format!("{gate:?}"), "stim::GateData::new(\"MPP\")");
+        assert_eq!(format!("{gate:?}"), "stim::Gate::MPP");
         assert_eq!(alias.to_string(), "CX");
-        assert_eq!(format!("{alias:?}"), "stim::GateData::new(\"CX\")");
+        assert_eq!(format!("{alias:?}"), "stim::Gate::CX");
     }
 
     #[test]
     fn gate_data_lookup_reports_unknown_gates() {
-        let error = GateData::new("definitely_not_a_gate").expect_err("unknown gate should fail");
+        let error = Gate::new("definitely_not_a_gate").expect_err("unknown gate should fail");
 
         assert!(error.message().contains("definitely_not_a_gate"));
     }
 
     #[test]
     fn all_gate_data_returns_canonical_gate_inventory() {
-        let inventory = all_gate_data();
+        let inventory = all_gates();
 
-        assert!(inventory.contains_key("CX"));
-        assert!(inventory.contains_key("DETECTOR"));
-        assert!(inventory.contains_key("H"));
-        assert!(inventory.contains_key("MPP"));
-        assert!(!inventory.contains_key("CNOT"));
-        assert!(!inventory.contains_key("NOT_A_GATE"));
+        assert!(inventory.contains(&Gate::CX));
+        assert!(inventory.contains(&Gate::DETECTOR));
+        assert!(inventory.contains(&Gate::H));
+        assert!(inventory.contains(&Gate::MPP));
 
-        let cx = inventory.get("CX").expect("CX should be present");
-        assert_eq!(
-            cx,
-            &GateData::new("cnot").expect("lookup should resolve alias")
-        );
+        let cx = inventory
+            .iter()
+            .find(|gate| **gate == Gate::CX)
+            .expect("CX should be present");
+        assert_eq!(*cx, Gate::new("cnot").expect("lookup should resolve alias"));
         assert_eq!(cx.name(), "CX");
         assert!(cx.aliases().contains(&"CNOT".to_string()));
 
-        for (name, gate) in &inventory {
-            assert_eq!(gate.name(), *name);
+        for gate in inventory {
+            let name = gate.name();
             assert_eq!(
-                gate,
-                &GateData::new(name).expect("inventory key should roundtrip")
+                *gate,
+                Gate::new(name).expect("inventory key should roundtrip")
             );
-            assert_eq!(gate.to_string(), *name);
+            assert_eq!(gate.to_string(), name);
         }
     }
 }
@@ -3027,7 +3021,7 @@ mod residual_api_tests {
 
         circuit
             .append_gate_targets(
-                &gate("CX"),
+                gate("CX"),
                 &[
                     GateTarget::from(0_u32),
                     GateTarget::from(1_u32),
@@ -3039,7 +3033,7 @@ mod residual_api_tests {
             .expect("qubit targets should append");
         circuit
             .append_gate_targets(
-                &gate("H"),
+                gate("H"),
                 &[GateTarget::from(4_u32), GateTarget::from(5_u32)],
                 &[],
             )
@@ -3060,7 +3054,7 @@ mod residual_api_tests {
 
         circuit
             .append_gate_targets(
-                &gate("CORRELATED_ERROR"),
+                gate("CORRELATED_ERROR"),
                 &[
                     crate::GateTarget::x(0_u32, false).expect("X target should construct"),
                     crate::GateTarget::y(1_u32, false).expect("Y target should construct"),
@@ -3078,14 +3072,14 @@ mod residual_api_tests {
 
         circuit
             .append_gate_targets(
-                &gate("M"),
+                gate("M"),
                 &[GateTarget::from(0_u32), GateTarget::from(1_u32)],
                 &[],
             )
             .expect("measurements should append");
         circuit
             .append_gate_targets(
-                &gate("CX"),
+                gate("CX"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     GateTarget::from(5_u32),
@@ -3095,7 +3089,7 @@ mod residual_api_tests {
             .expect("record-controlled CX should append");
         circuit
             .append_gate_targets(
-                &gate("DETECTOR"),
+                gate("DETECTOR"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     crate::GateTarget::rec(-2).expect("record target should construct"),
@@ -3105,7 +3099,7 @@ mod residual_api_tests {
             .expect("detector targets should append");
         circuit
             .append_gate_targets(
-                &gate("OBSERVABLE_INCLUDE"),
+                gate("OBSERVABLE_INCLUDE"),
                 &[
                     crate::GateTarget::rec(-1).expect("record target should construct"),
                     crate::GateTarget::rec(-2).expect("record target should construct"),
@@ -3152,7 +3146,7 @@ mod residual_api_tests {
         );
 
         circuit
-            .append_gate_targets(&gate("MPP"), &targets, &[])
+            .append_gate_targets(gate("MPP"), &targets, &[])
             .expect("MPP targets should append");
 
         assert_eq!(circuit, parse_circuit("MPP X1*Y2*Z3 Y4 Z5 !X1*X2"));

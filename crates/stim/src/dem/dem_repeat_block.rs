@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
-use crate::{DetectorErrorModel, Result, StimError};
+use crate::{DemInstructionType, DetectorErrorModel, Result, StimError};
 
 /// A repeat block from a detector error model.
 ///
@@ -23,7 +23,7 @@ use crate::{DetectorErrorModel, Result, StimError};
 ///     .expect("valid body");
 /// let block = stim::DemRepeatBlock::new(100, &body).expect("valid repeat block");
 /// assert_eq!(block.repeat_count(), 100);
-/// assert_eq!(block.r#type(), "repeat");
+/// assert_eq!(block.r#type(), stim::DemInstructionType::Repeat);
 /// assert_eq!(block.body_copy(), body);
 ///
 /// // Display renders the block in DEM text format.
@@ -83,15 +83,15 @@ impl DemRepeatBlock {
         self.block.clone()
     }
 
-    /// Returns the type name of this block, always `"repeat"`.
+    /// Returns the type of this block, always [`DemInstructionType::Repeat`].
     ///
     /// This is a duck-typing convenience method. It exists so that code
     /// that doesn't know whether it has a
     /// [`DemInstruction`](crate::DemInstruction) or a `DemRepeatBlock`
     /// can check the type field without doing a pattern match first.
     #[must_use]
-    pub fn r#type(&self) -> &str {
-        "repeat"
+    pub fn r#type(&self) -> DemInstructionType {
+        DemInstructionType::Repeat
     }
 }
 
@@ -155,7 +155,7 @@ mod tests {
         let repeat = DemRepeatBlock::new(100, &body).unwrap();
 
         assert_eq!(repeat.repeat_count(), 100);
-        assert_eq!(repeat.r#type(), "repeat");
+        assert_eq!(repeat.r#type(), DemInstructionType::Repeat);
         assert_eq!(repeat.body_copy(), body);
     }
 

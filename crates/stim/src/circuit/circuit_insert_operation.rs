@@ -34,7 +34,7 @@ pub enum CircuitInsertOperation {
     ///
     /// When this variant is inserted into a circuit, exactly one
     /// instruction line is added at the target position. For example,
-    /// inserting `CircuitInstruction::from_stim_program_text("Y 3 4 5")`
+    /// inserting `CircuitInstruction::parse("Y 3 4 5")`
     /// adds a `Y 3 4 5` line.
     Instruction(CircuitInstruction),
     /// A sub-circuit whose operations are inserted inline (not wrapped in a

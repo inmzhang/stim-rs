@@ -91,7 +91,7 @@ impl FromStr for TableauSynthesisMethod {
 /// - **[`Circuit`](crate::Circuit)**: A Clifford circuit can be compiled into a single
 ///   tableau via [`Circuit::to_tableau`](crate::Circuit::to_tableau), and a tableau can
 ///   be decomposed back into a circuit via [`Tableau::to_circuit`].
-/// - **[`GateData`](crate::GateData)**: The tableau for any named Clifford gate known to
+/// - **[`Gate`](crate::Gate)**: The tableau for any named Clifford gate known to
 ///   Stim (e.g. `"H"`, `"CNOT"`, `"S"`) can be retrieved with [`Tableau::from_named_gate`].
 ///
 /// # Examples
@@ -233,7 +233,7 @@ impl Tableau {
     /// `"ISWAP"`, etc. This method looks up the gate by name and returns its tableau
     /// representation.
     ///
-    /// Gate names are case-insensitive. Use [`GateData`](crate::GateData) to discover
+    /// Gate names are case-insensitive. Use [`Gate`](crate::Gate) to discover
     /// all available gate names.
     ///
     /// # Errors
@@ -252,13 +252,13 @@ impl Tableau {
     /// assert_eq!(cnot.x_output(0), stim::PauliString::from_text("+XX").unwrap());
     /// ```
     pub fn from_named_gate(name: &str) -> crate::Result<Self> {
-        let gate = crate::GateData::new(name)?;
-        Self::from_gate(&gate)
+        let gate = crate::Gate::new(name)?;
+        Self::from_gate(gate)
     }
 
     /// Returns the tableau of a validated Clifford gate handle.
-    pub fn from_gate(gate: &crate::Gate) -> crate::Result<Self> {
-        stim_cxx::Tableau::from_named_gate(&gate.name())
+    pub fn from_gate(gate: crate::Gate) -> crate::Result<Self> {
+        stim_cxx::Tableau::from_named_gate(gate.name())
             .map(|inner| Self { inner })
             .map_err(crate::StimError::from)
     }

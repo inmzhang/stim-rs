@@ -5,14 +5,14 @@ use std::str::FromStr;
 /// A replacement value accepted by [`CliffordString::set`].
 ///
 /// This enum allows `set` to accept either a gate name string (like `"H"` or
-/// `"S"`) or a reference to a [`crate::GateData`] instance. Both variants
+/// `"S"`) or a [`crate::Gate`] enum value. Both variants
 /// are converted through the corresponding [`From`] implementations, so
 /// callers can pass either type directly.
 pub enum CliffordGateValue<'a> {
     /// A gate name like `"H"`, `"S"`, or `"SQRT_X"`.
     Name(&'a str),
-    /// A reference to gate metadata obtained from [`crate::gate_data`].
-    GateData(&'a crate::GateData),
+    /// A canonical Stim gate.
+    Gate(crate::Gate),
 }
 
 impl<'a> From<&'a str> for CliffordGateValue<'a> {
@@ -21,9 +21,9 @@ impl<'a> From<&'a str> for CliffordGateValue<'a> {
     }
 }
 
-impl<'a> From<&'a crate::GateData> for CliffordGateValue<'a> {
-    fn from(value: &'a crate::GateData) -> Self {
-        Self::GateData(value)
+impl<'a> From<crate::Gate> for CliffordGateValue<'a> {
+    fn from(value: crate::Gate) -> Self {
+        Self::Gate(value)
     }
 }
 
@@ -262,7 +262,7 @@ impl CliffordString {
     }
 
     /// Returns the single-qubit Clifford gate at the given index as a
-    /// [`crate::GateData`].
+    /// [`crate::Gate`].
     ///
     /// Negative indices count backwards from the end of the string, following
     /// the Python convention (e.g. `-1` is the last element).
@@ -278,17 +278,17 @@ impl CliffordString {
     /// assert_eq!(c.get(1).unwrap().name(), "X");
     /// assert_eq!(c.get(-1).unwrap().name(), "H");
     /// ```
-    pub fn get(&self, index: isize) -> crate::Result<crate::GateData> {
+    pub fn get(&self, index: isize) -> crate::Result<crate::Gate> {
         self.inner
             .get_item_name(index as i64)
             .map_err(crate::StimError::from)
-            .and_then(|name| crate::GateData::new(&name))
+            .and_then(|name| crate::Gate::new(&name))
     }
 
     /// Replaces the single-qubit Clifford gate at the given index.
     ///
     /// The replacement `value` can be a gate name string (e.g. `"H"`) or a
-    /// reference to a [`crate::GateData`] instance. Negative indices count
+    /// [`crate::Gate`] enum value. Negative indices count
     /// backwards from the end.
     ///
     /// # Errors
@@ -301,7 +301,7 @@ impl CliffordString {
     /// ```
     /// let mut c = stim::CliffordString::from_text("I,I,I").unwrap();
     /// c.set(1, "H").unwrap();
-    /// c.set(-1, &stim::GateData::new("S").unwrap()).unwrap();
+    /// c.set(-1, stim::Gate::S).unwrap();
     /// assert_eq!(c.to_string(), "I,H,S");
     /// ```
     pub fn set<'a>(
@@ -312,8 +312,8 @@ impl CliffordString {
         let normalized = crate::normalize_index(index, self.len())
             .ok_or_else(|| crate::StimError::new(format!("index {index} out of range")))?;
         let replacement = match value.into() {
-            CliffordGateValue::Name(name) => crate::GateData::new(name)?.name(),
-            CliffordGateValue::GateData(gate) => gate.name(),
+            CliffordGateValue::Name(name) => crate::Gate::new(name)?.name().to_string(),
+            CliffordGateValue::Gate(gate) => gate.name().to_string(),
         };
         let mut parts: Vec<String> = if self.is_empty() {
             Vec::new()
@@ -869,7 +869,7 @@ mod tests {
         let mut s = CliffordString::from_text("I,I,I,I,I").unwrap();
         s.set(1, "H").unwrap();
         assert_eq!(s, CliffordString::from_text("I,H,I,I,I").unwrap());
-        s.set(-1, &crate::GateData::new("S").unwrap()).unwrap();
+        s.set(-1, crate::Gate::S).unwrap();
         assert_eq!(s, CliffordString::from_text("I,H,I,I,S").unwrap());
     }
 

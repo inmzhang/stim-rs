@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
-use crate::{Circuit, GateData, GateTarget, Result, StimError};
+use crate::{Circuit, Gate, GateTarget, Result, StimError};
 
 /// A single instruction from a stabilizer circuit, such as `H 0 1` or
 /// `CNOT rec[-1] 5`.
@@ -16,8 +16,9 @@ use crate::{Circuit, GateData, GateTarget, Result, StimError};
 /// | Component | Accessor | Example |
 /// |-----------|----------|---------|
 /// | Gate name | [`name()`](Self::name) | `"H"`, `"CX"`, `"X_ERROR"`, `"DETECTOR"` |
-/// | Gate arguments | [`gate_args_copy()`](Self::gate_args_copy) | `[0.01]` for `DEPOLARIZE1(0.01)` |
-/// | Targets | [`targets_copy()`](Self::targets_copy) | qubit indices, `rec[-k]` refs, Pauli targets |
+/// | Gate | [`gate()`](Self::gate) | `stim::Gate::CX` |
+/// | Gate arguments | [`gate_args()`](Self::gate_args) | `[0.01]` for `DEPOLARIZE1(0.01)` |
+/// | Targets | [`targets()`](Self::targets) | qubit indices, `rec[-k]` refs, Pauli targets |
 /// | Tag | [`tag()`](Self::tag) | `"100ns"` in `I[100ns] 2` |
 ///
 /// # Gate name canonicalization
@@ -73,10 +74,10 @@ use crate::{Circuit, GateData, GateTarget, Result, StimError};
 /// ```
 /// use stim::CircuitInstruction;
 ///
-/// let inst = CircuitInstruction::from_stim_program_text("DEPOLARIZE1(0.25) 5")
+/// let inst = CircuitInstruction::parse("DEPOLARIZE1(0.25) 5")
 ///     .expect("valid instruction text");
 /// assert_eq!(inst.name(), "DEPOLARIZE1");
-/// assert_eq!(inst.gate_args_copy(), vec![0.25]);
+/// assert_eq!(inst.gate_args(), &[0.25]);
 /// ```
 ///
 /// Tagged instructions:
@@ -84,14 +85,14 @@ use crate::{Circuit, GateData, GateTarget, Result, StimError};
 /// ```
 /// use stim::CircuitInstruction;
 ///
-/// let inst = CircuitInstruction::from_stim_program_text("I[100ns] 2")
+/// let inst = CircuitInstruction::parse("I[100ns] 2")
 ///     .expect("valid instruction");
 /// assert_eq!(inst.tag(), "100ns");
 /// assert_eq!(inst.to_string(), "I[100ns] 2");
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct CircuitInstruction {
-    name: String,
+    gate: Gate,
     tag: String,
     gate_args: Vec<f64>,
     targets: Vec<GateTarget>,
@@ -143,14 +144,13 @@ impl CircuitInstruction {
     /// assert_eq!(inst.to_string(), "X_ERROR(0.125) 5 7");
     /// ```
     pub fn new(
-        name: impl Into<String>,
+        name: impl AsRef<str>,
         targets: impl IntoIterator<Item = impl Into<GateTarget>>,
         gate_args: impl IntoIterator<Item = f64>,
         tag: impl Into<String>,
     ) -> Result<Self> {
-        let raw_name = name.into();
         let instruction = Self {
-            name: canonical_gate_name(&raw_name),
+            gate: Gate::new(name.as_ref())?,
             tag: tag.into(),
             gate_args: gate_args.into_iter().collect(),
             targets: targets.into_iter().map(Into::into).collect(),
@@ -189,7 +189,7 @@ impl CircuitInstruction {
     /// ```
     /// use stim::CircuitInstruction;
     ///
-    /// let inst = CircuitInstruction::from_stim_program_text("H 0 1")
+    /// let inst = CircuitInstruction::parse("H 0 1")
     ///     .expect("valid instruction text");
     /// assert_eq!(inst.name(), "H");
     ///
@@ -197,7 +197,7 @@ impl CircuitInstruction {
     /// let cx: CircuitInstruction = "CX 0 1".parse().expect("valid");
     /// assert_eq!(cx.name(), "CX");
     /// ```
-    pub fn from_stim_program_text(text: &str) -> Result<Self> {
+    pub fn parse(text: &str) -> Result<Self> {
         let circuit = Circuit::from_str(text)?;
         let normalized = circuit.to_string();
         if normalized.contains('\n') {
@@ -217,6 +217,17 @@ impl CircuitInstruction {
         Self::new(name, targets, gate_args, tag)
     }
 
+    /// Parses a single instruction from Stim program text.
+    pub fn from_stim_program_text(text: &str) -> Result<Self> {
+        Self::parse(text)
+    }
+
+    /// Returns the instruction's validated gate metadata.
+    #[must_use]
+    pub fn gate(&self) -> Gate {
+        self.gate
+    }
+
     /// Returns the canonical gate name (e.g. `"CX"`, `"H"`, `"M"`,
     /// `"X_ERROR"`, `"DETECTOR"`).
     ///
@@ -225,7 +236,7 @@ impl CircuitInstruction {
     /// will still return `"CX"` from this accessor.
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.name
+        self.gate.name()
     }
 
     /// Returns the instruction's tag string, or `""` if no tag was set.
@@ -256,8 +267,14 @@ impl CircuitInstruction {
     /// Each call returns a fresh `Vec`, so callers can mutate the result
     /// without affecting the instruction.
     #[must_use]
+    pub fn gate_args(&self) -> &[f64] {
+        &self.gate_args
+    }
+
+    /// Returns a copy of the gate's numeric arguments.
+    #[must_use]
     pub fn gate_args_copy(&self) -> Vec<f64> {
-        self.gate_args.clone()
+        self.gate_args.to_vec()
     }
 
     /// Returns a copy of all targets the instruction acts on.
@@ -271,8 +288,14 @@ impl CircuitInstruction {
     /// Each call returns a fresh `Vec`, so callers can mutate the result
     /// without affecting the instruction.
     #[must_use]
+    pub fn targets(&self) -> &[GateTarget] {
+        &self.targets
+    }
+
+    /// Returns a copy of all targets the instruction acts on.
+    #[must_use]
     pub fn targets_copy(&self) -> Vec<GateTarget> {
-        self.targets.clone()
+        self.targets.to_vec()
     }
 
     /// Returns the number of measurement results (bits) this instruction
@@ -326,25 +349,27 @@ impl CircuitInstruction {
             return split_on_combiners(&self.targets);
         }
 
-        match GateData::new(&self.name) {
-            Ok(gate) if gate.is_two_qubit_gate() => self
+        if self.gate.is_two_qubit_gate() {
+            return self
                 .targets
                 .chunks_exact(2)
                 .map(|chunk| chunk.to_vec())
-                .collect(),
-            Ok(gate)
-                if gate.is_single_qubit_gate()
-                    || gate.produces_measurements()
-                    || gate.takes_measurement_record_targets() =>
-            {
-                self.targets
-                    .iter()
-                    .copied()
-                    .map(|target| vec![target])
-                    .collect()
-            }
-            _ => vec![self.targets.clone()],
+                .collect();
         }
+
+        if self.gate.is_single_qubit_gate()
+            || self.gate.produces_measurements()
+            || self.gate.takes_measurement_record_targets()
+        {
+            return self
+                .targets
+                .iter()
+                .copied()
+                .map(|target| vec![target])
+                .collect();
+        }
+
+        vec![self.targets.clone()]
     }
 
     fn compute_num_measurements(&self) -> Result<u64> {
@@ -354,7 +379,7 @@ impl CircuitInstruction {
     }
 
     fn fmt_repr(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "stim::CircuitInstruction({:?}, [", self.name)?;
+        write!(f, "stim::CircuitInstruction({:?}, [", self.name())?;
         for (index, target) in self.targets.iter().enumerate() {
             if index > 0 {
                 f.write_str(", ")?;
@@ -379,8 +404,8 @@ impl PartialOrd for CircuitInstruction {
 
 impl Ord for CircuitInstruction {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.name
-            .cmp(&other.name)
+        self.name()
+            .cmp(other.name())
             .then_with(|| self.tag.cmp(&other.tag))
             .then_with(|| compare_f64_slices(&self.gate_args, &other.gate_args))
             .then_with(|| self.targets.cmp(&other.targets))
@@ -389,7 +414,7 @@ impl Ord for CircuitInstruction {
 
 impl std::hash::Hash for CircuitInstruction {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
+        self.name().hash(state);
         self.tag.hash(state);
         for arg in &self.gate_args {
             arg.to_bits().hash(state);
@@ -400,7 +425,7 @@ impl std::hash::Hash for CircuitInstruction {
 
 impl Display for CircuitInstruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name)?;
+        f.write_str(self.name())?;
         if !self.tag.is_empty() {
             write!(f, "[{}]", self.tag)?;
         }
@@ -454,19 +479,17 @@ impl Circuit {
     /// assert_eq!(circuit.to_string(), "H 0");
     /// ```
     pub fn append_instruction(&mut self, instruction: &CircuitInstruction) -> Result<()> {
-        if instruction.name().trim().is_empty() {
-            return Err(StimError::new("instruction name must not be empty"));
-        }
         let raw_targets = instruction
-            .targets_copy()
-            .into_iter()
+            .targets()
+            .iter()
+            .copied()
             .map(|target| target.raw_data())
             .collect::<Vec<_>>();
         self.inner
             .append_with_tag(
                 instruction.name(),
                 &raw_targets,
-                &instruction.gate_args_copy(),
+                instruction.gate_args(),
                 instruction.tag(),
             )
             .map_err(StimError::from)?;
@@ -507,14 +530,8 @@ impl FromStr for CircuitInstruction {
     type Err = StimError;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::from_stim_program_text(s)
+        Self::parse(s)
     }
-}
-
-fn canonical_gate_name(name: &str) -> String {
-    GateData::new(name)
-        .map(|gate| gate.name())
-        .unwrap_or_else(|_| name.to_string())
 }
 
 fn parse_head(head: &str) -> Result<(String, String, Vec<f64>)> {
@@ -596,12 +613,13 @@ mod tests {
     fn constructor_and_accessors_preserve_values() {
         let instruction = CircuitInstruction::new("X_ERROR", [5u32, 7u32], [0.125], "").unwrap();
 
+        assert_eq!(instruction.gate(), crate::Gate::X_ERROR);
         assert_eq!(instruction.name(), "X_ERROR");
         assert_eq!(instruction.tag(), "");
-        assert_eq!(instruction.gate_args_copy(), vec![0.125]);
+        assert_eq!(instruction.gate_args(), &[0.125]);
         assert_eq!(
-            instruction.targets_copy(),
-            vec![GateTarget::from(5u32), GateTarget::from(7u32)]
+            instruction.targets(),
+            [GateTarget::from(5u32), GateTarget::from(7u32)]
         );
         assert_eq!(instruction.num_measurements(), 0);
         assert_eq!(instruction.to_string(), "X_ERROR(0.125) 5 7");
@@ -619,11 +637,12 @@ mod tests {
         let parsed = CircuitInstruction::from_str("CX[annotated] rec[-1] 5").unwrap();
         let mpp = CircuitInstruction::from_str("MPP X0*Y1 X5*X6").unwrap();
 
+        assert_eq!(aliased.gate(), crate::Gate::CX);
         assert_eq!(aliased.name(), "CX");
         assert_eq!(aliased, parsed);
         assert_eq!(
-            mpp.targets_copy(),
-            vec![
+            mpp.targets(),
+            [
                 GateTarget::x(0u32, false).unwrap(),
                 GateTarget::combiner(),
                 GateTarget::y(1u32, false).unwrap(),
@@ -642,12 +661,20 @@ mod tests {
             .expect("instruction should parse");
 
         assert_eq!(qubit_coords.name(), "QUBIT_COORDS");
-        assert_eq!(qubit_coords.gate_args_copy(), vec![1.0, 2.0]);
-        assert_eq!(qubit_coords.targets_copy(), vec![GateTarget::from(0u32)]);
+        assert_eq!(qubit_coords.gate_args(), &[1.0, 2.0]);
+        assert_eq!(qubit_coords.targets(), [GateTarget::from(0u32)]);
 
         assert_eq!(detector.name(), "DETECTOR");
-        assert_eq!(detector.gate_args_copy(), vec![2.0, 0.0, 0.0]);
-        assert_eq!(detector.targets_copy(), vec![GateTarget::rec(-24).unwrap()]);
+        assert_eq!(detector.gate_args(), &[2.0, 0.0, 0.0]);
+        assert_eq!(detector.targets(), [GateTarget::rec(-24).unwrap()]);
+    }
+
+    #[test]
+    fn parse_aliases_single_instruction_text() {
+        let instruction = CircuitInstruction::parse("cnot 0 1").expect("instruction should parse");
+
+        assert_eq!(instruction.gate(), crate::Gate::CX);
+        assert_eq!(instruction.name(), "CX");
     }
 
     #[test]
@@ -854,15 +881,14 @@ mod tests {
 
     #[test]
     fn parser_rejects_multi_operation_and_repeat_inputs_and_covers_remaining_formats() {
-        let multiple = CircuitInstruction::from_stim_program_text("H 0\nX 1").unwrap_err();
+        let multiple = CircuitInstruction::parse("H 0\nX 1").unwrap_err();
         assert!(
             multiple
                 .message()
                 .contains("expected a single circuit instruction")
         );
 
-        let repeat =
-            CircuitInstruction::from_stim_program_text("REPEAT 2 {\n    H 0\n}").unwrap_err();
+        let repeat = CircuitInstruction::parse("REPEAT 2 {\n    H 0\n}").unwrap_err();
         assert!(
             repeat.message().contains("REPEAT")
                 || repeat.message().contains("single circuit instruction")
@@ -871,28 +897,15 @@ mod tests {
         let tick = CircuitInstruction::from_str("TICK").unwrap();
         assert!(tick.target_groups().is_empty());
 
-        let multi_args =
-            CircuitInstruction::from_stim_program_text("PAULI_CHANNEL_1(0.1,0.2,0.3) 0").unwrap();
+        let multi_args = CircuitInstruction::parse("PAULI_CHANNEL_1(0.1,0.2,0.3) 0").unwrap();
         assert_eq!(multi_args.to_string(), "PAULI_CHANNEL_1(0.1,0.2,0.3) 0");
 
         let mpp = CircuitInstruction::from_str("MPP X0*Y1").unwrap();
         assert_eq!(mpp.to_string(), "MPP X0* Y1");
         assert!(format!("{mpp:?}").contains("CircuitInstruction"));
 
-        let mut circuit = Circuit::new();
-        let invalid = CircuitInstruction {
-            name: " ".to_string(),
-            tag: String::new(),
-            gate_args: vec![],
-            targets: vec![],
-            num_measurements: 0,
-        };
-        let error = circuit.append_instruction(&invalid).unwrap_err();
-        assert!(
-            error
-                .message()
-                .contains("instruction name must not be empty")
-        );
+        let invalid = CircuitInstruction::new(" ", std::iter::empty::<u32>(), [], "").unwrap_err();
+        assert!(!invalid.message().is_empty());
 
         let low = CircuitInstruction::new("X_ERROR", [0u32], [0.1], "").unwrap();
         let high = CircuitInstruction::new("X_ERROR", [0u32], [0.2], "").unwrap();

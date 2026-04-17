@@ -89,12 +89,13 @@ pub use common::{
 pub use ndarray::{Array1, Array2};
 
 pub use dem::{
-    DemAppendOperation, DemInstruction, DemInstructionTarget, DemItem, DemRepeatBlock, DemTarget,
-    DemTargetWithCoords, DetectorErrorModel, DetectorErrorModelDiagramType,
+    DemAppendOperation, DemInstruction, DemInstructionTarget, DemInstructionType, DemItem,
+    DemRepeatBlock, DemTarget, DemTargetWithCoords, DetectorErrorModel,
+    DetectorErrorModelDiagramType,
 };
 pub use metadata::{
     ExplainedError, FlippedMeasurement, Gate, GateData, GateTarget, GateTargetWithCoords,
-    all_gate_data, target_combined_paulis,
+    all_gates, target_combined_paulis,
 };
 pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{

@@ -1947,7 +1947,7 @@ mod tests {
         assert_eq!(format!("{}", PauliString::from_text("iX").unwrap()), "+iX");
 
         let circuit: Circuit = "H 0".parse().unwrap();
-        let instruction = CircuitInstruction::from_stim_program_text("H 0").unwrap();
+        let instruction = CircuitInstruction::parse("H 0").unwrap();
         assert_eq!(
             PauliString::from_text("Z")
                 .unwrap()

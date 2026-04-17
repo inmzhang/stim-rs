@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Circuit, CircuitInstruction, GateData, GateTarget, Result, StimError};
+use crate::{Circuit, CircuitInstruction, Gate, GateTarget, Result, StimError};
 
 /// A single noise-channel operation to insert before or after a circuit instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -11,16 +11,16 @@ struct NoiseOperation {
 
 impl NoiseOperation {
     fn new(gate_name: &str, args: &[f64]) -> Result<Self> {
-        let gate = GateData::new(gate_name)?;
+        let gate = Gate::new(gate_name)?;
         if gate.produces_measurements() || !gate.is_noisy_gate() {
             return Err(StimError::new(format!(
                 "'{}' is not a pure noise channel",
                 gate.name()
             )));
         }
-        validate_gate_args(&gate.name(), args, &gate.num_parens_arguments_range())?;
+        validate_gate_args(gate.name(), args, &gate.num_parens_arguments_range())?;
         Ok(Self {
-            gate_name: gate.name(),
+            gate_name: gate.name().to_string(),
             args: args.to_vec(),
         })
     }
@@ -166,8 +166,8 @@ impl NoiseModelConfig {
     }
 
     fn with_gate_rule(mut self, gate_name: &str, rule: NoiseRule) -> Result<Self> {
-        let canonical = GateData::new(gate_name)?.name();
-        self.gate_rules.insert(canonical, rule);
+        let gate = Gate::new(gate_name)?;
+        self.gate_rules.insert(gate.name().to_string(), rule);
         Ok(self)
     }
 
@@ -295,22 +295,22 @@ impl NoiseModel for NoiseModelConfig {
                 continue;
             }
 
-            let instruction = CircuitInstruction::from_stim_program_text(line)?;
+            let instruction = CircuitInstruction::parse(line)?;
 
             for split_instruction in split_instruction_for_noise(&instruction)? {
-                let gate = GateData::new(split_instruction.name())?;
+                let gate = split_instruction.gate();
                 let qubit_targets = qubit_targets(&split_instruction);
 
                 self.record_qubit_usage(
                     &split_instruction,
-                    &gate,
+                    gate,
                     &qubit_targets,
                     &mut unitary_1q_qubits,
                     &mut non_unitary_or_multi_use_qubits,
                 )?;
                 used_qubits.extend(qubit_targets.iter().copied());
 
-                let resolved_rule = self.resolve_noise_rule(&split_instruction, &gate)?;
+                let resolved_rule = self.resolve_noise_rule(&split_instruction, gate)?;
                 self.append_instruction_with_noise(
                     &mut pending_moment,
                     &split_instruction,
@@ -417,8 +417,11 @@ impl NoiseModelConfig {
                 .copied()
                 .collect();
             if !idle_targets.is_empty() {
-                let depolarize1 = crate::GateData::new("DEPOLARIZE1")?;
-                output.append(&depolarize1, &idle_targets, &[self.idle_depolarization])?;
+                output.append(
+                    crate::Gate::DEPOLARIZE1,
+                    &idle_targets,
+                    &[self.idle_depolarization],
+                )?;
             }
         }
 
@@ -431,9 +434,8 @@ impl NoiseModelConfig {
                 .copied()
                 .collect();
             if !waiting_targets.is_empty() {
-                let depolarize1 = crate::GateData::new("DEPOLARIZE1")?;
                 output.append(
-                    &depolarize1,
+                    crate::Gate::DEPOLARIZE1,
                     &waiting_targets,
                     &[self.additional_depolarization_waiting_for_measure_or_reset],
                 )?;
@@ -446,7 +448,7 @@ impl NoiseModelConfig {
     fn record_qubit_usage(
         &self,
         instruction: &CircuitInstruction,
-        gate: &crate::GateData,
+        gate: crate::Gate,
         qubit_targets: &[u32],
         unitary_1q_qubits: &mut BTreeSet<u32>,
         non_unitary_or_multi_use_qubits: &mut BTreeSet<u32>,
@@ -454,7 +456,7 @@ impl NoiseModelConfig {
         if self.allow_multiple_uses_of_a_qubit_in_one_tick
             || qubit_targets.is_empty()
             || is_annotation(instruction.name())
-            || occurs_in_classical_control_system(instruction)?
+            || occurs_in_classical_control_system(instruction)
         {
             return Ok(());
         }
@@ -489,13 +491,13 @@ impl NoiseModelConfig {
     fn resolve_noise_rule(
         &self,
         instruction: &CircuitInstruction,
-        gate: &crate::GateData,
+        gate: crate::Gate,
     ) -> Result<Option<ResolvedNoiseRule>> {
-        if is_annotation(instruction.name()) || occurs_in_classical_control_system(instruction)? {
+        if is_annotation(instruction.name()) || occurs_in_classical_control_system(instruction) {
             return Ok(None);
         }
 
-        if let Some(rule) = self.gate_rules.get(gate.name().as_str()) {
+        if let Some(rule) = self.gate_rules.get(gate.name()) {
             return Ok(Some(ResolvedNoiseRule {
                 rule: rule.clone(),
                 source: RuleSource::ExplicitGate,
@@ -549,9 +551,9 @@ impl NoiseModelConfig {
     fn resolve_combined_measure_reset_rule(
         &self,
         instruction: &CircuitInstruction,
-        gate: &crate::GateData,
+        gate: crate::Gate,
     ) -> Result<Option<ResolvedNoiseRule>> {
-        let reset_gate_name = match gate.name().as_str() {
+        let reset_gate_name = match gate.name() {
             "MR" | "MRZ" => "R",
             "MRX" => "RX",
             "MRY" => "RY",
@@ -618,7 +620,7 @@ impl NoiseModelConfig {
             resolved_rule.rule.before(),
         );
 
-        let mut gate_args = instruction.gate_args_copy();
+        let mut gate_args = instruction.gate_args().to_vec();
         if resolved_rule.rule.flip_result() > 0.0 {
             if !gate_args.is_empty() {
                 return Err(StimError::new(format!(
@@ -631,7 +633,7 @@ impl NoiseModelConfig {
 
         let rewritten = CircuitInstruction::new(
             instruction.name(),
-            instruction.targets_copy(),
+            instruction.targets().iter().copied(),
             gate_args,
             instruction.tag(),
         )?;
@@ -689,27 +691,27 @@ fn is_annotation(gate_name: &str) -> bool {
     )
 }
 
-fn occurs_in_classical_control_system(instruction: &CircuitInstruction) -> Result<bool> {
+fn occurs_in_classical_control_system(instruction: &CircuitInstruction) -> bool {
     if is_annotation(instruction.name()) || instruction.name() == "TICK" {
-        return Ok(true);
+        return true;
     }
 
-    let gate = GateData::new(instruction.name())?;
+    let gate = instruction.gate();
     if gate.is_unitary() && gate.is_two_qubit_gate() {
-        let targets = instruction.targets_copy();
+        let targets = instruction.targets();
         for pair in targets.chunks_exact(2) {
             let classical_0 =
                 pair[0].is_measurement_record_target() || pair[0].is_sweep_bit_target();
             let classical_1 =
                 pair[1].is_measurement_record_target() || pair[1].is_sweep_bit_target();
             if !(classical_0 || classical_1) {
-                return Ok(false);
+                return false;
             }
         }
-        return Ok(true);
+        return true;
     }
 
-    Ok(false)
+    false
 }
 
 fn split_instruction_for_noise(
@@ -737,7 +739,7 @@ fn split_instruction_for_noise(
             CircuitInstruction::new(
                 "MPP",
                 targets,
-                instruction.gate_args_copy(),
+                instruction.gate_args().iter().copied(),
                 instruction.tag(),
             )
         })
@@ -746,8 +748,9 @@ fn split_instruction_for_noise(
 
 fn qubit_targets(instruction: &CircuitInstruction) -> Vec<u32> {
     instruction
-        .targets_copy()
-        .into_iter()
+        .targets()
+        .iter()
+        .copied()
         .filter_map(GateTarget::qubit_value)
         .collect()
 }
@@ -782,11 +785,10 @@ fn append_instruction_verbatim(
     instruction: &CircuitInstruction,
 ) -> Result<()> {
     if instruction.tag().is_empty() {
-        let gate = crate::GateData::new(instruction.name())?;
         output.append_gate_targets(
-            &gate,
-            &instruction.targets_copy(),
-            &instruction.gate_args_copy(),
+            instruction.gate(),
+            instruction.targets(),
+            instruction.gate_args(),
         )
     } else {
         output.append_from_stim_program_text(&instruction.to_string())
@@ -832,9 +834,9 @@ fn append_grouped_noise_ops(
         if targets.is_empty() {
             continue;
         }
-        let gate = crate::GateData::new(gate_name)?;
+        let gate = crate::Gate::new(gate_name)?;
         let gate_args: Vec<f64> = args.iter().map(|arg| f64::from_bits(*arg)).collect();
-        output.append(&gate, targets, &gate_args)?;
+        output.append(gate, targets, &gate_args)?;
     }
     Ok(())
 }
@@ -951,12 +953,9 @@ TICK"
             .noisy_circuit(&classically_controlled)
             .unwrap();
         assert_eq!(noisy.to_string(), "M 0\nCX rec[-1] 1");
-        assert!(
-            occurs_in_classical_control_system(
-                &crate::CircuitInstruction::from_stim_program_text("CX rec[-1] 1").unwrap()
-            )
-            .unwrap()
-        );
+        assert!(occurs_in_classical_control_system(
+            &crate::CircuitInstruction::parse("CX rec[-1] 1").unwrap()
+        ));
     }
 
     #[test]
@@ -978,7 +977,7 @@ TICK"
                 .contains("cannot inject result flips into already-parameterized instruction")
         );
 
-        let mpp = crate::CircuitInstruction::from_stim_program_text("MPP X0*X1 Z2*Z3").unwrap();
+        let mpp = crate::CircuitInstruction::parse("MPP X0*X1 Z2*Z3").unwrap();
         let split = split_instruction_for_noise(&mpp).unwrap();
         assert_eq!(split.len(), 2);
         assert_eq!(
@@ -997,11 +996,9 @@ TICK"
         );
 
         assert_eq!(
-            split_instruction_for_noise(
-                &crate::CircuitInstruction::from_stim_program_text("MPP X0*X1").unwrap()
-            )
-            .unwrap()
-            .len(),
+            split_instruction_for_noise(&crate::CircuitInstruction::parse("MPP X0*X1").unwrap())
+                .unwrap()
+                .len(),
             1
         );
 

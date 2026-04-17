@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
@@ -6,42 +5,251 @@ use ndarray::Array2;
 
 use crate::{Flow, Result, StimError, Tableau};
 
-/// Metadata about a gate supported by Stim.
-///
-/// Every gate that Stim recognises — unitaries such as `H` and `CX`, noise channels
-/// such as `X_ERROR` and `DEPOLARIZE1`, measurements (`M`, `MXX`, `MPP`), resets (`R`,
-/// `RX`), and annotations (`DETECTOR`, `TICK`) — has an associated `GateData` value
-/// that exposes its canonical name, aliases, stabilizer flows, Clifford tableau,
-/// unitary matrix, inverse relationships, and various Boolean classification flags.
-///
-/// Obtain a `GateData` through [`GateData::new`] or the bulk inventory
-/// [`all_gate_data`].
-///
-/// Two `GateData` values are equal when they refer to the same canonical gate,
-/// regardless of which alias was used to look them up.
-///
-/// # Examples
-///
-/// ```
-/// let h = stim::GateData::new("h").unwrap();
-/// assert_eq!(h.name(), "H");
-/// assert!(h.is_unitary());
-///
-/// // The Clifford tableau for H swaps the X and Z bases.
-/// let tableau = h.tableau().unwrap();
-/// assert_eq!(
-///     tableau,
-///     stim::Tableau::from_named_gate("H").unwrap()
-/// );
-/// ```
+macro_rules! stim_gates {
+    ($($variant:ident => $name:literal),+ $(,)?) => {
+        /// A canonical Stim gate identifier.
+        #[allow(non_camel_case_types)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub enum Gate {
+            $($variant),+
+        }
+
+        impl Gate {
+            pub const ALL: &'static [Self] = &[
+                $(Self::$variant),+
+            ];
+
+            pub fn new(name: &str) -> Result<Self> {
+                GateData::new(name).map(|data| data.gate())
+            }
+
+            #[must_use]
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name),+
+                }
+            }
+
+            fn from_canonical_name(name: &str) -> Option<Self> {
+                match name {
+                    $($name => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+
+            #[must_use]
+            pub fn data(self) -> GateData {
+                self.into()
+            }
+
+            #[must_use]
+            pub fn aliases(self) -> Vec<String> {
+                self.data().aliases()
+            }
+
+            #[must_use]
+            pub fn num_parens_arguments_range(self) -> Vec<u8> {
+                self.data().num_parens_arguments_range()
+            }
+
+            #[must_use]
+            pub fn is_noisy_gate(self) -> bool {
+                self.data().is_noisy_gate()
+            }
+
+            #[must_use]
+            pub fn is_reset(self) -> bool {
+                self.data().is_reset()
+            }
+
+            #[must_use]
+            pub fn is_single_qubit_gate(self) -> bool {
+                self.data().is_single_qubit_gate()
+            }
+
+            #[must_use]
+            pub fn is_symmetric_gate(self) -> bool {
+                self.data().is_symmetric_gate()
+            }
+
+            #[must_use]
+            pub fn is_two_qubit_gate(self) -> bool {
+                self.data().is_two_qubit_gate()
+            }
+
+            #[must_use]
+            pub fn is_unitary(self) -> bool {
+                self.data().is_unitary()
+            }
+
+            #[must_use]
+            pub fn produces_measurements(self) -> bool {
+                self.data().produces_measurements()
+            }
+
+            #[must_use]
+            pub fn takes_measurement_record_targets(self) -> bool {
+                self.data().takes_measurement_record_targets()
+            }
+
+            #[must_use]
+            pub fn takes_pauli_targets(self) -> bool {
+                self.data().takes_pauli_targets()
+            }
+
+            #[must_use]
+            pub fn flows(self) -> Option<Vec<Flow>> {
+                self.data().flows()
+            }
+
+            #[must_use]
+            pub fn tableau(self) -> Option<Tableau> {
+                self.data().tableau()
+            }
+
+            #[must_use]
+            pub fn unitary_matrix(self) -> Option<Array2<crate::Complex32>> {
+                self.data().unitary_matrix()
+            }
+
+            #[must_use]
+            pub fn inverse(self) -> Option<Self> {
+                self.data().inverse().map(|gate| gate.gate())
+            }
+
+            #[must_use]
+            pub fn generalized_inverse(self) -> Self {
+                self.data().generalized_inverse().gate()
+            }
+
+            #[must_use]
+            pub fn hadamard_conjugated(self, unsigned_only: bool) -> Option<Self> {
+                self.data()
+                    .hadamard_conjugated(unsigned_only)
+                    .map(|gate| gate.gate())
+            }
+        }
+
+        impl Display for Gate {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        impl fmt::Debug for Gate {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "stim::Gate::{}", self.name())
+            }
+        }
+
+        impl FromStr for Gate {
+            type Err = StimError;
+
+            fn from_str(s: &str) -> Result<Self> {
+                Self::new(s)
+            }
+        }
+    };
+}
+
+stim_gates! {
+    DETECTOR => "DETECTOR",
+    OBSERVABLE_INCLUDE => "OBSERVABLE_INCLUDE",
+    TICK => "TICK",
+    QUBIT_COORDS => "QUBIT_COORDS",
+    SHIFT_COORDS => "SHIFT_COORDS",
+    REPEAT => "REPEAT",
+    MPAD => "MPAD",
+    MX => "MX",
+    MY => "MY",
+    M => "M",
+    MRX => "MRX",
+    MRY => "MRY",
+    MR => "MR",
+    RX => "RX",
+    RY => "RY",
+    R => "R",
+    XCX => "XCX",
+    XCY => "XCY",
+    XCZ => "XCZ",
+    YCX => "YCX",
+    YCY => "YCY",
+    YCZ => "YCZ",
+    CX => "CX",
+    CY => "CY",
+    CZ => "CZ",
+    H => "H",
+    H_XY => "H_XY",
+    H_YZ => "H_YZ",
+    H_NXY => "H_NXY",
+    H_NXZ => "H_NXZ",
+    H_NYZ => "H_NYZ",
+    DEPOLARIZE1 => "DEPOLARIZE1",
+    DEPOLARIZE2 => "DEPOLARIZE2",
+    X_ERROR => "X_ERROR",
+    Y_ERROR => "Y_ERROR",
+    Z_ERROR => "Z_ERROR",
+    I_ERROR => "I_ERROR",
+    II_ERROR => "II_ERROR",
+    PAULI_CHANNEL_1 => "PAULI_CHANNEL_1",
+    PAULI_CHANNEL_2 => "PAULI_CHANNEL_2",
+    E => "E",
+    ELSE_CORRELATED_ERROR => "ELSE_CORRELATED_ERROR",
+    HERALDED_ERASE => "HERALDED_ERASE",
+    HERALDED_PAULI_CHANNEL_1 => "HERALDED_PAULI_CHANNEL_1",
+    I => "I",
+    X => "X",
+    Y => "Y",
+    Z => "Z",
+    C_XYZ => "C_XYZ",
+    C_ZYX => "C_ZYX",
+    C_NXYZ => "C_NXYZ",
+    C_XNYZ => "C_XNYZ",
+    C_XYNZ => "C_XYNZ",
+    C_NZYX => "C_NZYX",
+    C_ZNYX => "C_ZNYX",
+    C_ZYNX => "C_ZYNX",
+    SQRT_X => "SQRT_X",
+    SQRT_X_DAG => "SQRT_X_DAG",
+    SQRT_Y => "SQRT_Y",
+    SQRT_Y_DAG => "SQRT_Y_DAG",
+    S => "S",
+    S_DAG => "S_DAG",
+    II => "II",
+    SQRT_XX => "SQRT_XX",
+    SQRT_XX_DAG => "SQRT_XX_DAG",
+    SQRT_YY => "SQRT_YY",
+    SQRT_YY_DAG => "SQRT_YY_DAG",
+    SQRT_ZZ => "SQRT_ZZ",
+    SQRT_ZZ_DAG => "SQRT_ZZ_DAG",
+    MPP => "MPP",
+    SPP => "SPP",
+    SPP_DAG => "SPP_DAG",
+    SWAP => "SWAP",
+    ISWAP => "ISWAP",
+    CXSWAP => "CXSWAP",
+    SWAPCX => "SWAPCX",
+    CZSWAP => "CZSWAP",
+    ISWAP_DAG => "ISWAP_DAG",
+    MXX => "MXX",
+    MYY => "MYY",
+    MZZ => "MZZ",
+}
+
+/// Metadata about a specific canonical Stim gate.
 pub struct GateData {
+    gate: Gate,
     pub(crate) inner: stim_cxx::GateData,
 }
 
-/// A typed Stim gate handle validated against the built-in gate catalog.
-pub type Gate = GateData;
-
 impl GateData {
+    fn from_inner(inner: stim_cxx::GateData) -> Self {
+        let canonical_name = inner.name();
+        let gate = Gate::from_canonical_name(&canonical_name)
+            .expect("stim-cxx returned an unknown canonical gate name");
+        Self { gate, inner }
+    }
+
     /// Looks up metadata for a gate by name or alias.
     ///
     /// Gate names are case-insensitive: `"h"`, `"H"`, and `"h_xz"` all resolve to the
@@ -55,13 +263,12 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// let gate = stim::GateData::new("H").unwrap();
-    /// assert_eq!(gate.name(), "H");
-    /// assert!(gate.is_unitary());
+    /// assert_eq!(stim::Gate::H.name(), "H");
+    /// assert!(stim::Gate::H.is_unitary());
     /// ```
     pub fn new(name: &str) -> Result<Self> {
         stim_cxx::gate_data(name)
-            .map(|inner| GateData { inner })
+            .map(Self::from_inner)
             .map_err(StimError::from)
     }
 
@@ -69,17 +276,22 @@ impl GateData {
     ///
     /// Each Stim gate has exactly one canonical (upper-case) name. When a gate is
     /// looked up by an alias or a differently-cased variant, the canonical name is
-    /// still returned. For example, looking up `"cnot"` yields a `GateData` whose
+    /// still returned. For example, looking up `"cnot"` yields a `Gate` whose
     /// `name()` is `"CX"`.
     ///
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::GateData::new("cnot").unwrap().name(), "CX");
+    /// assert_eq!(stim::Gate::CX.name(), "CX");
     /// ```
     #[must_use]
-    pub fn name(&self) -> String {
-        self.inner.name()
+    pub fn gate(&self) -> Gate {
+        self.gate
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.gate.name()
     }
 
     /// Returns all aliases that can be used to refer to this gate.
@@ -93,9 +305,8 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// let cx = stim::GateData::new("CX").unwrap();
-    /// assert!(cx.aliases().contains(&"CNOT".to_string()));
-    /// assert!(cx.aliases().contains(&"CX".to_string()));
+    /// assert!(stim::Gate::CX.aliases().contains(&"CNOT".to_string()));
+    /// assert!(stim::Gate::CX.aliases().contains(&"CX".to_string()));
     /// ```
     #[must_use]
     pub fn aliases(&self) -> Vec<String> {
@@ -118,8 +329,8 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::GateData::new("H").unwrap().num_parens_arguments_range(), vec![0]);
-    /// assert_eq!(stim::GateData::new("M").unwrap().num_parens_arguments_range(), vec![0, 1]);
+    /// assert_eq!(stim::Gate::H.num_parens_arguments_range(), vec![0]);
+    /// assert_eq!(stim::Gate::M.num_parens_arguments_range(), vec![0, 1]);
     /// ```
     #[must_use]
     pub fn num_parens_arguments_range(&self) -> Vec<u8> {
@@ -140,10 +351,10 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("X_ERROR").unwrap().is_noisy_gate());
-    /// assert!(stim::GateData::new("M").unwrap().is_noisy_gate());
-    /// assert!(!stim::GateData::new("H").unwrap().is_noisy_gate());
-    /// assert!(!stim::GateData::new("R").unwrap().is_noisy_gate());
+    /// assert!(stim::Gate::X_ERROR.is_noisy_gate());
+    /// assert!(stim::Gate::M.is_noisy_gate());
+    /// assert!(!stim::Gate::H.is_noisy_gate());
+    /// assert!(!stim::Gate::R.is_noisy_gate());
     /// ```
     #[must_use]
     pub fn is_noisy_gate(&self) -> bool {
@@ -162,10 +373,10 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("R").unwrap().is_reset());
-    /// assert!(stim::GateData::new("MR").unwrap().is_reset());
-    /// assert!(!stim::GateData::new("M").unwrap().is_reset());
-    /// assert!(!stim::GateData::new("H").unwrap().is_reset());
+    /// assert!(stim::Gate::R.is_reset());
+    /// assert!(stim::Gate::MR.is_reset());
+    /// assert!(!stim::Gate::M.is_reset());
+    /// assert!(!stim::Gate::H.is_reset());
     /// ```
     #[must_use]
     pub fn is_reset(&self) -> bool {
@@ -184,11 +395,11 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("H").unwrap().is_single_qubit_gate());
-    /// assert!(stim::GateData::new("M").unwrap().is_single_qubit_gate());
-    /// assert!(stim::GateData::new("X_ERROR").unwrap().is_single_qubit_gate());
-    /// assert!(!stim::GateData::new("CX").unwrap().is_single_qubit_gate());
-    /// assert!(!stim::GateData::new("MPP").unwrap().is_single_qubit_gate());
+    /// assert!(stim::Gate::H.is_single_qubit_gate());
+    /// assert!(stim::Gate::M.is_single_qubit_gate());
+    /// assert!(stim::Gate::X_ERROR.is_single_qubit_gate());
+    /// assert!(!stim::Gate::CX.is_single_qubit_gate());
+    /// assert!(!stim::Gate::MPP.is_single_qubit_gate());
     /// ```
     #[must_use]
     pub fn is_single_qubit_gate(&self) -> bool {
@@ -211,10 +422,10 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("CZ").unwrap().is_symmetric_gate());
-    /// assert!(stim::GateData::new("ISWAP").unwrap().is_symmetric_gate());
-    /// assert!(!stim::GateData::new("CX").unwrap().is_symmetric_gate());
-    /// assert!(!stim::GateData::new("CXSWAP").unwrap().is_symmetric_gate());
+    /// assert!(stim::Gate::CZ.is_symmetric_gate());
+    /// assert!(stim::Gate::ISWAP.is_symmetric_gate());
+    /// assert!(!stim::Gate::CX.is_symmetric_gate());
+    /// assert!(!stim::Gate::CXSWAP.is_symmetric_gate());
     /// ```
     #[must_use]
     pub fn is_symmetric_gate(&self) -> bool {
@@ -233,10 +444,10 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("CX").unwrap().is_two_qubit_gate());
-    /// assert!(stim::GateData::new("MXX").unwrap().is_two_qubit_gate());
-    /// assert!(!stim::GateData::new("H").unwrap().is_two_qubit_gate());
-    /// assert!(!stim::GateData::new("MPP").unwrap().is_two_qubit_gate());
+    /// assert!(stim::Gate::CX.is_two_qubit_gate());
+    /// assert!(stim::Gate::MXX.is_two_qubit_gate());
+    /// assert!(!stim::Gate::H.is_two_qubit_gate());
+    /// assert!(!stim::Gate::MPP.is_two_qubit_gate());
     /// ```
     #[must_use]
     pub fn is_two_qubit_gate(&self) -> bool {
@@ -255,11 +466,11 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("H").unwrap().is_unitary());
-    /// assert!(stim::GateData::new("CX").unwrap().is_unitary());
-    /// assert!(!stim::GateData::new("M").unwrap().is_unitary());
-    /// assert!(!stim::GateData::new("R").unwrap().is_unitary());
-    /// assert!(!stim::GateData::new("X_ERROR").unwrap().is_unitary());
+    /// assert!(stim::Gate::H.is_unitary());
+    /// assert!(stim::Gate::CX.is_unitary());
+    /// assert!(!stim::Gate::M.is_unitary());
+    /// assert!(!stim::Gate::R.is_unitary());
+    /// assert!(!stim::Gate::X_ERROR.is_unitary());
     /// ```
     #[must_use]
     pub fn is_unitary(&self) -> bool {
@@ -280,11 +491,11 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("M").unwrap().produces_measurements());
-    /// assert!(stim::GateData::new("MPP").unwrap().produces_measurements());
-    /// assert!(!stim::GateData::new("H").unwrap().produces_measurements());
-    /// assert!(!stim::GateData::new("R").unwrap().produces_measurements());
-    /// assert!(!stim::GateData::new("DETECTOR").unwrap().produces_measurements());
+    /// assert!(stim::Gate::M.produces_measurements());
+    /// assert!(stim::Gate::MPP.produces_measurements());
+    /// assert!(!stim::Gate::H.produces_measurements());
+    /// assert!(!stim::Gate::R.produces_measurements());
+    /// assert!(!stim::Gate::DETECTOR.produces_measurements());
     /// ```
     #[must_use]
     pub fn produces_measurements(&self) -> bool {
@@ -304,10 +515,10 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("CX").unwrap().takes_measurement_record_targets());
-    /// assert!(stim::GateData::new("DETECTOR").unwrap().takes_measurement_record_targets());
-    /// assert!(!stim::GateData::new("H").unwrap().takes_measurement_record_targets());
-    /// assert!(!stim::GateData::new("M").unwrap().takes_measurement_record_targets());
+    /// assert!(stim::Gate::CX.takes_measurement_record_targets());
+    /// assert!(stim::Gate::DETECTOR.takes_measurement_record_targets());
+    /// assert!(!stim::Gate::H.takes_measurement_record_targets());
+    /// assert!(!stim::Gate::M.takes_measurement_record_targets());
     /// ```
     #[must_use]
     pub fn takes_measurement_record_targets(&self) -> bool {
@@ -328,11 +539,11 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("CORRELATED_ERROR").unwrap().takes_pauli_targets());
-    /// assert!(stim::GateData::new("MPP").unwrap().takes_pauli_targets());
-    /// assert!(!stim::GateData::new("H").unwrap().takes_pauli_targets());
-    /// assert!(!stim::GateData::new("CX").unwrap().takes_pauli_targets());
-    /// assert!(!stim::GateData::new("X_ERROR").unwrap().takes_pauli_targets());
+    /// assert!(stim::Gate::E.takes_pauli_targets());
+    /// assert!(stim::Gate::MPP.takes_pauli_targets());
+    /// assert!(!stim::Gate::H.takes_pauli_targets());
+    /// assert!(!stim::Gate::CX.takes_pauli_targets());
+    /// assert!(!stim::Gate::X_ERROR.takes_pauli_targets());
     /// ```
     #[must_use]
     pub fn takes_pauli_targets(&self) -> bool {
@@ -356,7 +567,7 @@ impl GateData {
     ///
     /// ```
     /// assert_eq!(
-    ///     stim::GateData::new("H").unwrap().flows().unwrap(),
+    ///     stim::Gate::H.flows().unwrap(),
     ///     vec![
     ///         stim::Flow::new("X -> Z").unwrap(),
     ///         stim::Flow::new("Z -> X").unwrap(),
@@ -386,9 +597,9 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("M").unwrap().tableau().is_none());
+    /// assert!(stim::Gate::M.tableau().is_none());
     /// assert_eq!(
-    ///     stim::GateData::new("H").unwrap().tableau().unwrap(),
+    ///     stim::Gate::H.tableau().unwrap(),
     ///     stim::Tableau::from_named_gate("H").unwrap()
     /// );
     /// ```
@@ -410,9 +621,9 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert!(stim::GateData::new("M").unwrap().unitary_matrix().is_none());
+    /// assert!(stim::Gate::M.unitary_matrix().is_none());
     /// assert_eq!(
-    ///     stim::GateData::new("X").unwrap().unitary_matrix().unwrap(),
+    ///     stim::Gate::X.unitary_matrix().unwrap(),
     ///     ndarray::array![
     ///         [stim::Complex32::new(0.0, 0.0), stim::Complex32::new(1.0, 0.0)],
     ///         [stim::Complex32::new(1.0, 0.0), stim::Complex32::new(0.0, 0.0)],
@@ -449,12 +660,12 @@ impl GateData {
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::GateData::new("S").unwrap().inverse().unwrap().name(), "S_DAG");
-    /// assert!(stim::GateData::new("X_ERROR").unwrap().inverse().is_none());
+    /// assert_eq!(stim::Gate::S.inverse().unwrap().name(), "S_DAG");
+    /// assert!(stim::Gate::X_ERROR.inverse().is_none());
     /// ```
     #[must_use]
     pub fn inverse(&self) -> Option<Self> {
-        self.inner.inverse().map(|inner| Self { inner })
+        self.inner.inverse().map(Self::from_inner)
     }
 
     /// Returns the closest-thing-to-an-inverse for the gate, choosing *something* even
@@ -473,25 +684,23 @@ impl GateData {
     /// - **Annotations** (e.g. `TICK`, `DETECTOR`): the generalized inverse is the
     ///   same annotation.
     ///
-    /// Unlike [`inverse`](GateData::inverse), this method always returns a value.
+    /// Unlike [`inverse`](Gate::inverse), this method always returns a value.
     ///
     /// # Examples
     ///
     /// ```
     /// assert_eq!(
-    ///     stim::GateData::new("R").unwrap().generalized_inverse().name(),
+    ///     stim::Gate::R.generalized_inverse().name(),
     ///     "M"
     /// );
     /// assert_eq!(
-    ///     stim::GateData::new("X_ERROR").unwrap().generalized_inverse().name(),
+    ///     stim::Gate::X_ERROR.generalized_inverse().name(),
     ///     "X_ERROR"
     /// );
     /// ```
     #[must_use]
     pub fn generalized_inverse(&self) -> Self {
-        Self {
-            inner: self.inner.generalized_inverse(),
-        }
+        Self::from_inner(self.inner.generalized_inverse())
     }
 
     /// Returns the Hadamard-conjugated form of the gate, or `None` if Stim does not
@@ -518,8 +727,7 @@ impl GateData {
     ///
     /// ```
     /// assert_eq!(
-    ///     stim::GateData::new("X")
-    ///         .unwrap()
+    ///     stim::Gate::X
     ///         .hadamard_conjugated(false)
     ///         .unwrap()
     ///         .name(),
@@ -530,7 +738,7 @@ impl GateData {
     pub fn hadamard_conjugated(&self, unsigned_only: bool) -> Option<Self> {
         self.inner
             .hadamard_conjugated(unsigned_only)
-            .map(|inner| Self { inner })
+            .map(Self::from_inner)
     }
 }
 
@@ -538,7 +746,7 @@ impl GateData {
 ///
 /// The returned map contains one entry per canonical Stim gate. Aliases are *not*
 /// included as separate keys — for example, the map contains `"CX"` but not `"CNOT"`.
-/// To look up a gate by alias, use [`GateData::new`] instead.
+/// To look up a gate by alias, use [`Gate::new`] instead.
 ///
 /// This is useful for enumerating all gates that Stim supports, for example to build
 /// a gate reference or to iterate over gate properties programmatically.
@@ -546,29 +754,27 @@ impl GateData {
 /// # Examples
 ///
 /// ```
-/// let gates = stim::all_gate_data();
-/// assert!(gates.contains_key("H"));
-/// assert!(gates.contains_key("CX"));
-///
-/// // Aliases are not included as separate keys.
-/// assert!(!gates.contains_key("CNOT"));
+/// let gates = stim::all_gates();
+/// assert!(gates.contains(&stim::Gate::H));
+/// assert!(gates.contains(&stim::Gate::CX));
 /// ```
 #[must_use]
-pub fn all_gate_data() -> BTreeMap<String, GateData> {
-    stim_cxx::all_gate_names()
-        .into_iter()
-        .map(|name| {
-            let gate = GateData::new(&name).expect("canonical Stim gate name should resolve");
-            (name, gate)
-        })
-        .collect()
+pub fn all_gates() -> &'static [Gate] {
+    Gate::ALL
 }
 
 impl Clone for GateData {
     fn clone(&self) -> Self {
         Self {
+            gate: self.gate,
             inner: self.inner.clone(),
         }
+    }
+}
+
+impl From<Gate> for GateData {
+    fn from(value: Gate) -> Self {
+        GateData::new(value.name()).expect("defined Stim gate must resolve through stim-cxx")
     }
 }
 
@@ -590,7 +796,7 @@ impl Eq for GateData {}
 
 impl Display for GateData {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name())
+        f.write_str(self.name())
     }
 }
 
@@ -602,27 +808,32 @@ impl fmt::Debug for GateData {
 
 #[cfg(test)]
 mod tests {
-    use super::GateData;
-    use crate::{Complex32, Flow, all_gate_data};
+    use super::Gate;
+    use crate::{Complex32, Flow, all_gates};
 
     #[test]
     fn gate_data_new_matches_lookup() {
-        let gate = GateData::new("H").unwrap();
-        assert_eq!(gate.name(), "H");
-        assert!(gate.is_unitary());
+        assert_eq!(Gate::H.name(), "H");
+        assert!(Gate::H.is_unitary());
     }
 
     #[test]
     fn gate_data_debug_uses_lookup_form() {
-        let gate = GateData::new("cnot").expect("gate should parse");
+        let gate = Gate::new("cnot").expect("gate should parse");
 
-        assert_eq!(format!("{gate:?}"), "stim::GateData::new(\"CX\")");
+        assert_eq!(format!("{gate:?}"), "stim::Gate::CX");
+    }
+
+    #[test]
+    fn gate_type_is_the_primary_public_name() {
+        assert_eq!(Gate::H.name(), "H");
+        assert_eq!(format!("{:?}", Gate::H), "stim::Gate::H");
     }
 
     #[test]
     fn gate_data_resolves_aliases_to_canonical_entries() {
-        let canonical = GateData::new("CX").expect("canonical gate should resolve");
-        let alias = GateData::new("cnot").expect("alias should resolve");
+        let canonical = Gate::CX;
+        let alias = Gate::new("cnot").expect("alias should resolve");
 
         assert_eq!(canonical.name(), "CX");
         assert_eq!(alias.name(), "CX");
@@ -633,13 +844,13 @@ mod tests {
 
     #[test]
     fn gate_data_exposes_representative_metadata_flags() {
-        let h = GateData::new("H").expect("gate should exist");
-        let x_error = GateData::new("X_ERROR").expect("gate should exist");
-        let m = GateData::new("M").expect("gate should exist");
-        let r = GateData::new("R").expect("gate should exist");
-        let detector = GateData::new("DETECTOR").expect("gate should exist");
-        let cx = GateData::new("CX").expect("gate should exist");
-        let cz = GateData::new("CZ").expect("gate should exist");
+        let h = Gate::H;
+        let x_error = Gate::X_ERROR;
+        let m = Gate::M;
+        let r = Gate::R;
+        let detector = Gate::DETECTOR;
+        let cx = Gate::CX;
+        let cz = Gate::CZ;
 
         assert!(h.is_single_qubit_gate());
         assert!(h.is_unitary());
@@ -666,13 +877,13 @@ mod tests {
 
     #[test]
     fn gate_data_exposes_inverse_and_hadamard_relationships() {
-        let h = GateData::new("H").expect("gate should exist");
-        let s = GateData::new("S").expect("gate should exist");
-        let x_error = GateData::new("X_ERROR").expect("gate should exist");
-        let r = GateData::new("R").expect("gate should exist");
-        let x = GateData::new("X").expect("gate should exist");
-        let cx = GateData::new("CX").expect("gate should exist");
-        let ry = GateData::new("RY").expect("gate should exist");
+        let h = Gate::H;
+        let s = Gate::S;
+        let x_error = Gate::X_ERROR;
+        let r = Gate::R;
+        let x = Gate::X;
+        let cx = Gate::CX;
+        let ry = Gate::RY;
 
         assert_eq!(h.inverse().expect("H has inverse").name(), "H");
         assert_eq!(s.inverse().expect("S has inverse").name(), "S_DAG");
@@ -704,73 +915,67 @@ mod tests {
 
     #[test]
     fn gate_data_has_stable_identity_and_representation() {
-        let canonical = GateData::new("CX").expect("gate should exist");
-        let alias = GateData::new("cnot").expect("alias should resolve");
-        let cloned = alias.clone();
-        let other = GateData::new("H").expect("other gate should exist");
-        let mpp = GateData::new("mpp").expect("gate should exist");
+        let canonical = Gate::CX;
+        let alias = Gate::new("cnot").expect("alias should resolve");
+        let cloned = alias;
+        let other = Gate::H;
+        let mpp = Gate::new("mpp").expect("gate should exist");
 
         assert_eq!(canonical, alias);
         assert_eq!(cloned, canonical);
         assert_ne!(canonical, other);
 
         assert_eq!(canonical.to_string(), "CX");
-        assert_eq!(format!("{canonical:?}"), "stim::GateData::new(\"CX\")");
+        assert_eq!(format!("{canonical:?}"), "stim::Gate::CX");
         assert_eq!(alias.to_string(), "CX");
-        assert_eq!(format!("{alias:?}"), "stim::GateData::new(\"CX\")");
+        assert_eq!(format!("{alias:?}"), "stim::Gate::CX");
         assert_eq!(mpp.to_string(), "MPP");
-        assert_eq!(format!("{mpp:?}"), "stim::GateData::new(\"MPP\")");
+        assert_eq!(format!("{mpp:?}"), "stim::Gate::MPP");
     }
 
     #[test]
     fn gate_data_reports_unknown_gate_names() {
-        let error = GateData::new("definitely_not_a_gate").expect_err("unknown gate should fail");
+        let error = Gate::new("definitely_not_a_gate").expect_err("unknown gate should fail");
 
         assert!(error.message().contains("definitely_not_a_gate"));
     }
 
     #[test]
     fn all_gate_data_enumerates_canonical_inventory_with_roundtrip_invariants() {
-        let inventory = all_gate_data();
+        let inventory = all_gates();
 
-        assert!(inventory.contains_key("CX"));
-        assert!(inventory.contains_key("DETECTOR"));
-        assert!(inventory.contains_key("H"));
-        assert!(inventory.contains_key("MPP"));
-        assert!(!inventory.contains_key("CNOT"));
-        assert!(!inventory.contains_key("NOT_A_GATE"));
+        assert!(inventory.contains(&Gate::CX));
+        assert!(inventory.contains(&Gate::DETECTOR));
+        assert!(inventory.contains(&Gate::H));
+        assert!(inventory.contains(&Gate::MPP));
 
-        let cx = inventory.get("CX").expect("CX should be present");
-        assert_eq!(
-            cx,
-            &GateData::new("cnot").expect("alias lookup should resolve")
-        );
+        let cx = inventory
+            .iter()
+            .find(|gate| **gate == Gate::CX)
+            .expect("CX should be present");
+        assert_eq!(*cx, Gate::new("cnot").expect("alias lookup should resolve"));
         assert_eq!(cx.name(), "CX");
         assert!(cx.aliases().contains(&"CNOT".to_string()));
 
-        for (name, gate) in &inventory {
-            assert_eq!(gate.name(), *name);
+        for gate in inventory {
+            let name = gate.name();
             assert_eq!(
-                gate,
-                &GateData::new(name).expect("inventory key should roundtrip")
+                *gate,
+                Gate::new(name).expect("inventory key should roundtrip")
             );
-            assert_eq!(gate.to_string(), *name);
-            assert_eq!(
-                format!("{gate:?}"),
-                format!("stim::GateData::new({name:?})")
-            );
+            assert_eq!(gate.to_string(), name);
+            assert_eq!(format!("{gate:?}"), format!("stim::Gate::{name}"));
         }
     }
 
     #[test]
     fn gate_data_flows_match_documented_examples() {
         assert_eq!(
-            GateData::new("H").unwrap().flows().unwrap(),
+            Gate::H.flows().unwrap(),
             vec![Flow::new("X -> Z").unwrap(), Flow::new("Z -> X").unwrap(),]
         );
 
-        let iswap_flows: Vec<String> = GateData::new("ISWAP")
-            .unwrap()
+        let iswap_flows: Vec<String> = Gate::ISWAP
             .flows()
             .unwrap()
             .into_iter()
@@ -781,8 +986,7 @@ mod tests {
             vec!["X_ -> ZY", "Z_ -> _Z", "_X -> YZ", "_Z -> Z_"]
         );
 
-        let mxx_flows: Vec<String> = GateData::new("MXX")
-            .unwrap()
+        let mxx_flows: Vec<String> = Gate::MXX
             .flows()
             .unwrap()
             .into_iter()
@@ -796,25 +1000,25 @@ mod tests {
 
     #[test]
     fn gate_data_tableau_matches_documented_examples() {
-        assert!(GateData::new("M").unwrap().tableau().is_none());
+        assert!(Gate::M.tableau().is_none());
 
         assert_eq!(
-            format!("{:?}", GateData::new("H").unwrap().tableau().unwrap()),
+            format!("{:?}", Gate::H.tableau().unwrap()),
             "stim.Tableau.from_conjugated_generators(\n    xs=[\n        stim.PauliString(\"+Z\"),\n    ],\n    zs=[\n        stim.PauliString(\"+X\"),\n    ],\n)"
         );
 
         assert_eq!(
-            format!("{:?}", GateData::new("ISWAP").unwrap().tableau().unwrap()),
+            format!("{:?}", Gate::ISWAP.tableau().unwrap()),
             "stim.Tableau.from_conjugated_generators(\n    xs=[\n        stim.PauliString(\"+ZY\"),\n        stim.PauliString(\"+YZ\"),\n    ],\n    zs=[\n        stim.PauliString(\"+_Z\"),\n        stim.PauliString(\"+Z_\"),\n    ],\n)"
         );
     }
 
     #[test]
     fn gate_data_unitary_matrix_matches_documented_examples() {
-        assert!(GateData::new("M").unwrap().unitary_matrix().is_none());
+        assert!(Gate::M.unitary_matrix().is_none());
 
         assert_eq!(
-            GateData::new("X").unwrap().unitary_matrix().unwrap(),
+            Gate::X.unitary_matrix().unwrap(),
             ndarray::array![
                 [Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
                 [Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
@@ -822,7 +1026,7 @@ mod tests {
         );
 
         assert_eq!(
-            GateData::new("ISWAP").unwrap().unitary_matrix().unwrap(),
+            Gate::ISWAP.unitary_matrix().unwrap(),
             ndarray::array![
                 [
                     Complex32::new(1.0, 0.0),

@@ -17,7 +17,7 @@ use crate::common::slicing::{compute_slice_indices, normalize_index};
 use crate::{DemSampler, Result, SatProblemFormat, StimError};
 
 pub use dem_append_operation::DemAppendOperation;
-pub use dem_instruction::{DemInstruction, DemInstructionTarget};
+pub use dem_instruction::{DemInstruction, DemInstructionTarget, DemInstructionType};
 pub use dem_item::DemItem;
 pub use dem_repeat_block::DemRepeatBlock;
 pub use dem_target::{DemTarget, DemTargetWithCoords};
@@ -779,13 +779,16 @@ impl DetectorErrorModel {
     }
 
     /// Appends a new detector error model instruction built from its
-    /// constituent parts: instruction type name, parenthesized arguments,
+    /// constituent parts: instruction type, parenthesized arguments,
     /// targets, and an optional tag.
     ///
     /// This is the primary way to programmatically build up a detector error
-    /// model instruction by instruction. The `instruction_type` is a string
-    /// like `"error"`, `"shift_detectors"`, `"detector"`, or
-    /// `"logical_observable"`. The `parens_arguments` are the numeric values
+    /// model instruction by instruction. The `instruction_type` is a
+    /// [`DemInstructionType`] like [`Error`](crate::DemInstructionType::Error),
+    /// [`ShiftDetectors`](crate::DemInstructionType::ShiftDetectors),
+    /// [`Detector`](crate::DemInstructionType::Detector), or
+    /// [`LogicalObservable`](crate::DemInstructionType::LogicalObservable).
+    /// The `parens_arguments` are the numeric values
     /// inside the parentheses (e.g. the `0.25` in `error(0.25) D0`). The
     /// `targets` are the instruction targets (e.g. detector ids, observable
     /// ids, separators, or raw integers). The `tag` is an arbitrary string
@@ -793,18 +796,21 @@ impl DetectorErrorModel {
     ///
     /// # Errors
     ///
-    /// Returns an error if the instruction type is not recognised, or if the
-    /// combination of arguments and targets is invalid (e.g. an empty
-    /// instruction type string).
+    /// Returns an error if the combination of arguments and targets is invalid.
     ///
     /// # Examples
     ///
     /// ```
     /// let mut dem = stim::DetectorErrorModel::new();
-    /// dem.append("error", [0.125], [stim::DemTarget::relative_detector_id(1).unwrap()], "")
+    /// dem.append(
+    ///     stim::DemInstructionType::Error,
+    ///     [0.125],
+    ///     [stim::DemTarget::relative_detector_id(1).unwrap()],
+    ///     "",
+    /// )
     ///     .unwrap();
     /// dem.append(
-    ///     "shift_detectors",
+    ///     stim::DemInstructionType::ShiftDetectors,
     ///     [1.0, 2.0, 3.0],
     ///     [5u64],
     ///     "",
@@ -814,13 +820,14 @@ impl DetectorErrorModel {
     /// ```
     pub fn append(
         &mut self,
-        instruction_type: &str,
+        instruction_type: DemInstructionType,
         parens_arguments: impl IntoIterator<Item = f64>,
         targets: impl IntoIterator<Item = impl Into<DemInstructionTarget>>,
         tag: &str,
     ) -> Result<()> {
         let instruction = DemInstruction::new(instruction_type, parens_arguments, targets, tag)?;
-        self.append_dem_instruction(&instruction)
+        self.append_dem_instruction(&instruction);
+        Ok(())
     }
 
     /// Appends an existing [`DemInstruction`] to the end of this model.
@@ -828,14 +835,11 @@ impl DetectorErrorModel {
     /// The instruction is serialized and re-parsed, so the appended
     /// instruction is an independent copy.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the serialized instruction text is invalid (this
-    /// should not happen for well-formed `DemInstruction` values).
-    pub fn append_dem_instruction(&mut self, instruction: &DemInstruction) -> Result<()> {
+    pub fn append_dem_instruction(&mut self, instruction: &DemInstruction) {
         let raw_targets = instruction
-            .targets_copy()
-            .into_iter()
+            .targets()
+            .iter()
+            .copied()
             .map(|target| match target {
                 DemInstructionTarget::DemTarget(target) => target.raw_data(),
                 DemInstructionTarget::RelativeOffset(value) => value,
@@ -843,14 +847,13 @@ impl DetectorErrorModel {
             .collect::<Vec<_>>();
         self.inner
             .append_instruction(
-                instruction.r#type(),
-                &instruction.args_copy(),
+                instruction.r#type().name(),
+                instruction.args(),
                 &raw_targets,
                 instruction.tag(),
             )
-            .map_err(StimError::from)?;
+            .expect("validated DemInstruction should append without native validation failure");
         self.invalidate_item_cache();
-        Ok(())
     }
 
     /// Appends an existing [`DemRepeatBlock`] to the end of this model.
@@ -858,15 +861,11 @@ impl DetectorErrorModel {
     /// The repeat block is serialized and re-parsed, so the appended block is
     /// an independent copy.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the serialized repeat block text is invalid.
-    pub fn append_dem_repeat_block(&mut self, repeat_block: &DemRepeatBlock) -> Result<()> {
+    pub fn append_dem_repeat_block(&mut self, repeat_block: &DemRepeatBlock) {
         self.inner
             .append_repeat_block(repeat_block.repeat_count(), &repeat_block.body_copy().inner)
-            .map_err(StimError::from)?;
+            .expect("validated DemRepeatBlock should append without native validation failure");
         self.invalidate_item_cache();
-        Ok(())
     }
 
     /// Appends all instructions from another [`DetectorErrorModel`] to the end
@@ -876,16 +875,12 @@ impl DetectorErrorModel {
     /// serialized and re-parsed, so mutations to the source after appending
     /// have no effect on this model.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-parsing the combined model text fails.
-    pub fn append_detector_error_model(&mut self, model: &DetectorErrorModel) -> Result<()> {
+    pub fn append_detector_error_model(&mut self, model: &DetectorErrorModel) {
         if model.is_empty() {
-            return Ok(());
+            return;
         }
         self.inner.add_assign(&model.inner);
         self.invalidate_item_cache();
-        Ok(())
     }
 
     /// Appends a detector-error-model operation of any supported owned type:
@@ -900,19 +895,15 @@ impl DetectorErrorModel {
     /// references and owned values of the underlying types via `Into`
     /// conversions.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the serialized text of the operation is invalid.
-    ///
     /// # Examples
     ///
     /// ```
     /// let mut model = stim::DetectorErrorModel::new();
     /// let instruction: stim::DemInstruction = "error(0.125) D1".parse().unwrap();
-    /// model.append_operation(stim::DemAppendOperation::Instruction(instruction)).unwrap();
+    /// model.append_operation(stim::DemAppendOperation::Instruction(instruction));
     /// assert_eq!(model.to_string(), "error(0.125) D1");
     /// ```
-    pub fn append_operation(&mut self, operation: impl Into<DemAppendOperation>) -> Result<()> {
+    pub fn append_operation(&mut self, operation: impl Into<DemAppendOperation>) {
         match operation.into() {
             DemAppendOperation::Instruction(instruction) => {
                 self.append_dem_instruction(&instruction)
@@ -1047,8 +1038,14 @@ impl DetectorErrorModel {
                     .collect()
             };
             DemItem::Instruction(
-                DemInstruction::new(item.instruction_type, item.args, targets, item.tag)
-                    .expect("stim-cxx instruction data should be valid"),
+                DemInstruction::new(
+                    DemInstructionType::from_name(&item.instruction_type)
+                        .expect("stim-cxx instruction type should be recognized"),
+                    item.args,
+                    targets,
+                    item.tag,
+                )
+                .expect("stim-cxx instruction data should be valid"),
             )
         }
     }
@@ -1462,7 +1459,7 @@ mod tests {
             model.get(0).unwrap(),
             DemItem::Instruction(
                 DemInstruction::new(
-                    "error",
+                    DemInstructionType::Error,
                     [0.125],
                     [DemTarget::relative_detector_id(0).unwrap()],
                     ""
@@ -1486,7 +1483,7 @@ mod tests {
             model.get(-1).unwrap(),
             DemItem::Instruction(
                 DemInstruction::new(
-                    "detector",
+                    DemInstructionType::Detector,
                     [],
                     [DemTarget::relative_detector_id(5).unwrap()],
                     ""
@@ -1534,7 +1531,7 @@ mod tests {
         let expected = vec![
             DemItem::Instruction(
                 DemInstruction::new(
-                    "error",
+                    DemInstructionType::Error,
                     [0.125],
                     [DemTarget::relative_detector_id(0).unwrap()],
                     "",
@@ -1550,7 +1547,7 @@ mod tests {
             ),
             DemItem::Instruction(
                 DemInstruction::new(
-                    "logical_observable",
+                    DemInstructionType::LogicalObservable,
                     [],
                     [DemTarget::logical_observable_id(0).unwrap()],
                     "",
@@ -1580,7 +1577,7 @@ mod tests {
             model[0],
             DemItem::Instruction(
                 DemInstruction::new(
-                    "error",
+                    DemInstructionType::Error,
                     [0.125],
                     [DemTarget::relative_detector_id(0).unwrap()],
                     "",
@@ -1607,7 +1604,7 @@ mod tests {
             model[0],
             DemItem::Instruction(
                 DemInstruction::new(
-                    "error",
+                    DemInstructionType::Error,
                     [0.125],
                     [DemTarget::relative_detector_id(0).unwrap()],
                     "",
@@ -1625,7 +1622,7 @@ mod tests {
             model[1],
             DemItem::Instruction(
                 DemInstruction::new(
-                    "logical_observable",
+                    DemInstructionType::LogicalObservable,
                     [],
                     [DemTarget::logical_observable_id(0).unwrap()],
                     "",
@@ -1671,7 +1668,7 @@ mod tests {
         let mut model = DetectorErrorModel::new();
         model
             .append(
-                "error",
+                DemInstructionType::Error,
                 [0.125],
                 [DemTarget::relative_detector_id(1).unwrap()],
                 "",
@@ -1679,7 +1676,7 @@ mod tests {
             .unwrap();
         model
             .append(
-                "error",
+                DemInstructionType::Error,
                 [0.25],
                 [
                     DemTarget::relative_detector_id(1).unwrap(),
@@ -1691,7 +1688,12 @@ mod tests {
             )
             .unwrap();
         model
-            .append("shift_detectors", [1.0, 2.0, 3.0], [5u64], "")
+            .append(
+                DemInstructionType::ShiftDetectors,
+                [1.0, 2.0, 3.0],
+                [5u64],
+                "",
+            )
             .unwrap();
 
         assert_eq!(
@@ -1711,19 +1713,24 @@ mod tests {
         let mut model = DetectorErrorModel::new();
         model
             .append(
-                "error",
+                DemInstructionType::Error,
                 [0.125],
                 [DemTarget::relative_detector_id(1).unwrap()],
                 "",
             )
             .unwrap();
         model
-            .append("shift_detectors", [1.0, 2.0, 3.0], [5u64], "")
+            .append(
+                DemInstructionType::ShiftDetectors,
+                [1.0, 2.0, 3.0],
+                [5u64],
+                "",
+            )
             .unwrap();
 
         let repeated = model.clone() * 3;
         let first = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [DemTarget::relative_detector_id(1).unwrap()],
             "",
@@ -1731,9 +1738,9 @@ mod tests {
         .unwrap();
         let repeat_block = DemRepeatBlock::new(3, &model).unwrap();
 
-        model.append_dem_repeat_block(&repeat_block).unwrap();
-        model.append_dem_instruction(&first).unwrap();
-        model.append_detector_error_model(&repeated).unwrap();
+        model.append_dem_repeat_block(&repeat_block);
+        model.append_dem_instruction(&first);
+        model.append_detector_error_model(&repeated);
 
         assert_eq!(
             model,
@@ -1757,7 +1764,8 @@ mod tests {
 
     #[test]
     fn dem_instruction_append_path_supports_raw_numeric_targets() {
-        let instruction = DemInstruction::new("shift_detectors", [1.0], [5u64], "").unwrap();
+        let instruction =
+            DemInstruction::new(DemInstructionType::ShiftDetectors, [1.0], [5u64], "").unwrap();
         assert_eq!(
             instruction.targets_copy(),
             vec![DemInstructionTarget::from(5u64)]
@@ -1767,9 +1775,7 @@ mod tests {
     #[test]
     fn detector_error_model_append_empty_model_is_noop_and_invalid_instruction_fails() {
         let mut model = DetectorErrorModel::from_str("error(0.125) D1").unwrap();
-        model
-            .append_detector_error_model(&DetectorErrorModel::new())
-            .unwrap();
+        model.append_detector_error_model(&DetectorErrorModel::new());
         assert_eq!(
             model,
             DetectorErrorModel::from_str("error(0.125) D1").unwrap()
@@ -1777,7 +1783,12 @@ mod tests {
 
         assert!(
             model
-                .append("", [], Vec::<DemInstructionTarget>::new(), "")
+                .append(
+                    DemInstructionType::Error,
+                    [],
+                    Vec::<DemInstructionTarget>::new(),
+                    ""
+                )
                 .is_err()
         );
     }
@@ -1786,12 +1797,8 @@ mod tests {
     fn detector_error_model_append_operation_accepts_instruction_values() {
         let mut model = DetectorErrorModel::new();
 
-        model
-            .append_operation(DemInstruction::from_str("error(0.125) D1").unwrap())
-            .unwrap();
-        model
-            .append_operation(DemInstruction::from_str("shift_detectors(1,2,3) 5").unwrap())
-            .unwrap();
+        model.append_operation(DemInstruction::from_str("error(0.125) D1").unwrap());
+        model.append_operation(DemInstruction::from_str("shift_detectors(1,2,3) 5").unwrap());
 
         assert_eq!(
             model,
@@ -1808,7 +1815,7 @@ mod tests {
         )
         .unwrap();
 
-        model.append_operation(repeat).unwrap();
+        model.append_operation(repeat);
 
         assert_eq!(
             model,
@@ -1821,12 +1828,10 @@ mod tests {
     fn detector_error_model_append_operation_accepts_models_and_ignores_empty_input() {
         let mut model = DetectorErrorModel::from_str("error(0.125) D1").unwrap();
 
-        model
-            .append_operation(
-                DetectorErrorModel::from_str("shift_detectors 1\nlogical_observable L0").unwrap(),
-            )
-            .unwrap();
-        model.append_operation(DetectorErrorModel::new()).unwrap();
+        model.append_operation(
+            DetectorErrorModel::from_str("shift_detectors 1\nlogical_observable L0").unwrap(),
+        );
+        model.append_operation(DetectorErrorModel::new());
 
         assert_eq!(
             model,
@@ -1843,8 +1848,8 @@ mod tests {
         let instruction = DemInstruction::from_str("error(0.125) D1").unwrap();
         let appended = DetectorErrorModel::from_str("shift_detectors 1").unwrap();
 
-        model.append_operation(&instruction).unwrap();
-        model.append_operation(&appended).unwrap();
+        model.append_operation(&instruction);
+        model.append_operation(&appended);
 
         assert_eq!(
             instruction,

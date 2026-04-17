@@ -899,12 +899,12 @@ impl TableauSimulator {
         args: &[f64],
     ) -> crate::Result<()> {
         let mut circuit = crate::Circuit::new();
-        let gate = crate::GateData::new(gate_name)?;
+        let gate = crate::Gate::new(gate_name)?;
         let raw_targets: Vec<u32> = targets
             .iter()
             .map(|&target| u32::try_from(target).expect("qubit index should fit into u32"))
             .collect();
-        circuit.append(&gate, &raw_targets, args)?;
+        circuit.append(gate, &raw_targets, args)?;
         self.do_circuit(&circuit);
         Ok(())
     }
@@ -2866,7 +2866,7 @@ mod tests {
         assert_eq!(pauli_sim.measure_many(&[0]), vec![true]);
 
         let mut instruction_sim = TableauSimulator::new();
-        let instruction = CircuitInstruction::from_stim_program_text("H 0").unwrap();
+        let instruction = CircuitInstruction::parse("H 0").unwrap();
         instruction_sim.r#do(&instruction).unwrap();
         assert_eq!(
             instruction_sim.peek_bloch(0),
@@ -3665,7 +3665,7 @@ mod tests {
                 .contains("bit-packed measurement flip rows must all have width")
         );
 
-        let instruction = CircuitInstruction::from_stim_program_text("M 0").unwrap();
+        let instruction = CircuitInstruction::parse("M 0").unwrap();
         sim.r#do(&instruction).unwrap();
         let repeat_body: Circuit = "M 1".parse().unwrap();
         let repeat_block = CircuitRepeatBlock::new(2, &repeat_body, "").unwrap();

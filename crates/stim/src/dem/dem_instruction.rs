@@ -3,6 +3,48 @@ use std::str::FromStr;
 
 use crate::{DemTarget, DetectorErrorModel, Result, StimError};
 
+/// A detector error model instruction kind.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum DemInstructionType {
+    Error,
+    ShiftDetectors,
+    Detector,
+    LogicalObservable,
+    Repeat,
+}
+
+impl DemInstructionType {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::ShiftDetectors => "shift_detectors",
+            Self::Detector => "detector",
+            Self::LogicalObservable => "logical_observable",
+            Self::Repeat => "repeat",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Result<Self> {
+        match name {
+            "error" => Ok(Self::Error),
+            "shift_detectors" => Ok(Self::ShiftDetectors),
+            "detector" => Ok(Self::Detector),
+            "logical_observable" => Ok(Self::LogicalObservable),
+            "repeat" => Ok(Self::Repeat),
+            _ => Err(StimError::new(format!(
+                "unrecognized DEM instruction type: {name}"
+            ))),
+        }
+    }
+}
+
+impl Display for DemInstructionType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// A target used inside a detector error model (DEM) instruction.
 ///
 /// DEM instructions refer to detectors, logical observables, separators,
@@ -100,10 +142,7 @@ impl fmt::Debug for DemInstructionTarget {
 /// error-propagation structure of a quantum error-correction circuit.
 /// Each instruction in a DEM has four components:
 ///
-/// - A **type** string identifying the instruction kind. The most common
-///   types are `"error"` (a fault mechanism), `"detector"` (declares a
-///   detector), `"logical_observable"` (declares an observable), and
-///   `"shift_detectors"` (offsets detector indices).
+/// - A **type** ([`DemInstructionType`]) identifying the instruction kind.
 /// - An optional **tag** -- the `[...]` annotation after the type name,
 ///   e.g. `error[my-tag](0.125) D0`. Tags are arbitrary strings that
 ///   Stim propagates but otherwise ignores.
@@ -124,13 +163,13 @@ impl fmt::Debug for DemInstructionTarget {
 /// ```
 /// // Parse from DEM text.
 /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid DEM line");
-/// assert_eq!(inst.r#type(), "error");
+/// assert_eq!(inst.r#type(), stim::DemInstructionType::Error);
 /// assert_eq!(inst.args_copy(), vec![0.125]);
 /// assert_eq!(inst.targets_copy().len(), 2);
 ///
 /// // Construct programmatically.
 /// let inst = stim::DemInstruction::new(
-///     "error",
+///     stim::DemInstructionType::Error,
 ///     [0.125],
 ///     [
 ///         stim::DemTarget::relative_detector_id(5).expect("valid id"),
@@ -142,7 +181,7 @@ impl fmt::Debug for DemInstructionTarget {
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct DemInstruction {
-    instruction_type: String,
+    instruction_type: DemInstructionType,
     tag: String,
     args: Vec<f64>,
     targets: Vec<DemInstructionTarget>,
@@ -156,14 +195,13 @@ impl DemInstruction {
     ///
     /// # Errors
     ///
-    /// Returns an error if `instruction_type` is empty or the assembled
-    /// instruction text is not valid DEM.
+    /// Returns an error if the assembled instruction text is not valid DEM.
     ///
     /// # Examples
     ///
     /// ```
     /// let inst = stim::DemInstruction::new(
-    ///     "error",
+    ///     stim::DemInstructionType::Error,
     ///     [0.125],
     ///     [
     ///         stim::DemTarget::relative_detector_id(5).expect("valid id"),
@@ -174,13 +212,13 @@ impl DemInstruction {
     /// assert_eq!(inst.to_string(), "error(0.125) D5 L2");
     /// ```
     pub fn new(
-        instruction_type: impl Into<String>,
+        instruction_type: DemInstructionType,
         args: impl IntoIterator<Item = f64>,
         targets: impl IntoIterator<Item = impl Into<DemInstructionTarget>>,
         tag: impl Into<String>,
     ) -> Result<Self> {
         let instruction = Self {
-            instruction_type: instruction_type.into(),
+            instruction_type,
             tag: tag.into(),
             args: args.into_iter().collect(),
             targets: targets.into_iter().map(Into::into).collect(),
@@ -204,7 +242,7 @@ impl DemInstruction {
     /// ```
     /// let inst = stim::DemInstruction::from_dem_text("error(0.125) D5 L6 ^ D4  # comment")
     ///     .expect("valid DEM text");
-    /// assert_eq!(inst.r#type(), "error");
+    /// assert_eq!(inst.r#type(), stim::DemInstructionType::Error);
     /// assert_eq!(inst.to_string(), "error(0.125) D5 L6 ^ D4");
     /// ```
     pub fn from_dem_text(text: &str) -> Result<Self> {
@@ -231,16 +269,15 @@ impl DemInstruction {
         Self::new(instruction_type, args, targets, tag)
     }
 
-    /// Returns the instruction type name (e.g. `"error"`, `"detector"`,
-    /// `"logical_observable"`, `"shift_detectors"`).
+    /// Returns the instruction type.
     ///
     /// This is a duck-typing convenience method. It exists so that code
     /// that doesn't know whether it has a `DemInstruction` or a
     /// [`DemRepeatBlock`](crate::DemRepeatBlock) can check the type
     /// field without doing a pattern match first.
     #[must_use]
-    pub fn r#type(&self) -> &str {
-        &self.instruction_type
+    pub fn r#type(&self) -> DemInstructionType {
+        self.instruction_type
     }
 
     /// Returns the instruction's tag, or an empty string if untagged.
@@ -285,6 +322,11 @@ impl DemInstruction {
         self.args.clone()
     }
 
+    #[must_use]
+    pub fn args(&self) -> &[f64] {
+        &self.args
+    }
+
     /// Returns a copy of the instruction's target list.
     ///
     /// The result is a freshly allocated copy; editing it will not
@@ -299,6 +341,11 @@ impl DemInstruction {
     #[must_use]
     pub fn targets_copy(&self) -> Vec<DemInstructionTarget> {
         self.targets.clone()
+    }
+
+    #[must_use]
+    pub fn targets(&self) -> &[DemInstructionTarget] {
+        &self.targets
     }
 
     /// Splits the target list into groups delimited by separator targets
@@ -341,9 +388,6 @@ impl DemInstruction {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.instruction_type.trim().is_empty() {
-            return Err(StimError::new("instruction type must not be empty"));
-        }
         let _ = DetectorErrorModel::from_str(&self.to_string())?;
         Ok(())
     }
@@ -352,7 +396,8 @@ impl DemInstruction {
         write!(
             f,
             "stim::DemInstruction({:?}, {:?}",
-            self.instruction_type, self.args
+            self.instruction_type.name(),
+            self.args
         )?;
         f.write_str(", [")?;
         for (index, target) in self.targets.iter().enumerate() {
@@ -400,7 +445,7 @@ impl std::hash::Hash for DemInstruction {
 
 impl Display for DemInstruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.instruction_type)?;
+        f.write_str(self.instruction_type.name())?;
         if !self.tag.is_empty() {
             write!(f, "[{}]", self.tag)?;
         }
@@ -435,7 +480,7 @@ impl FromStr for DemInstruction {
     }
 }
 
-fn parse_head(head: &str) -> Result<(String, String, Vec<f64>)> {
+fn parse_head(head: &str) -> Result<(DemInstructionType, String, Vec<f64>)> {
     let name_end = head.find(['[', '(']).unwrap_or(head.len());
     let instruction_type = &head[..name_end];
     let mut rest = &head[name_end..];
@@ -467,7 +512,7 @@ fn parse_head(head: &str) -> Result<(String, String, Vec<f64>)> {
         }
     }
 
-    Ok((instruction_type.to_string(), tag, args))
+    Ok((DemInstructionType::from_name(instruction_type)?, tag, args))
 }
 
 fn parse_targets(text: &str) -> Result<Vec<DemInstructionTarget>> {
@@ -526,7 +571,7 @@ mod tests {
     #[test]
     fn constructor_and_accessors_preserve_values() {
         let instruction = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [
                 DemTarget::relative_detector_id(5).unwrap(),
@@ -536,7 +581,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(instruction.r#type(), "error");
+        assert_eq!(instruction.r#type(), DemInstructionType::Error);
         assert_eq!(instruction.tag(), "test-tag");
         assert_eq!(instruction.args_copy(), vec![0.125]);
         assert_eq!(
@@ -553,7 +598,7 @@ mod tests {
     fn parsed_line_roundtrips_and_strips_comments() {
         let instruction = DemInstruction::from_str("error(0.125) D5 L6 ^ D4  # comment").unwrap();
 
-        assert_eq!(instruction.r#type(), "error");
+        assert_eq!(instruction.r#type(), DemInstructionType::Error);
         assert_eq!(instruction.tag(), "");
         assert_eq!(instruction.args_copy(), vec![0.125]);
         assert_eq!(
@@ -571,21 +616,21 @@ mod tests {
     #[test]
     fn equality_hash_and_order_follow_all_fields() {
         let first = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [DemTarget::relative_detector_id(2).unwrap()],
             "",
         )
         .unwrap();
         let same = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [DemTarget::relative_detector_id(2).unwrap()],
             "",
         )
         .unwrap();
         let different = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [DemTarget::relative_detector_id(3).unwrap()],
             "",
@@ -613,7 +658,7 @@ mod tests {
     #[test]
     fn target_groups_split_on_separators_and_preserve_empty_groups() {
         let split = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.01],
             [
                 DemTarget::relative_detector_id(0).unwrap(),
@@ -625,7 +670,7 @@ mod tests {
         )
         .unwrap();
         let single = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.01],
             [
                 DemTarget::relative_detector_id(0).unwrap(),
@@ -634,8 +679,13 @@ mod tests {
             "",
         )
         .unwrap();
-        let empty =
-            DemInstruction::new("error", [0.01], Vec::<DemInstructionTarget>::new(), "").unwrap();
+        let empty = DemInstruction::new(
+            DemInstructionType::Error,
+            [0.01],
+            Vec::<DemInstructionTarget>::new(),
+            "",
+        )
+        .unwrap();
 
         assert_eq!(
             split.target_groups(),
@@ -661,8 +711,13 @@ mod tests {
 
     #[test]
     fn raw_integer_targets_are_supported_for_shift_detectors() {
-        let instruction =
-            DemInstruction::new("shift_detectors", [1.0, 2.0, 3.0], [5u64], "").unwrap();
+        let instruction = DemInstruction::new(
+            DemInstructionType::ShiftDetectors,
+            [1.0, 2.0, 3.0],
+            [5u64],
+            "",
+        )
+        .unwrap();
 
         assert_eq!(
             instruction.targets_copy(),
@@ -678,7 +733,7 @@ mod tests {
     #[test]
     fn debug_matches_binding_conventions() {
         let instruction = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.125],
             [DemTarget::relative_detector_id(5).unwrap()],
             "test-tag",
@@ -690,7 +745,8 @@ mod tests {
             "stim::DemInstruction(\"error\", [0.125], [stim::DemTarget('D5')], tag=\"test-tag\")"
         );
 
-        let shifted = DemInstruction::new("shift_detectors", [1.0], [5u64], "").unwrap();
+        let shifted =
+            DemInstruction::new(DemInstructionType::ShiftDetectors, [1.0], [5u64], "").unwrap();
         assert_eq!(
             format!("{shifted:?}"),
             "stim::DemInstruction(\"shift_detectors\", [1.0], [5])"
@@ -717,7 +773,8 @@ mod tests {
         assert_eq!(DemInstructionTarget::from(5u32).to_string(), "5");
         assert_eq!(DemInstructionTarget::from(6usize).to_string(), "6");
 
-        let shifted = DemInstruction::new("shift_detectors", [1.0], [5u64], "").unwrap();
+        let shifted =
+            DemInstruction::new(DemInstructionType::ShiftDetectors, [1.0], [5u64], "").unwrap();
         assert!(format!("{shifted:?}").contains("[5]"));
 
         let unterminated_tag = parse_head("error[tag").unwrap_err();
@@ -738,14 +795,14 @@ mod tests {
         );
 
         let low = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.1],
             [DemTarget::relative_detector_id(0).unwrap()],
             "",
         )
         .unwrap();
         let high = DemInstruction::new(
-            "error",
+            DemInstructionType::Error,
             [0.2],
             [DemTarget::relative_detector_id(0).unwrap()],
             "",
