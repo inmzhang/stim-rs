@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/stim.svg)](https://crates.io/crates/stim)
 [![docs.rs](https://docs.rs/stim/badge.svg)](https://docs.rs/stim)
 [![CI](https://github.com/inmzhang/stim-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/inmzhang/stim-rs/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/inmzhang/stim-rs/graph/badge.svg?token=8OXDnCQ8fx)](https://codecov.io/gh/inmzhang/stim-rs)
+[![codecov](https://codecov.io/gh/inmzhang/stim-rs/branch/main/graph/badge.svg?token=8OXDnCQ8fx)](https://codecov.io/gh/inmzhang/stim-rs)
 
 `stim-rs` provides Rust bindings for [Stim](https://github.com/quantumlib/Stim), a high-performance stabilizer circuit simulator and analyzer widely used in quantum error-correction workflows.
 
