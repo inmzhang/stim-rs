@@ -295,7 +295,7 @@ impl NoiseModel for NoiseModelConfig {
                 continue;
             }
 
-            let instruction = CircuitInstruction::parse(line)?;
+            let instruction = line.parse::<CircuitInstruction>()?;
 
             for split_instruction in split_instruction_for_noise(&instruction)? {
                 let gate = split_instruction.gate();
@@ -632,7 +632,7 @@ impl NoiseModelConfig {
         }
 
         let rewritten = CircuitInstruction::new(
-            instruction.name(),
+            instruction.gate(),
             instruction.targets().iter().copied(),
             gate_args,
             instruction.tag(),
@@ -737,7 +737,7 @@ fn split_instruction_for_noise(
                 targets.push(*target);
             }
             CircuitInstruction::new(
-                "MPP",
+                crate::Gate::MPP,
                 targets,
                 instruction.gate_args().iter().copied(),
                 instruction.tag(),
@@ -954,7 +954,7 @@ TICK"
             .unwrap();
         assert_eq!(noisy.to_string(), "M 0\nCX rec[-1] 1");
         assert!(occurs_in_classical_control_system(
-            &crate::CircuitInstruction::parse("CX rec[-1] 1").unwrap()
+            &"CX rec[-1] 1".parse::<crate::CircuitInstruction>().unwrap()
         ));
     }
 
@@ -977,7 +977,9 @@ TICK"
                 .contains("cannot inject result flips into already-parameterized instruction")
         );
 
-        let mpp = crate::CircuitInstruction::parse("MPP X0*X1 Z2*Z3").unwrap();
+        let mpp = "MPP X0*X1 Z2*Z3"
+            .parse::<crate::CircuitInstruction>()
+            .unwrap();
         let split = split_instruction_for_noise(&mpp).unwrap();
         assert_eq!(split.len(), 2);
         assert_eq!(
@@ -996,7 +998,7 @@ TICK"
         );
 
         assert_eq!(
-            split_instruction_for_noise(&crate::CircuitInstruction::parse("MPP X0*X1").unwrap())
+            split_instruction_for_noise(&"MPP X0*X1".parse::<crate::CircuitInstruction>().unwrap())
                 .unwrap()
                 .len(),
             1
@@ -1006,12 +1008,12 @@ TICK"
         assert!(annotation_line_name("H 0").is_none());
 
         let mut with_tag = Circuit::new();
-        let tagged = crate::CircuitInstruction::new("H", [0u32], [], "tag").unwrap();
+        let tagged = crate::CircuitInstruction::new(crate::Gate::H, [0u32], [], "tag").unwrap();
         append_instruction_verbatim(&mut with_tag, &tagged).unwrap();
         assert_eq!(with_tag.to_string(), "H[tag] 0");
 
         let mut without_tag = Circuit::new();
-        let plain = crate::CircuitInstruction::new("H", [1u32], [], "").unwrap();
+        let plain = crate::CircuitInstruction::new(crate::Gate::H, [1u32], [], "").unwrap();
         append_instruction_verbatim(&mut without_tag, &plain).unwrap();
         assert_eq!(without_tag.to_string(), "H 1");
 

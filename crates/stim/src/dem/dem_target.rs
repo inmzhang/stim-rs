@@ -43,7 +43,7 @@ const SEPARATOR_SYGIL: u64 = u64::MAX;
 /// - [`DemTarget::relative_detector_id`]
 /// - [`DemTarget::logical_observable_id`]
 /// - [`DemTarget::separator`]
-/// - [`DemTarget::from_text`] (parses `"D5"`, `"L2"`, `"^"`)
+/// - [`FromStr`](std::str::FromStr) / `"D5".parse::<DemTarget>()`
 ///
 /// # Classification
 ///
@@ -137,9 +137,6 @@ impl DemTarget {
     /// The `<id>` portion must be a valid non-negative integer that fits within
     /// the range allowed for that target kind.
     ///
-    /// This method is also available via the [`FromStr`] trait, so you can use
-    /// `"D7".parse::<DemTarget>()` interchangeably with `DemTarget::from_text("D7")`.
-    ///
     /// # Errors
     ///
     /// Returns an error if `text` does not match a known target format or
@@ -148,17 +145,17 @@ impl DemTarget {
     /// # Examples
     ///
     /// ```
-    /// let det = stim::DemTarget::from_text("D7").expect("valid detector");
+    /// let det: stim::DemTarget = "D7".parse().expect("valid detector");
     /// assert!(det.is_relative_detector_id());
     /// assert_eq!(det.val().expect("has value"), 7);
     ///
-    /// let obs = stim::DemTarget::from_text("L5").expect("valid observable");
+    /// let obs: stim::DemTarget = "L5".parse().expect("valid observable");
     /// assert!(obs.is_logical_observable_id());
     ///
-    /// let sep = stim::DemTarget::from_text("^").expect("valid separator");
+    /// let sep: stim::DemTarget = "^".parse().expect("valid separator");
     /// assert!(sep.is_separator());
     /// ```
-    pub fn from_text(text: &str) -> Result<Self> {
+    fn parse_text(text: &str) -> Result<Self> {
         if text == "^" {
             return Ok(Self::separator());
         }
@@ -407,7 +404,7 @@ impl FromStr for DemTarget {
     type Err = StimError;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::from_text(s)
+        Self::parse_text(s)
     }
 }
 
@@ -801,7 +798,8 @@ mod tests {
         for text in ["D0", "D17", "L0", "L99", "^"] {
             assert_eq!(
                 DemTarget::from_str(text).expect("FromStr should parse representative target"),
-                DemTarget::from_text(text).expect("from_text should parse representative target")
+                text.parse::<DemTarget>()
+                    .expect("from_text should parse representative target")
             );
         }
     }
@@ -809,7 +807,9 @@ mod tests {
     #[test]
     fn dem_target_rejects_malformed_inputs() {
         for text in ["", "5", "d3", "l2", "^^", "rec[-1]", "*"] {
-            let error = DemTarget::from_text(text).expect_err("malformed target should fail");
+            let error = text
+                .parse::<DemTarget>()
+                .expect_err("malformed target should fail");
             assert!(
                 error
                     .message()
@@ -843,17 +843,20 @@ mod tests {
         let max_observable = 0xFFFF_FFFFu64;
 
         assert_eq!(
-            DemTarget::from_text(&format!("D{max_detector}"))
+            format!("D{max_detector}")
+                .parse::<DemTarget>()
                 .expect("largest supported detector id should parse"),
             DemTarget::relative_detector_id(max_detector).expect("helper should build")
         );
         assert_eq!(
-            DemTarget::from_text(&format!("L{max_observable}"))
+            format!("L{max_observable}")
+                .parse::<DemTarget>()
                 .expect("largest supported observable id should parse"),
             DemTarget::logical_observable_id(max_observable).expect("helper should build")
         );
 
-        let detector_error = DemTarget::from_text(&format!("D{}", max_detector + 1))
+        let detector_error = format!("D{}", max_detector + 1)
+            .parse::<DemTarget>()
             .expect_err("too-large detector id should fail");
         assert!(
             detector_error
@@ -863,7 +866,8 @@ mod tests {
             detector_error.message()
         );
 
-        let observable_error = DemTarget::from_text(&format!("L{}", max_observable + 1))
+        let observable_error = format!("L{}", max_observable + 1)
+            .parse::<DemTarget>()
             .expect_err("too-large observable id should fail");
         assert!(
             observable_error.message().contains("id > 0xFFFFFFFF"),

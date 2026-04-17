@@ -54,13 +54,13 @@ impl<'a> From<crate::Gate> for CliffordGateValue<'a> {
 /// use stim::CliffordString;
 ///
 /// // Parse from comma-separated gate names.
-/// let c = CliffordString::from_text("H,S,C_XYZ").unwrap();
+/// let c = "H,S,C_XYZ".parse::<CliffordString>().unwrap();
 /// assert_eq!(c.len(), 3);
 /// assert_eq!(c.get(0).unwrap().name(), "H");
 ///
 /// // Pairwise composition: H*H = I, S*H = C_ZYX, C_XYZ*H = SQRT_X_DAG.
-/// let composed = CliffordString::from_text("H,S,C_XYZ").unwrap()
-///     * CliffordString::from_text("H,H,H").unwrap();
+/// let composed = "H,S,C_XYZ".parse::<CliffordString>().unwrap()
+///     * "H,H,H".parse::<CliffordString>().unwrap();
 /// assert_eq!(composed.to_string(), "I,C_ZYX,SQRT_X_DAG");
 /// ```
 #[derive(Clone, PartialEq, Eq)]
@@ -106,15 +106,15 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let s = stim::CliffordString::from_text("X,Y,Z,H,SQRT_X,C_XYZ").unwrap();
+    /// let s: stim::CliffordString = "X,Y,Z,H,SQRT_X,C_XYZ".parse().unwrap();
     /// assert_eq!(s.get(2).unwrap().name(), "Z");
     /// assert_eq!(s.get(-1).unwrap().name(), "C_XYZ");
     ///
     /// // Whitespace is trimmed.
-    /// let s = stim::CliffordString::from_text("  H  ,  S  ").unwrap();
+    /// let s: stim::CliffordString = "  H  ,  S  ".parse().unwrap();
     /// assert_eq!(s.to_string(), "H,S");
     /// ```
-    pub fn from_text(text: &str) -> crate::Result<Self> {
+    fn parse_text(text: &str) -> crate::Result<Self> {
         stim_cxx::CliffordString::from_text(text)
             .map(|inner| Self { inner })
             .map_err(crate::StimError::from)
@@ -129,7 +129,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("-XYZ").unwrap();
+    /// let p = "-XYZ".parse::<stim::PauliString>().unwrap();
     /// let c = stim::CliffordString::from_pauli_string(&p);
     /// // The sign is discarded.
     /// assert_eq!(c.to_string(), "X,Y,Z");
@@ -225,7 +225,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let c = stim::CliffordString::from_text("H,S,I").unwrap();
+    /// let c = "H,S,I".parse::<stim::CliffordString>().unwrap();
     /// assert_eq!(c.num_qubits(), 3);
     /// ```
     #[must_use]
@@ -240,7 +240,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let c = stim::CliffordString::from_text("I,X,Y,Z,H").unwrap();
+    /// let c = "I,X,Y,Z,H".parse::<stim::CliffordString>().unwrap();
     /// assert_eq!(c.len(), 5);
     /// ```
     #[must_use]
@@ -274,7 +274,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let c = stim::CliffordString::from_text("I,X,H").unwrap();
+    /// let c = "I,X,H".parse::<stim::CliffordString>().unwrap();
     /// assert_eq!(c.get(1).unwrap().name(), "X");
     /// assert_eq!(c.get(-1).unwrap().name(), "H");
     /// ```
@@ -299,7 +299,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let mut c = stim::CliffordString::from_text("I,I,I").unwrap();
+    /// let mut c = "I,I,I".parse::<stim::CliffordString>().unwrap();
     /// c.set(1, "H").unwrap();
     /// c.set(-1, stim::Gate::S).unwrap();
     /// assert_eq!(c.to_string(), "I,H,S");
@@ -321,7 +321,7 @@ impl CliffordString {
             self.to_string().split(',').map(str::to_owned).collect()
         };
         parts[normalized] = replacement;
-        *self = Self::from_text(&parts.join(","))?;
+        *self = parts.join(",").parse::<Self>()?;
         Ok(())
     }
 
@@ -340,7 +340,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let c = stim::CliffordString::from_text("I,X,H,Y,S").unwrap();
+    /// let c = "I,X,H,Y,S".parse::<stim::CliffordString>().unwrap();
     ///
     /// // Omit the last element.
     /// assert_eq!(c.slice(None, Some(-1), 1).unwrap().to_string(), "I,X,H,Y");
@@ -384,8 +384,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().x_outputs();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+XXZY").unwrap());
+    /// let (paulis, signs) = "I,Y,H,S".parse::<stim::CliffordString>().unwrap().x_outputs();
+    /// assert_eq!(paulis, "+XXZY".parse::<stim::PauliString>().unwrap());
     /// assert_eq!(signs, vec![false, true, false, false]);
     /// ```
     pub fn x_outputs(&self) -> (crate::PauliString, Vec<bool>) {
@@ -408,8 +408,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().x_outputs_bit_packed();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+XXZY").unwrap());
+    /// let (paulis, signs) = "I,Y,H,S".parse::<stim::CliffordString>().unwrap().x_outputs_bit_packed();
+    /// assert_eq!(paulis, "+XXZY".parse::<stim::PauliString>().unwrap());
     /// // Bit 1 is set (Y at index 1 negates X), giving 0b00000010 = 2.
     /// assert_eq!(signs, vec![2]);
     /// ```
@@ -436,8 +436,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,X,H,S").unwrap().y_outputs();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+YYYX").unwrap());
+    /// let (paulis, signs) = "I,X,H,S".parse::<stim::CliffordString>().unwrap().y_outputs();
+    /// assert_eq!(paulis, "+YYYX".parse::<stim::PauliString>().unwrap());
     /// assert_eq!(signs, vec![false, true, true, true]);
     /// ```
     pub fn y_outputs(&self) -> (crate::PauliString, Vec<bool>) {
@@ -460,8 +460,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,X,H,S").unwrap().y_outputs_bit_packed();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+YYYX").unwrap());
+    /// let (paulis, signs) = "I,X,H,S".parse::<stim::CliffordString>().unwrap().y_outputs_bit_packed();
+    /// assert_eq!(paulis, "+YYYX".parse::<stim::PauliString>().unwrap());
     /// // Bits 1, 2, 3 are set: 0b00001110 = 14.
     /// assert_eq!(signs, vec![14]);
     /// ```
@@ -491,8 +491,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().z_outputs();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+ZZXZ").unwrap());
+    /// let (paulis, signs) = "I,Y,H,S".parse::<stim::CliffordString>().unwrap().z_outputs();
+    /// assert_eq!(paulis, "+ZZXZ".parse::<stim::PauliString>().unwrap());
     /// assert_eq!(signs, vec![false, true, false, false]);
     /// ```
     pub fn z_outputs(&self) -> (crate::PauliString, Vec<bool>) {
@@ -515,8 +515,8 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let (paulis, signs) = stim::CliffordString::from_text("I,Y,H,S").unwrap().z_outputs_bit_packed();
-    /// assert_eq!(paulis, stim::PauliString::from_text("+ZZXZ").unwrap());
+    /// let (paulis, signs) = "I,Y,H,S".parse::<stim::CliffordString>().unwrap().z_outputs_bit_packed();
+    /// assert_eq!(paulis, "+ZZXZ".parse::<stim::PauliString>().unwrap());
     /// // Bit 1 is set (Y at index 1 negates Z): 0b00000010 = 2.
     /// assert_eq!(signs, vec![2]);
     /// ```
@@ -541,7 +541,7 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let c = stim::CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
+    /// let c = "I,X,H,S,C_XYZ".parse::<stim::CliffordString>().unwrap();
     /// assert_eq!(c.pow(3).to_string(), "I,X,H,S_DAG,I");
     /// assert_eq!(c.pow(-1).to_string(), "I,X,H,S_DAG,C_ZYX");
     /// ```
@@ -559,9 +559,9 @@ impl CliffordString {
     /// # Examples
     ///
     /// ```
-    /// let mut c = stim::CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
+    /// let mut c = "I,X,H,S,C_XYZ".parse::<stim::CliffordString>().unwrap();
     /// c.ipow(3);
-    /// assert_eq!(c, stim::CliffordString::from_text("I,X,H,S_DAG,I").unwrap());
+    /// assert_eq!(c, "I,X,H,S_DAG,I".parse::<stim::CliffordString>().unwrap());
     /// ```
     pub fn ipow(&mut self, exponent: i64) {
         self.inner.ipow(exponent);
@@ -590,7 +590,7 @@ impl FromStr for CliffordString {
     type Err = crate::StimError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_text(s)
+        Self::parse_text(s)
     }
 }
 
@@ -604,8 +604,8 @@ impl FromStr for CliffordString {
 /// ```
 /// use stim::CliffordString;
 ///
-/// let ab = CliffordString::from_text("I,X,H").unwrap()
-///     + CliffordString::from_text("Y,S").unwrap();
+/// let ab = "I,X,H".parse::<CliffordString>().unwrap()
+///     + "Y,S".parse::<CliffordString>().unwrap();
 /// assert_eq!(ab.to_string(), "I,X,H,Y,S");
 /// ```
 impl Add for CliffordString {
@@ -640,8 +640,8 @@ impl AddAssign for CliffordString {
 /// use stim::CliffordString;
 ///
 /// // S * S = Z on the first qubit, X * Z = Y on the second.
-/// let product = CliffordString::from_text("S,X,X").unwrap()
-///     * CliffordString::from_text("S,Z,H,Z").unwrap();
+/// let product = "S,X,X".parse::<CliffordString>().unwrap()
+///     * "S,Z,H,Z".parse::<CliffordString>().unwrap();
 /// assert_eq!(product.to_string(), "Z,Y,SQRT_Y,Z");
 /// ```
 impl Mul<CliffordString> for CliffordString {
@@ -674,7 +674,7 @@ impl MulAssign<CliffordString> for CliffordString {
 /// ```
 /// use stim::CliffordString;
 ///
-/// let repeated = CliffordString::from_text("I,X,H").unwrap() * 3;
+/// let repeated = "I,X,H".parse::<CliffordString>().unwrap() * 3;
 /// assert_eq!(repeated.to_string(), "I,X,H,I,X,H,I,X,H");
 /// ```
 impl Mul<u64> for CliffordString {
@@ -712,7 +712,7 @@ impl MulAssign<u64> for CliffordString {
 /// ```
 /// use stim::CliffordString;
 ///
-/// let repeated = 2 * CliffordString::from_text("I,X,H").unwrap();
+/// let repeated = 2 * "I,X,H".parse::<CliffordString>().unwrap();
 /// assert_eq!(repeated.to_string(), "I,X,H,I,X,H");
 /// ```
 impl Mul<CliffordString> for u64 {
@@ -736,7 +736,9 @@ mod tests {
         assert_eq!(format!("{c:?}"), "stim.CliffordString(\"I,I,I\")");
         assert_eq!(c.len(), 3);
 
-        let s = CliffordString::from_text("  X  ,   Y  ,  Z  , H_XZ , SQRT_X,C_XYZ,   ").unwrap();
+        let s = "  X  ,   Y  ,  Z  , H_XZ , SQRT_X,C_XYZ,   "
+            .parse::<CliffordString>()
+            .unwrap();
         assert_eq!(s.to_string(), "X,Y,Z,H,SQRT_X,C_XYZ");
         assert_eq!(s.get(2).unwrap().name(), "Z");
         assert_eq!(s.get(-1).unwrap().name(), "C_XYZ");
@@ -746,8 +748,7 @@ mod tests {
         );
         assert_eq!(s.slice(None, None, 2).unwrap().to_string(), "X,Z,SQRT_X");
 
-        let from_pauli =
-            CliffordString::from_pauli_string(&PauliString::from_text("-XYZ").unwrap());
+        let from_pauli = CliffordString::from_pauli_string(&"-XYZ".parse::<PauliString>().unwrap());
         assert_eq!(from_pauli.to_string(), "X,Y,Z");
 
         let from_circuit = CliffordString::from_circuit(
@@ -783,33 +784,36 @@ mod tests {
             "C_XYZ,C_XYNZ,C_NXYZ,C_XNYZ,C_ZYX,C_ZNYX,C_NZYX,C_ZYNX"
         );
 
-        let (x_paulis, x_signs) = CliffordString::from_text("I,Y,H,S").unwrap().x_outputs();
-        assert_eq!(x_paulis, PauliString::from_text("+XXZY").unwrap());
+        let (x_paulis, x_signs) = "I,Y,H,S".parse::<CliffordString>().unwrap().x_outputs();
+        assert_eq!(x_paulis, "+XXZY".parse::<PauliString>().unwrap());
         assert_eq!(x_signs, vec![false, true, false, false]);
         assert_eq!(
-            CliffordString::from_text("I,Y,H,S")
+            "I,Y,H,S"
+                .parse::<CliffordString>()
                 .unwrap()
                 .x_outputs_bit_packed()
                 .1,
             vec![2]
         );
 
-        let (y_paulis, y_signs) = CliffordString::from_text("I,X,H,S").unwrap().y_outputs();
-        assert_eq!(y_paulis, PauliString::from_text("+YYYX").unwrap());
+        let (y_paulis, y_signs) = "I,X,H,S".parse::<CliffordString>().unwrap().y_outputs();
+        assert_eq!(y_paulis, "+YYYX".parse::<PauliString>().unwrap());
         assert_eq!(y_signs, vec![false, true, true, true]);
         assert_eq!(
-            CliffordString::from_text("I,X,H,S")
+            "I,X,H,S"
+                .parse::<CliffordString>()
                 .unwrap()
                 .y_outputs_bit_packed()
                 .1,
             vec![14]
         );
 
-        let (z_paulis, z_signs) = CliffordString::from_text("I,Y,H,S").unwrap().z_outputs();
-        assert_eq!(z_paulis, PauliString::from_text("+ZZXZ").unwrap());
+        let (z_paulis, z_signs) = "I,Y,H,S".parse::<CliffordString>().unwrap().z_outputs();
+        assert_eq!(z_paulis, "+ZZXZ".parse::<PauliString>().unwrap());
         assert_eq!(z_signs, vec![false, true, false, false]);
         assert_eq!(
-            CliffordString::from_text("I,Y,H,S")
+            "I,Y,H,S"
+                .parse::<CliffordString>()
                 .unwrap()
                 .z_outputs_bit_packed()
                 .1,
@@ -820,57 +824,57 @@ mod tests {
     #[test]
     fn clifford_string_arithmetic_and_powers_match_documented_examples() {
         assert_eq!(
-            CliffordString::from_text("I,X,H").unwrap() + CliffordString::from_text("Y,S").unwrap(),
-            CliffordString::from_text("I,X,H,Y,S").unwrap()
+            "I,X,H".parse::<CliffordString>().unwrap() + "Y,S".parse::<CliffordString>().unwrap(),
+            "I,X,H,Y,S".parse::<CliffordString>().unwrap()
         );
 
-        let mut concat = CliffordString::from_text("I,X,H").unwrap();
-        concat += CliffordString::from_text("Y,S").unwrap();
-        assert_eq!(concat, CliffordString::from_text("I,X,H,Y,S").unwrap());
+        let mut concat = "I,X,H".parse::<CliffordString>().unwrap();
+        concat += "Y,S".parse::<CliffordString>().unwrap();
+        assert_eq!(concat, "I,X,H,Y,S".parse::<CliffordString>().unwrap());
 
         assert_eq!(
-            CliffordString::from_text("S,X,X").unwrap()
-                * CliffordString::from_text("S,Z,H,Z").unwrap(),
-            CliffordString::from_text("Z,Y,SQRT_Y,Z").unwrap()
+            "S,X,X".parse::<CliffordString>().unwrap()
+                * "S,Z,H,Z".parse::<CliffordString>().unwrap(),
+            "Z,Y,SQRT_Y,Z".parse::<CliffordString>().unwrap()
         );
 
-        let mut mul_assign = CliffordString::from_text("S,X,X").unwrap();
-        mul_assign *= CliffordString::from_text("S,Z,H,Z").unwrap();
+        let mut mul_assign = "S,X,X".parse::<CliffordString>().unwrap();
+        mul_assign *= "S,Z,H,Z".parse::<CliffordString>().unwrap();
         assert_eq!(
             mul_assign,
-            CliffordString::from_text("Z,Y,SQRT_Y,Z").unwrap()
+            "Z,Y,SQRT_Y,Z".parse::<CliffordString>().unwrap()
         );
 
         assert_eq!(
-            CliffordString::from_text("I,X,H").unwrap() * 3,
-            CliffordString::from_text("I,X,H,I,X,H,I,X,H").unwrap()
+            "I,X,H".parse::<CliffordString>().unwrap() * 3,
+            "I,X,H,I,X,H,I,X,H".parse::<CliffordString>().unwrap()
         );
         assert_eq!(
-            2 * CliffordString::from_text("I,X,H").unwrap(),
-            CliffordString::from_text("I,X,H,I,X,H").unwrap()
+            2 * "I,X,H".parse::<CliffordString>().unwrap(),
+            "I,X,H,I,X,H".parse::<CliffordString>().unwrap()
         );
 
-        let mut repeated = CliffordString::from_text("I,X,H").unwrap();
+        let mut repeated = "I,X,H".parse::<CliffordString>().unwrap();
         repeated *= 2;
-        assert_eq!(repeated, CliffordString::from_text("I,X,H,I,X,H").unwrap());
+        assert_eq!(repeated, "I,X,H,I,X,H".parse::<CliffordString>().unwrap());
 
-        let mut p = CliffordString::from_text("I,X,H,S,C_XYZ").unwrap();
+        let mut p = "I,X,H,S,C_XYZ".parse::<CliffordString>().unwrap();
         p.ipow(3);
-        assert_eq!(p, CliffordString::from_text("I,X,H,S_DAG,I").unwrap());
+        assert_eq!(p, "I,X,H,S_DAG,I".parse::<CliffordString>().unwrap());
         p.ipow(2);
-        assert_eq!(p, CliffordString::from_text("I,I,I,Z,I").unwrap());
-        assert_eq!(p.pow(2), CliffordString::from_text("I,I,I,I,I").unwrap());
+        assert_eq!(p, "I,I,I,Z,I".parse::<CliffordString>().unwrap());
+        assert_eq!(p.pow(2), "I,I,I,I,I".parse::<CliffordString>().unwrap());
         p.ipow(2);
-        assert_eq!(p, CliffordString::from_text("I,I,I,I,I").unwrap());
+        assert_eq!(p, "I,I,I,I,I".parse::<CliffordString>().unwrap());
     }
 
     #[test]
     fn clifford_string_set_updates_single_gate_entries() {
-        let mut s = CliffordString::from_text("I,I,I,I,I").unwrap();
+        let mut s = "I,I,I,I,I".parse::<CliffordString>().unwrap();
         s.set(1, "H").unwrap();
-        assert_eq!(s, CliffordString::from_text("I,H,I,I,I").unwrap());
+        assert_eq!(s, "I,H,I,I,I".parse::<CliffordString>().unwrap());
         s.set(-1, crate::Gate::S).unwrap();
-        assert_eq!(s, CliffordString::from_text("I,H,I,I,S").unwrap());
+        assert_eq!(s, "I,H,I,I,S".parse::<CliffordString>().unwrap());
     }
 
     #[test]
@@ -881,7 +885,8 @@ mod tests {
         let random = CliffordString::random(3);
         assert_eq!(random.clone().len(), 3);
 
-        let step_error = CliffordString::from_text("I,X")
+        let step_error = "I,X"
+            .parse::<CliffordString>()
             .unwrap()
             .slice(None, None, 0)
             .unwrap_err();

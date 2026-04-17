@@ -83,8 +83,8 @@ pub(crate) use common::bit_packing::{pack_bits, unpack_bits};
 pub(crate) use common::slicing::{compute_slice_indices, normalize_index};
 pub use common::upstream_commit;
 pub use common::{
-    Complex32, Endian, OpenQasmVersion, Result, SatProblemFormat, StimError, read_shot_data_file,
-    write_shot_data_file,
+    Complex32, Endian, OpenQasmVersion, Result, SatProblemFormat, ShotDataFormat, StimError,
+    read_shot_data_file, write_shot_data_file,
 };
 pub use ndarray::{Array1, Array2};
 

@@ -29,7 +29,7 @@ use crate::{CircuitInstruction, CircuitRepeatBlock};
 ///
 /// ```
 /// let instruction = stim::CircuitInstruction::new(
-///     "H", [0u32, 1u32], std::iter::empty::<f64>(), "",
+///     stim::Gate::H, [0u32, 1u32], std::iter::empty::<f64>(), "",
 /// ).expect("H is a valid gate");
 ///
 /// let item = stim::CircuitItem::Instruction(instruction.clone());

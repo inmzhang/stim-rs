@@ -24,4 +24,4 @@ pub type Complex32 = num_complex::Complex<f32>;
 pub use bridge::upstream_commit;
 pub use error::{Result, StimError};
 pub use io::{read_shot_data_file, write_shot_data_file};
-pub use options::{Endian, OpenQasmVersion, SatProblemFormat};
+pub use options::{Endian, OpenQasmVersion, SatProblemFormat, ShotDataFormat};

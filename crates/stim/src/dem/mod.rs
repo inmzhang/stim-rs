@@ -863,7 +863,7 @@ impl DetectorErrorModel {
     ///
     pub fn append_dem_repeat_block(&mut self, repeat_block: &DemRepeatBlock) {
         self.inner
-            .append_repeat_block(repeat_block.repeat_count(), &repeat_block.body_copy().inner)
+            .append_repeat_block(repeat_block.repeat_count(), &repeat_block.body().inner)
             .expect("validated DemRepeatBlock should append without native validation failure");
         self.invalidate_item_cache();
     }
@@ -1365,7 +1365,15 @@ mod tests {
 
         let mut sampler = dem.compile_sampler_with_seed(7);
         sampler
-            .sample_write_with_errors(1, &dets_path, "01", &obs_path, "01", &err_path, "hits")
+            .sample_write_with_errors(
+                1,
+                &dets_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+                &err_path,
+                crate::ShotDataFormat::Hits,
+            )
             .unwrap();
         assert_eq!(fs::read_to_string(&dets_path).unwrap(), "011\n");
         assert_eq!(fs::read_to_string(&obs_path).unwrap(), "1\n");
@@ -1375,7 +1383,13 @@ mod tests {
         let obs_path = unique_temp_path("dem-obs-noerr");
         let mut sampler = dem.compile_sampler_with_seed(7);
         sampler
-            .sample_write(1, &dets_path, "01", &obs_path, "01")
+            .sample_write(
+                1,
+                &dets_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+            )
             .unwrap();
         assert_eq!(fs::read_to_string(&dets_path).unwrap(), "011\n");
         assert_eq!(fs::read_to_string(&obs_path).unwrap(), "1\n");
@@ -1390,11 +1404,11 @@ mod tests {
             .sample_write_with_errors(
                 5,
                 &replay_det_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_obs_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_err_path,
-                "b8",
+                crate::ShotDataFormat::B8,
             )
             .unwrap();
         let expected_dets = fs::read_to_string(&replay_det_path).unwrap();
@@ -1407,13 +1421,13 @@ mod tests {
             .sample_write_replay_with_errors(
                 5,
                 &replay_det_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_obs_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_err_out_path,
-                "b8",
+                crate::ShotDataFormat::B8,
                 &replay_err_path,
-                "b8",
+                crate::ShotDataFormat::B8,
             )
             .unwrap();
         assert_eq!(fs::read_to_string(&replay_det_path).unwrap(), expected_dets);
@@ -1766,10 +1780,7 @@ mod tests {
     fn dem_instruction_append_path_supports_raw_numeric_targets() {
         let instruction =
             DemInstruction::new(DemInstructionType::ShiftDetectors, [1.0], [5u64], "").unwrap();
-        assert_eq!(
-            instruction.targets_copy(),
-            vec![DemInstructionTarget::from(5u64)]
-        );
+        assert_eq!(instruction.targets(), [DemInstructionTarget::from(5u64)]);
     }
 
     #[test]

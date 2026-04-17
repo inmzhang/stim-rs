@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::Path;
 
 use crate::common::bit_packing::{pack_rows_array, unpack_rows_array};
-use crate::{Result, StimError};
+use crate::{Result, ShotDataFormat, StimError};
 use ndarray::{Array2, ArrayView2};
 
 /// Fast repeated measurement sampling from a compiled Stim circuit.
@@ -364,8 +364,7 @@ impl MeasurementSampler {
     ///
     /// * `shots` - The number of times to sample every measurement.
     /// * `filepath` - The file path to write results to.
-    /// * `format_name` - The output format. Valid values are `"01"`, `"b8"`,
-    ///   `"r8"`, `"ptb64"`, `"hits"`, and `"dets"`.
+    /// * `format_name` - The output format.
     ///
     /// # Errors
     ///
@@ -378,7 +377,9 @@ impl MeasurementSampler {
     /// let circuit: stim::Circuit = "X 0\nM 0".parse().unwrap();
     /// let path = std::env::temp_dir().join("stim-rs-measurement-sampler-write.01");
     /// let mut sampler = circuit.compile_sampler(false);
-    /// sampler.sample_write(2, &path, "01").unwrap();
+    /// sampler
+    ///     .sample_write(2, &path, stim::ShotDataFormat::Bits01)
+    ///     .unwrap();
     /// assert_eq!(std::fs::read_to_string(&path).unwrap(), "1\n1\n");
     /// std::fs::remove_file(path).unwrap();
     /// ```
@@ -386,14 +387,14 @@ impl MeasurementSampler {
         &mut self,
         shots: u64,
         filepath: impl AsRef<Path>,
-        format_name: &str,
+        format_name: ShotDataFormat,
     ) -> Result<()> {
         let path = filepath
             .as_ref()
             .to_str()
             .ok_or_else(|| StimError::new("filepath must be valid UTF-8"))?;
         self.inner
-            .sample_write(shots, path, format_name)
+            .sample_write(shots, path, format_name.as_str())
             .map_err(StimError::from)
     }
 }
@@ -409,7 +410,7 @@ impl TableauSimulator {
     /// ```
     /// let mut sim = stim::TableauSimulator::new();
     /// sim.h(&[0]).unwrap();
-    /// assert_eq!(sim.peek_bloch(0), stim::PauliString::from_text("+X").unwrap());
+    /// assert_eq!(sim.peek_bloch(0), "+X".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -460,8 +461,8 @@ impl TableauSimulator {
     /// assert_eq!(
     ///     sim.current_inverse_tableau(),
     ///     stim::Tableau::from_conjugated_generators(
-    ///         &[stim::PauliString::from_text("+Z").unwrap()],
-    ///         &[stim::PauliString::from_text("+X").unwrap()],
+    ///         &["+Z".parse::<stim::PauliString>().unwrap()],
+    ///         &["+X".parse::<stim::PauliString>().unwrap()],
     ///     )
     ///     .unwrap()
     /// );
@@ -521,7 +522,7 @@ impl TableauSimulator {
     ///
     /// ```
     /// let mut sim = stim::TableauSimulator::new();
-    /// sim.do_pauli_string(&stim::PauliString::from_text("IX").unwrap());
+    /// sim.do_pauli_string(&"IX".parse::<stim::PauliString>().unwrap());
     /// assert_eq!(sim.measure_many(&[0, 1]), vec![false, true]);
     /// ```
     pub fn do_pauli_string(&mut self, pauli_string: &crate::PauliString) {
@@ -568,11 +569,7 @@ impl TableauSimulator {
             }
             TableauSimulatorOperation::RepeatBlock(block) => {
                 let mut circuit = crate::Circuit::new();
-                circuit.append_repeat_block(
-                    block.repeat_count(),
-                    &block.body_copy(),
-                    block.tag(),
-                )?;
+                circuit.append_repeat_block(block.repeat_count(), block.body(), block.tag())?;
                 self.do_circuit(&circuit);
                 Ok(())
             }
@@ -591,11 +588,11 @@ impl TableauSimulator {
     ///
     /// ```
     /// let mut sim = stim::TableauSimulator::new();
-    /// assert_eq!(sim.peek_bloch(0), stim::PauliString::from_text("+Z").unwrap());
+    /// assert_eq!(sim.peek_bloch(0), "+Z".parse::<stim::PauliString>().unwrap());
     /// sim.x(&[0]).unwrap();
-    /// assert_eq!(sim.peek_bloch(0), stim::PauliString::from_text("-Z").unwrap());
+    /// assert_eq!(sim.peek_bloch(0), "-Z".parse::<stim::PauliString>().unwrap());
     /// sim.h(&[0]).unwrap();
-    /// assert_eq!(sim.peek_bloch(0), stim::PauliString::from_text("-X").unwrap());
+    /// assert_eq!(sim.peek_bloch(0), "-X".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn peek_bloch(&mut self, target: usize) -> crate::PauliString {
@@ -659,7 +656,7 @@ impl TableauSimulator {
     ///
     /// ```
     /// let mut sim = stim::TableauSimulator::new();
-    /// sim.do_pauli_string(&stim::PauliString::from_text("IXYZ").unwrap());
+    /// sim.do_pauli_string(&"IXYZ".parse::<stim::PauliString>().unwrap());
     /// assert_eq!(sim.measure_many(&[0, 1, 2, 3]), vec![false, true, true, false]);
     /// ```
     #[must_use]
@@ -684,7 +681,7 @@ impl TableauSimulator {
     /// sim.h(&[0]).unwrap();
     /// assert_eq!(
     ///     sim.canonical_stabilizers(),
-    ///     vec![stim::PauliString::from_text("+X").unwrap()]
+    ///     vec!["+X".parse::<stim::PauliString>().unwrap()]
     /// );
     /// ```
     #[must_use]
@@ -816,7 +813,7 @@ impl TableauSimulator {
     /// sim.h(&[0]).unwrap();
     /// assert_eq!(
     ///     sim.measure_kickback(0).1,
-    ///     Some(stim::PauliString::from_text("+X").unwrap())
+    ///     Some("+X".parse::<stim::PauliString>().unwrap())
     /// );
     /// ```
     pub fn measure_kickback(&mut self, target: usize) -> (bool, Option<crate::PauliString>) {
@@ -1276,7 +1273,7 @@ impl FlipSimulator {
     /// sim.set_pauli_flip('X', 2, 1).unwrap();
     /// assert_eq!(
     ///     sim.peek_pauli_flip(1).unwrap(),
-    ///     stim::PauliString::from_text("+__X").unwrap()
+    ///     "+__X".parse::<stim::PauliString>().unwrap()
     /// );
     /// ```
     pub fn set_pauli_flip(
@@ -1324,8 +1321,8 @@ impl FlipSimulator {
     /// assert_eq!(
     ///     sim.peek_pauli_flips().unwrap(),
     ///     vec![
-    ///         stim::PauliString::from_text("+___").unwrap(),
-    ///         stim::PauliString::from_text("+__X").unwrap(),
+    ///         "+___".parse::<stim::PauliString>().unwrap(),
+    ///         "+__X".parse::<stim::PauliString>().unwrap(),
     ///     ]
     /// );
     /// ```
@@ -1446,11 +1443,7 @@ impl FlipSimulator {
             }
             FlipSimulatorOperation::RepeatBlock(block) => {
                 let mut circuit = crate::Circuit::new();
-                circuit.append_repeat_block(
-                    block.repeat_count(),
-                    &block.body_copy(),
-                    block.tag(),
-                )?;
+                circuit.append_repeat_block(block.repeat_count(), block.body(), block.tag())?;
                 self.do_circuit(&circuit);
                 Ok(())
             }
@@ -1476,8 +1469,8 @@ impl FlipSimulator {
     /// assert_eq!(
     ///     sim.peek_pauli_flips().unwrap(),
     ///     vec![
-    ///         stim::PauliString::from_text("+X_X").unwrap(),
-    ///         stim::PauliString::from_text("+__X").unwrap(),
+    ///         "+X_X".parse::<stim::PauliString>().unwrap(),
+    ///         "+__X".parse::<stim::PauliString>().unwrap(),
     ///     ]
     /// );
     /// ```
@@ -1815,7 +1808,9 @@ impl DetectorSampler {
     /// let circuit: stim::Circuit = "X 0\nM 0\nDETECTOR rec[-1]".parse().unwrap();
     /// let path = std::env::temp_dir().join("stim-rs-detector-sampler-write.01");
     /// let mut sampler = circuit.compile_detector_sampler_with_seed(11);
-    /// sampler.sample_write(2, &path, "01").unwrap();
+    /// sampler
+    ///     .sample_write(2, &path, stim::ShotDataFormat::Bits01)
+    ///     .unwrap();
     /// assert_eq!(std::fs::read_to_string(&path).unwrap(), "0\n0\n");
     /// std::fs::remove_file(path).unwrap();
     /// ```
@@ -1823,14 +1818,14 @@ impl DetectorSampler {
         &mut self,
         shots: u64,
         filepath: impl AsRef<Path>,
-        format_name: &str,
+        format_name: ShotDataFormat,
     ) -> Result<()> {
         let path = filepath
             .as_ref()
             .to_str()
             .ok_or_else(|| StimError::new("filepath must be valid UTF-8"))?;
         self.inner
-            .sample_write(shots, path, format_name)
+            .sample_write(shots, path, format_name.as_str())
             .map_err(StimError::from)
     }
 
@@ -1849,7 +1844,13 @@ impl DetectorSampler {
     /// let obs = std::env::temp_dir().join("stim-rs-detector-sampler-obs.01");
     /// let mut sampler = circuit.compile_detector_sampler_with_seed(11);
     /// sampler
-    ///     .sample_write_separate_observables(2, &dets, "01", &obs, "01")
+    ///     .sample_write_separate_observables(
+    ///         2,
+    ///         &dets,
+    ///         stim::ShotDataFormat::Bits01,
+    ///         &obs,
+    ///         stim::ShotDataFormat::Bits01,
+    ///     )
     ///     .unwrap();
     /// assert_eq!(std::fs::read_to_string(&dets).unwrap(), "0\n0\n");
     /// assert_eq!(std::fs::read_to_string(&obs).unwrap(), "0\n0\n");
@@ -1860,9 +1861,9 @@ impl DetectorSampler {
         &mut self,
         shots: u64,
         dets_filepath: impl AsRef<Path>,
-        dets_format_name: &str,
+        dets_format_name: ShotDataFormat,
         obs_filepath: impl AsRef<Path>,
-        obs_format_name: &str,
+        obs_format_name: ShotDataFormat,
     ) -> Result<()> {
         let dets_path = dets_filepath
             .as_ref()
@@ -1876,9 +1877,9 @@ impl DetectorSampler {
             .sample_write_separate_observables(
                 shots,
                 dets_path,
-                dets_format_name,
+                dets_format_name.as_str(),
                 obs_path,
-                obs_format_name,
+                obs_format_name.as_str(),
             )
             .map_err(StimError::from)
     }
@@ -2090,9 +2091,9 @@ impl DemSampler {
         &mut self,
         shots: u64,
         dets_filepath: impl AsRef<Path>,
-        dets_format_name: &str,
+        dets_format_name: ShotDataFormat,
         obs_filepath: impl AsRef<Path>,
-        obs_format_name: &str,
+        obs_format_name: ShotDataFormat,
     ) -> Result<()> {
         let dets_path = dets_filepath
             .as_ref()
@@ -2106,9 +2107,9 @@ impl DemSampler {
             .sample_write(
                 shots,
                 dets_path,
-                dets_format_name,
+                dets_format_name.as_str(),
                 obs_path,
-                obs_format_name,
+                obs_format_name.as_str(),
                 "",
                 "01",
                 false,
@@ -2125,11 +2126,11 @@ impl DemSampler {
         &mut self,
         shots: u64,
         dets_filepath: impl AsRef<Path>,
-        dets_format_name: &str,
+        dets_format_name: ShotDataFormat,
         obs_filepath: impl AsRef<Path>,
-        obs_format_name: &str,
+        obs_format_name: ShotDataFormat,
         err_filepath: impl AsRef<Path>,
-        err_format_name: &str,
+        err_format_name: ShotDataFormat,
     ) -> Result<()> {
         let dets_path = dets_filepath
             .as_ref()
@@ -2147,11 +2148,11 @@ impl DemSampler {
             .sample_write(
                 shots,
                 dets_path,
-                dets_format_name,
+                dets_format_name.as_str(),
                 obs_path,
-                obs_format_name,
+                obs_format_name.as_str(),
                 err_path,
-                err_format_name,
+                err_format_name.as_str(),
                 true,
             )
             .map_err(StimError::from)
@@ -2166,11 +2167,11 @@ impl DemSampler {
         &mut self,
         shots: u64,
         dets_filepath: impl AsRef<Path>,
-        dets_format_name: &str,
+        dets_format_name: ShotDataFormat,
         obs_filepath: impl AsRef<Path>,
-        obs_format_name: &str,
+        obs_format_name: ShotDataFormat,
         replay_err_filepath: impl AsRef<Path>,
-        replay_err_format_name: &str,
+        replay_err_format_name: ShotDataFormat,
     ) -> Result<()> {
         let dets_path = dets_filepath
             .as_ref()
@@ -2188,14 +2189,14 @@ impl DemSampler {
             .sample_write_replay(
                 shots,
                 dets_path,
-                dets_format_name,
+                dets_format_name.as_str(),
                 obs_path,
-                obs_format_name,
+                obs_format_name.as_str(),
                 "",
                 "01",
                 false,
                 replay_path,
-                replay_err_format_name,
+                replay_err_format_name.as_str(),
             )
             .map_err(StimError::from)
     }
@@ -2210,13 +2211,13 @@ impl DemSampler {
         &mut self,
         shots: u64,
         dets_filepath: impl AsRef<Path>,
-        dets_format_name: &str,
+        dets_format_name: ShotDataFormat,
         obs_filepath: impl AsRef<Path>,
-        obs_format_name: &str,
+        obs_format_name: ShotDataFormat,
         err_filepath: impl AsRef<Path>,
-        err_format_name: &str,
+        err_format_name: ShotDataFormat,
         replay_err_filepath: impl AsRef<Path>,
-        replay_err_format_name: &str,
+        replay_err_format_name: ShotDataFormat,
     ) -> Result<()> {
         let dets_path = dets_filepath
             .as_ref()
@@ -2238,14 +2239,14 @@ impl DemSampler {
             .sample_write_replay(
                 shots,
                 dets_path,
-                dets_format_name,
+                dets_format_name.as_str(),
                 obs_path,
-                obs_format_name,
+                obs_format_name.as_str(),
                 err_path,
-                err_format_name,
+                err_format_name.as_str(),
                 true,
                 replay_path,
-                replay_err_format_name,
+                replay_err_format_name.as_str(),
             )
             .map_err(StimError::from)
     }
@@ -2567,7 +2568,7 @@ impl MeasurementsToDetectionEventsConverter {
     /// # Arguments
     ///
     /// * `measurements_filepath` - Path to the file containing measurement data.
-    /// * `measurements_format` - Format of the measurement file (`"01"`, `"b8"`, etc.).
+    /// * `measurements_format` - Format of the measurement file.
     /// * `sweep_bits_filepath` - Optional path to sweep-bit data.
     /// * `sweep_bits_format` - Format of the sweep-bit file.
     /// * `detection_events_filepath` - Where to write detection-event output.
@@ -2596,14 +2597,14 @@ impl MeasurementsToDetectionEventsConverter {
     /// converter
     ///     .convert_file(
     ///         &measurements_path,
-    ///         "01",
+    ///         stim::ShotDataFormat::Bits01,
     ///         None::<&std::path::Path>,
-    ///         "01",
+    ///         stim::ShotDataFormat::Bits01,
     ///         &detections_path,
-    ///         "01",
+    ///         stim::ShotDataFormat::Bits01,
     ///         false,
     ///         None::<&std::path::Path>,
-    ///         "01",
+    ///         stim::ShotDataFormat::Bits01,
     ///     )
     ///     .unwrap();
     ///
@@ -2614,14 +2615,14 @@ impl MeasurementsToDetectionEventsConverter {
     pub fn convert_file<SweepPath, ObsPath>(
         &mut self,
         measurements_filepath: impl AsRef<Path>,
-        measurements_format: &str,
+        measurements_format: ShotDataFormat,
         sweep_bits_filepath: Option<SweepPath>,
-        sweep_bits_format: &str,
+        sweep_bits_format: ShotDataFormat,
         detection_events_filepath: impl AsRef<Path>,
-        detection_events_format: &str,
+        detection_events_format: ShotDataFormat,
         append_observables: bool,
         obs_out_filepath: Option<ObsPath>,
-        obs_out_format: &str,
+        obs_out_format: ShotDataFormat,
     ) -> Result<()>
     where
         SweepPath: AsRef<Path>,
@@ -2656,14 +2657,14 @@ impl MeasurementsToDetectionEventsConverter {
         self.inner
             .convert_file(
                 measurements_path,
-                measurements_format,
+                measurements_format.as_str(),
                 sweep_bits_path,
-                sweep_bits_format,
+                sweep_bits_format.as_str(),
                 detection_events_path,
-                detection_events_format,
+                detection_events_format.as_str(),
                 append_observables,
                 obs_out_path,
-                obs_out_format,
+                obs_out_format.as_str(),
             )
             .map_err(StimError::from)
     }
@@ -2791,8 +2792,8 @@ mod tests {
         assert_eq!(
             s.current_inverse_tableau(),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("+Z").unwrap()],
-                &[PauliString::from_text("+X").unwrap()],
+                &["+Z".parse::<PauliString>().unwrap()],
+                &["+X".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
@@ -2816,7 +2817,7 @@ mod tests {
         assert_eq!(s.current_measurement_record(), vec![true]);
 
         let mut s = TableauSimulator::new();
-        s.do_pauli_string(&PauliString::from_text("IXYZ").unwrap());
+        s.do_pauli_string(&"IXYZ".parse::<PauliString>().unwrap());
         assert_eq!(
             s.measure_many(&[0, 1, 2, 3]),
             vec![false, true, true, false]
@@ -2833,14 +2834,14 @@ mod tests {
         );
         let rot3 = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("_X_").unwrap(),
-                PauliString::from_text("__X").unwrap(),
-                PauliString::from_text("X__").unwrap(),
+                "_X_".parse::<PauliString>().unwrap(),
+                "__X".parse::<PauliString>().unwrap(),
+                "X__".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("_Z_").unwrap(),
-                PauliString::from_text("__Z").unwrap(),
-                PauliString::from_text("Z__").unwrap(),
+                "_Z_".parse::<PauliString>().unwrap(),
+                "__Z".parse::<PauliString>().unwrap(),
+                "Z__".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap();
@@ -2861,16 +2862,16 @@ mod tests {
 
         let mut pauli_sim = TableauSimulator::with_seed(5);
         pauli_sim
-            .r#do(&PauliString::from_text("X").unwrap())
+            .r#do(&"X".parse::<PauliString>().unwrap())
             .unwrap();
         assert_eq!(pauli_sim.measure_many(&[0]), vec![true]);
 
         let mut instruction_sim = TableauSimulator::new();
-        let instruction = CircuitInstruction::parse("H 0").unwrap();
+        let instruction = "H 0".parse::<CircuitInstruction>().unwrap();
         instruction_sim.r#do(&instruction).unwrap();
         assert_eq!(
             instruction_sim.peek_bloch(0),
-            PauliString::from_text("+X").unwrap()
+            "+X".parse::<PauliString>().unwrap()
         );
 
         let mut repeat_sim = TableauSimulator::new();
@@ -2919,11 +2920,11 @@ mod tests {
     #[test]
     fn tableau_simulator_peek_methods_match_documented_examples() {
         let mut s = TableauSimulator::new();
-        assert_eq!(s.peek_bloch(0), PauliString::from_text("+Z").unwrap());
+        assert_eq!(s.peek_bloch(0), "+Z".parse::<PauliString>().unwrap());
         s.x(&[0]).unwrap();
-        assert_eq!(s.peek_bloch(0), PauliString::from_text("-Z").unwrap());
+        assert_eq!(s.peek_bloch(0), "-Z".parse::<PauliString>().unwrap());
         s.h(&[0]).unwrap();
-        assert_eq!(s.peek_bloch(0), PauliString::from_text("-X").unwrap());
+        assert_eq!(s.peek_bloch(0), "-X".parse::<PauliString>().unwrap());
 
         let mut s = TableauSimulator::new();
         s.reset_z(&[0]).unwrap();
@@ -2980,17 +2981,17 @@ mod tests {
     fn tableau_simulator_observable_and_postselect_methods_match_documented_examples() {
         let mut s = TableauSimulator::new();
         assert_eq!(
-            s.peek_observable_expectation(&PauliString::from_text("+Z").unwrap())
+            s.peek_observable_expectation(&"+Z".parse::<PauliString>().unwrap())
                 .unwrap(),
             1
         );
         assert_eq!(
-            s.peek_observable_expectation(&PauliString::from_text("+X").unwrap())
+            s.peek_observable_expectation(&"+X".parse::<PauliString>().unwrap())
                 .unwrap(),
             0
         );
         assert_eq!(
-            s.peek_observable_expectation(&PauliString::from_text("-Z").unwrap())
+            s.peek_observable_expectation(&"-Z".parse::<PauliString>().unwrap())
                 .unwrap(),
             -1
         );
@@ -2998,13 +2999,13 @@ mod tests {
         s.r#do(&Circuit::from_str("H 0\nCNOT 0 1").unwrap())
             .unwrap();
         let xx = s
-            .measure_observable(&PauliString::from_text("XX").unwrap(), 0.5)
+            .measure_observable(&"XX".parse::<PauliString>().unwrap(), 0.5)
             .unwrap();
         let yy = s
-            .measure_observable(&PauliString::from_text("YY").unwrap(), 0.5)
+            .measure_observable(&"YY".parse::<PauliString>().unwrap(), 0.5)
             .unwrap();
         let zz = s
-            .measure_observable(&PauliString::from_text("-ZZ").unwrap(), 0.5)
+            .measure_observable(&"-ZZ".parse::<PauliString>().unwrap(), 0.5)
             .unwrap();
         assert!(matches!(xx, true | false));
         assert!(matches!(yy, true | false));
@@ -3022,12 +3023,12 @@ mod tests {
         assert_eq!(s.peek_y(1), 1);
 
         let mut s = TableauSimulator::new();
-        s.postselect_observable(&PauliString::from_text("+XX").unwrap(), false)
+        s.postselect_observable(&"+XX".parse::<PauliString>().unwrap(), false)
             .unwrap();
-        s.postselect_observable(&PauliString::from_text("+ZZ").unwrap(), false)
+        s.postselect_observable(&"+ZZ".parse::<PauliString>().unwrap(), false)
             .unwrap();
         assert_eq!(
-            s.peek_observable_expectation(&PauliString::from_text("+YY").unwrap())
+            s.peek_observable_expectation(&"+YY".parse::<PauliString>().unwrap())
                 .unwrap(),
             -1
         );
@@ -3040,15 +3041,15 @@ mod tests {
         s.h(&[0]).unwrap();
         assert_eq!(
             s.measure_kickback(0).1,
-            Some(PauliString::from_text("+X").unwrap())
+            Some("+X".parse::<PauliString>().unwrap())
         );
 
         let mut tab_sim = TableauSimulator::new();
         tab_sim
             .set_state_from_stabilizers(
                 &[
-                    PauliString::from_text("XX").unwrap(),
-                    PauliString::from_text("ZZ").unwrap(),
+                    "XX".parse::<PauliString>().unwrap(),
+                    "ZZ".parse::<PauliString>().unwrap(),
                 ],
                 false,
                 false,
@@ -3058,12 +3059,12 @@ mod tests {
             tab_sim.current_inverse_tableau().inverse(false),
             Tableau::from_conjugated_generators(
                 &[
-                    PauliString::from_text("+Z_").unwrap(),
-                    PauliString::from_text("+_X").unwrap(),
+                    "+Z_".parse::<PauliString>().unwrap(),
+                    "+_X".parse::<PauliString>().unwrap(),
                 ],
                 &[
-                    PauliString::from_text("+XX").unwrap(),
-                    PauliString::from_text("+ZZ").unwrap(),
+                    "+XX".parse::<PauliString>().unwrap(),
+                    "+ZZ".parse::<PauliString>().unwrap(),
                 ],
             )
             .unwrap()
@@ -3082,8 +3083,8 @@ mod tests {
         assert_eq!(
             tab_sim.current_inverse_tableau().inverse(false),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("+Z").unwrap()],
-                &[PauliString::from_text("+Y").unwrap()],
+                &["+Z".parse::<PauliString>().unwrap()],
+                &["+Y".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
@@ -3116,7 +3117,7 @@ mod tests {
         assert_eq!(unpacked, bool_matrix(vec![vec![true, false]; 3]));
 
         file_sampler
-            .sample_write(3, &path, "01")
+            .sample_write(3, &path, crate::ShotDataFormat::Bits01)
             .expect("sample_write should succeed");
 
         assert_eq!(
@@ -3146,7 +3147,7 @@ mod tests {
         assert_eq!(bool_matrix(unpack_rows(&packed, 2)), unpacked);
 
         file_sampler
-            .sample_write(8, &path, "01")
+            .sample_write(8, &path, crate::ShotDataFormat::Bits01)
             .expect("sample_write should succeed");
 
         assert_eq!(
@@ -3250,7 +3251,7 @@ mod tests {
 
         let mut writer = file_circuit.compile_detector_sampler_with_seed(11);
         writer
-            .sample_write(shots, &shots_path, "01")
+            .sample_write(shots, &shots_path, crate::ShotDataFormat::Bits01)
             .expect("sample_write should succeed");
         assert_eq!(
             fs::read_to_string(&shots_path).expect("shot file should read"),
@@ -3259,7 +3260,13 @@ mod tests {
 
         let mut separate_writer = file_circuit.compile_detector_sampler_with_seed(11);
         separate_writer
-            .sample_write_separate_observables(shots, &dets_path, "01", &obs_path, "01")
+            .sample_write_separate_observables(
+                shots,
+                &dets_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+            )
             .expect("sample_write_separate_observables should succeed");
         assert_eq!(
             fs::read_to_string(&dets_path).expect("detector file should read"),
@@ -3436,14 +3443,14 @@ mod tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 Some(&sweep_bits_path),
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &detections_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 false,
                 Some(&obs_path),
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .expect("convert_file should succeed");
         assert_eq!(
@@ -3458,14 +3465,14 @@ mod tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 Some(&sweep_bits_path),
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &appended_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 true,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .expect("convert_file should append observables");
         assert_eq!(
@@ -3547,13 +3554,13 @@ mod tests {
         assert_eq!(
             sim.peek_pauli_flips().unwrap(),
             vec![
-                PauliString::from_text("+___").unwrap(),
-                PauliString::from_text("+__X").unwrap()
+                "+___".parse::<PauliString>().unwrap(),
+                "+__X".parse::<PauliString>().unwrap()
             ]
         );
         assert_eq!(
             sim.peek_pauli_flip(1).unwrap(),
-            PauliString::from_text("+__X").unwrap()
+            "+__X".parse::<PauliString>().unwrap()
         );
     }
 
@@ -3602,8 +3609,8 @@ mod tests {
         assert_eq!(
             sim.peek_pauli_flips().unwrap(),
             vec![
-                PauliString::from_text("+X_X").unwrap(),
-                PauliString::from_text("+__X").unwrap()
+                "+X_X".parse::<PauliString>().unwrap(),
+                "+__X".parse::<PauliString>().unwrap()
             ]
         );
 
@@ -3621,8 +3628,8 @@ mod tests {
         assert_eq!(
             sim.peek_pauli_flips().unwrap(),
             vec![
-                PauliString::from_text("+X_Y").unwrap(),
-                PauliString::from_text("+Z_Y").unwrap()
+                "+X_Y".parse::<PauliString>().unwrap(),
+                "+Z_Y".parse::<PauliString>().unwrap()
             ]
         );
 
@@ -3665,7 +3672,7 @@ mod tests {
                 .contains("bit-packed measurement flip rows must all have width")
         );
 
-        let instruction = CircuitInstruction::parse("M 0").unwrap();
+        let instruction = "M 0".parse::<CircuitInstruction>().unwrap();
         sim.r#do(&instruction).unwrap();
         let repeat_body: Circuit = "M 1".parse().unwrap();
         let repeat_block = CircuitRepeatBlock::new(2, &repeat_body, "").unwrap();
@@ -3774,14 +3781,28 @@ mod tests {
 
         let mut writer = dem.compile_sampler();
         writer
-            .sample_write(2, &dets_path, "01", &obs_path, "01")
+            .sample_write(
+                2,
+                &dets_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+            )
             .unwrap();
         assert_eq!(fs::read_to_string(&dets_path).unwrap(), "011\n011\n");
         assert_eq!(fs::read_to_string(&obs_path).unwrap(), "1\n1\n");
 
         let mut writer = dem.compile_sampler();
         writer
-            .sample_write_with_errors(2, &dets_path, "01", &obs_path, "01", &err_path, "01")
+            .sample_write_with_errors(
+                2,
+                &dets_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+                &err_path,
+                crate::ShotDataFormat::Bits01,
+            )
             .unwrap();
         assert_eq!(fs::read_to_string(&err_path).unwrap(), "01\n01\n");
 
@@ -3790,11 +3811,11 @@ mod tests {
             .sample_write_replay(
                 2,
                 &replay_dets_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_obs_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &err_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .unwrap();
         assert_eq!(
@@ -3811,13 +3832,13 @@ mod tests {
             .sample_write_replay_with_errors(
                 2,
                 &replay_all_dets_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_all_obs_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &replay_all_err_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &err_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .unwrap();
         assert_eq!(
@@ -3894,14 +3915,14 @@ mod tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &detections_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 false,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .unwrap();
         assert_eq!(fs::read_to_string(&detections_path).unwrap(), "1\n0\n");

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::bit_packing::{pack_rows_array, unpack_rows_array};
-use super::{Result, StimError};
+use super::{Result, ShotDataFormat, StimError};
 use ndarray::{Array2, ArrayView2};
 
 /// Reads shot data from a file in one of Stim's supported formats.
@@ -59,10 +59,10 @@ use ndarray::{Array2, ArrayView2};
 ///     vec![true, false, true, false, true, false],
 /// ).expect("shape should be valid");
 ///
-/// write_shot_data_file(data.view(), &path, "01", 3, 0, 0)
+/// write_shot_data_file(data.view(), &path, stim::ShotDataFormat::Bits01, 3, 0, 0)
 ///     .expect("write should succeed");
 ///
-/// let read_back = read_shot_data_file(&path, "01", 3, 0, 0)
+/// let read_back = read_shot_data_file(&path, stim::ShotDataFormat::Bits01, 3, 0, 0)
 ///     .expect("read should succeed");
 /// assert_eq!(read_back, data);
 ///
@@ -70,7 +70,7 @@ use ndarray::{Array2, ArrayView2};
 /// ```
 pub fn read_shot_data_file(
     filepath: impl AsRef<Path>,
-    format_name: &str,
+    format_name: ShotDataFormat,
     num_measurements: usize,
     num_detectors: usize,
     num_observables: usize,
@@ -82,7 +82,7 @@ pub fn read_shot_data_file(
     let bit_len = num_measurements + num_detectors + num_observables;
     let packed = stim_cxx::read_shot_data_file_bit_packed(
         path,
-        format_name,
+        format_name.as_str(),
         num_measurements as u64,
         num_detectors as u64,
         num_observables as u64,
@@ -136,7 +136,7 @@ pub fn read_shot_data_file(
 ///     vec![true, false, true, false, true, false],
 /// ).expect("shape should be valid");
 ///
-/// write_shot_data_file(data.view(), &path, "01", 3, 0, 0)
+/// write_shot_data_file(data.view(), &path, stim::ShotDataFormat::Bits01, 3, 0, 0)
 ///     .expect("write should succeed");
 ///
 /// let contents = std::fs::read_to_string(&path)
@@ -148,7 +148,7 @@ pub fn read_shot_data_file(
 pub fn write_shot_data_file(
     data: ArrayView2<'_, bool>,
     filepath: impl AsRef<Path>,
-    format_name: &str,
+    format_name: ShotDataFormat,
     num_measurements: usize,
     num_detectors: usize,
     num_observables: usize,
@@ -163,7 +163,7 @@ pub fn write_shot_data_file(
         &packed,
         data.nrows() as u64,
         path,
-        format_name,
+        format_name.as_str(),
         num_measurements as u64,
         num_detectors as u64,
         num_observables as u64,
@@ -173,7 +173,7 @@ pub fn write_shot_data_file(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_shot_data_file, write_shot_data_file};
+    use super::{ShotDataFormat, read_shot_data_file, write_shot_data_file};
     use ndarray::Array2;
     use std::fs;
     use std::path::PathBuf;
@@ -203,10 +203,18 @@ mod tests {
             vec![false, false, false, true],
         ];
 
-        write_shot_data_file(bool_matrix(data.clone()).view(), &path, "01", 4, 0, 0)
-            .expect("write should succeed");
+        write_shot_data_file(
+            bool_matrix(data.clone()).view(),
+            &path,
+            ShotDataFormat::Bits01,
+            4,
+            0,
+            0,
+        )
+        .expect("write should succeed");
 
-        let read_back = read_shot_data_file(&path, "01", 4, 0, 0).expect("read should succeed");
+        let read_back = read_shot_data_file(&path, ShotDataFormat::Bits01, 4, 0, 0)
+            .expect("read should succeed");
         assert_eq!(read_back, bool_matrix(data.clone()));
         assert_eq!(
             fs::read_to_string(&path).expect("written file should read as text"),
@@ -225,11 +233,18 @@ mod tests {
             vec![true, true, false, false, false, false, true],
         ];
 
-        write_shot_data_file(bool_matrix(data.clone()).view(), &path, "b8", 2, 3, 2)
-            .expect("write should succeed");
+        write_shot_data_file(
+            bool_matrix(data.clone()).view(),
+            &path,
+            ShotDataFormat::B8,
+            2,
+            3,
+            2,
+        )
+        .expect("write should succeed");
 
-        let read_back =
-            read_shot_data_file(&path, "b8", 2, 3, 2).expect("mixed-width read should succeed");
+        let read_back = read_shot_data_file(&path, ShotDataFormat::B8, 2, 3, 2)
+            .expect("mixed-width read should succeed");
         assert_eq!(read_back, bool_matrix(data.clone()));
 
         fs::remove_file(path).expect("temporary file should delete");
@@ -244,11 +259,18 @@ mod tests {
             vec![false, true, false, true, false, true],
         ];
 
-        write_shot_data_file(bool_matrix(data.clone()).view(), &path, "dets", 0, 4, 2)
-            .expect("write should succeed");
+        write_shot_data_file(
+            bool_matrix(data.clone()).view(),
+            &path,
+            ShotDataFormat::Dets,
+            0,
+            4,
+            2,
+        )
+        .expect("write should succeed");
 
-        let read_back =
-            read_shot_data_file(&path, "dets", 0, 4, 2).expect("dets read should succeed");
+        let read_back = read_shot_data_file(&path, ShotDataFormat::Dets, 0, 4, 2)
+            .expect("dets read should succeed");
         assert_eq!(read_back, bool_matrix(data.clone()));
         assert_eq!(
             fs::read_to_string(&path).expect("written file should read as text"),
@@ -263,8 +285,8 @@ mod tests {
         let path = unique_temp_path_with_extension("shot-data-invalid-width", "01");
         let data = bool_matrix(vec![vec![true, false, true]]);
 
-        let error =
-            write_shot_data_file(data.view(), &path, "01", 4, 0, 0).expect_err("write should fail");
+        let error = write_shot_data_file(data.view(), &path, ShotDataFormat::Bits01, 4, 0, 0)
+            .expect_err("write should fail");
 
         assert_eq!(error.message(), "expected 4 bits per shot, got 3");
         assert!(
@@ -282,13 +304,19 @@ mod tests {
         let invalid_path = PathBuf::from(OsString::from_vec(vec![0x66, 0x6f, 0x80, 0x6f]));
         let data = vec![vec![true, false, true]];
 
-        let write_error =
-            write_shot_data_file(bool_matrix(data).view(), &invalid_path, "01", 3, 0, 0)
-                .expect_err("write should fail");
+        let write_error = write_shot_data_file(
+            bool_matrix(data).view(),
+            &invalid_path,
+            ShotDataFormat::Bits01,
+            3,
+            0,
+            0,
+        )
+        .expect_err("write should fail");
         assert_eq!(write_error.message(), "filepath must be valid UTF-8");
 
-        let read_error =
-            read_shot_data_file(&invalid_path, "01", 3, 0, 0).expect_err("read should fail");
+        let read_error = read_shot_data_file(&invalid_path, ShotDataFormat::Bits01, 3, 0, 0)
+            .expect_err("read should fail");
         assert_eq!(read_error.message(), "filepath must be valid UTF-8");
     }
 }

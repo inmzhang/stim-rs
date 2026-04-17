@@ -1411,7 +1411,7 @@ impl Circuit {
     ///
     /// ```
     /// let mut circuit: stim::Circuit = "H 0\nM 0".parse().unwrap();
-    /// circuit.insert(1, stim::CircuitInstruction::parse("X 1").unwrap()).unwrap();
+    /// circuit.insert(1, "X 1".parse::<stim::CircuitInstruction>().unwrap()).unwrap();
     /// assert_eq!(circuit.to_string(), "H 0\nX 1\nM 0");
     /// ```
     pub fn insert(
@@ -1454,7 +1454,7 @@ impl Circuit {
                     .insert_repeat_block(
                         normalized as usize,
                         repeat_block.repeat_count(),
-                        &repeat_block.body_copy().inner,
+                        &repeat_block.body().inner,
                         repeat_block.tag(),
                     )
                     .map_err(StimError::from)?;
@@ -1471,7 +1471,7 @@ impl Circuit {
     /// ```
     /// let mut circuit = stim::Circuit::new();
     /// circuit
-    ///     .append_operation(stim::CircuitInstruction::parse("H 0").unwrap())
+    ///     .append_operation("H 0".parse::<stim::CircuitInstruction>().unwrap())
     ///     .unwrap();
     /// assert_eq!(circuit.to_string(), "H 0");
     /// ```
@@ -1493,7 +1493,7 @@ impl Circuit {
                 self.inner
                     .append_repeat_block(
                         repeat_block.repeat_count(),
-                        &repeat_block.body_copy().inner,
+                        &repeat_block.body().inner,
                         repeat_block.tag(),
                     )
                     .map_err(StimError::from)?;
@@ -1525,7 +1525,7 @@ impl Circuit {
         } else {
             CircuitItem::Instruction(
                 CircuitInstruction::new(
-                    item.name,
+                    Gate::new(&item.name).expect("stim-cxx instruction gate should be valid"),
                     item.targets.into_iter().map(GateTarget::from_raw_data),
                     item.gate_args,
                     item.tag,
@@ -2335,7 +2335,7 @@ mod api_tests {
         let mut sampler = circuit.compile_sampler(false);
 
         sampler
-            .sample_write(2, &path, "01")
+            .sample_write(2, &path, crate::ShotDataFormat::Bits01)
             .expect("sample_write should succeed");
 
         assert_eq!(
@@ -2388,7 +2388,7 @@ mod api_tests {
         let mut sampler = circuit.compile_detector_sampler_with_seed(11);
 
         sampler
-            .sample_write(2, &path, "01")
+            .sample_write(2, &path, crate::ShotDataFormat::Bits01)
             .expect("sample_write should succeed");
 
         assert_eq!(
@@ -2409,7 +2409,13 @@ mod api_tests {
         let mut sampler = circuit.compile_detector_sampler_with_seed(11);
 
         sampler
-            .sample_write_separate_observables(2, &det_path, "01", &obs_path, "01")
+            .sample_write_separate_observables(
+                2,
+                &det_path,
+                crate::ShotDataFormat::Bits01,
+                &obs_path,
+                crate::ShotDataFormat::Bits01,
+            )
             .expect("sample_write should succeed");
 
         assert_eq!(
@@ -2622,14 +2628,14 @@ mod api_tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &detections_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 false,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .expect("convert_file should succeed");
         assert_eq!(
@@ -2640,14 +2646,14 @@ mod api_tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &appended_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 true,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .expect("convert_file should append observables");
         assert_eq!(
@@ -2658,14 +2664,14 @@ mod api_tests {
         converter
             .convert_file(
                 &measurements_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 None::<&std::path::Path>,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 &detections_path,
-                "01",
+                crate::ShotDataFormat::Bits01,
                 false,
                 Some(obs_path.as_path()),
-                "01",
+                crate::ShotDataFormat::Bits01,
             )
             .expect("convert_file should separate observables");
         assert_eq!(
@@ -2843,7 +2849,7 @@ mod residual_api_tests {
     use crate::DetectingRegionFilter;
     use crate::{
         CircuitInstruction, CircuitItem, CircuitRepeatBlock, DemTarget, DetectorErrorModel, Flow,
-        GateTarget, PauliString,
+        Gate, GateTarget, PauliString,
     };
     #[test]
     fn circuit_get_detector_coordinates_matches_documented_examples() {
@@ -3157,10 +3163,10 @@ mod residual_api_tests {
         let mut circuit = Circuit::new();
 
         circuit
-            .append_operation(CircuitInstruction::new("X", [0u32], [], "").unwrap())
+            .append_operation(CircuitInstruction::new(Gate::X, [0u32], [], "").unwrap())
             .unwrap();
         circuit
-            .append_operation(CircuitInstruction::new("H", [0u32, 1u32], [], "").unwrap())
+            .append_operation(CircuitInstruction::new(Gate::H, [0u32, 1u32], [], "").unwrap())
             .unwrap();
 
         assert_eq!(circuit, Circuit::from_str("X 0\nH 0 1").unwrap());
@@ -3198,7 +3204,7 @@ mod residual_api_tests {
     #[test]
     fn circuit_append_operation_copies_inputs_instead_of_aliasing() {
         let mut circuit = Circuit::new();
-        let instruction = CircuitInstruction::new("Y", [3u32, 4u32, 5u32], [], "").unwrap();
+        let instruction = CircuitInstruction::new(Gate::Y, [3u32, 4u32, 5u32], [], "").unwrap();
         let inserted = Circuit::from_str("S 1\nX 2").unwrap();
 
         circuit.append_operation(&instruction).unwrap();
@@ -3206,7 +3212,7 @@ mod residual_api_tests {
 
         assert_eq!(
             instruction,
-            CircuitInstruction::new("Y", [3u32, 4u32, 5u32], [], "").unwrap()
+            CircuitInstruction::new(Gate::Y, [3u32, 4u32, 5u32], [], "").unwrap()
         );
         assert_eq!(inserted, Circuit::from_str("S 1\nX 2").unwrap());
         assert_eq!(circuit, Circuit::from_str("Y 3 4 5\nS 1\nX 2").unwrap());
@@ -3231,7 +3237,7 @@ mod residual_api_tests {
         assert_eq!(
             circuit.get(1).unwrap(),
             CircuitItem::Instruction(
-                CircuitInstruction::new("X_ERROR", [2u32], [0.5], "").unwrap()
+                CircuitInstruction::new(Gate::X_ERROR, [2u32], [0.5], "").unwrap()
             )
         );
         assert_eq!(
@@ -3245,8 +3251,8 @@ mod residual_api_tests {
             circuit.get(-1).unwrap(),
             CircuitItem::Instruction(
                 CircuitInstruction::new(
-                    "DETECTOR",
-                    [GateTarget::from_target_str("rec[-1]").unwrap()],
+                    Gate::DETECTOR,
+                    ["rec[-1]".parse::<GateTarget>().unwrap()],
                     [],
                     ""
                 )
@@ -3312,11 +3318,11 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit.pop(-1).unwrap(),
-            CircuitItem::Instruction(CircuitInstruction::new("Y", [3u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::Y, [3u32], [], "").unwrap())
         );
         assert_eq!(
             circuit.pop(1).unwrap(),
-            CircuitItem::Instruction(CircuitInstruction::new("S", [1u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::S, [1u32], [], "").unwrap())
         );
         assert_eq!(circuit, Circuit::from_str("H 0\nX 2").unwrap());
     }
@@ -3339,7 +3345,7 @@ mod residual_api_tests {
 
         assert_eq!(
             popped,
-            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::M, [0u32], [], "").unwrap())
         );
         assert_eq!(circuit, Circuit::from_str("X 0\nDETECTOR rec[-1]").unwrap());
         assert_eq!(sliced, Circuit::new());
@@ -3358,11 +3364,11 @@ mod residual_api_tests {
         .unwrap();
 
         let expected = vec![
-            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap()),
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::H, [0u32], [], "").unwrap()),
             CircuitItem::RepeatBlock(
                 CircuitRepeatBlock::new(2, &Circuit::from_str("X 1").unwrap(), "").unwrap(),
             ),
-            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap()),
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::M, [0u32], [], "").unwrap()),
         ];
         let mut mutable = circuit.clone();
 
@@ -3385,7 +3391,7 @@ mod residual_api_tests {
 
         assert_eq!(
             circuit[0],
-            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::H, [0u32], [], "").unwrap())
         );
         assert_eq!(
             circuit[1],
@@ -3400,7 +3406,7 @@ mod residual_api_tests {
         let mut circuit = Circuit::from_str("H 0").unwrap();
         assert_eq!(
             circuit[0],
-            CircuitItem::Instruction(CircuitInstruction::new("H", [0u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::H, [0u32], [], "").unwrap())
         );
 
         circuit.append_from_stim_program_text("M 0").unwrap();
@@ -3408,7 +3414,7 @@ mod residual_api_tests {
         assert_eq!(circuit.len(), 2);
         assert_eq!(
             circuit[1],
-            CircuitItem::Instruction(CircuitInstruction::new("M", [0u32], [], "").unwrap())
+            CircuitItem::Instruction(CircuitInstruction::new(Gate::M, [0u32], [], "").unwrap())
         );
     }
 
@@ -3443,7 +3449,7 @@ mod residual_api_tests {
         circuit
             .insert(
                 1,
-                CircuitInstruction::new("Y", [3u32, 4u32, 5u32], [], "").unwrap(),
+                CircuitInstruction::new(Gate::Y, [3u32, 4u32, 5u32], [], "").unwrap(),
             )
             .unwrap();
 
@@ -3493,19 +3499,22 @@ mod residual_api_tests {
         let mut circuit = Circuit::new();
         assert!(
             circuit
-                .insert(0, CircuitInstruction::new("X", [0u32], [], "").unwrap())
+                .insert(0, CircuitInstruction::new(Gate::X, [0u32], [], "").unwrap())
                 .is_err()
         );
 
         let mut non_empty = Circuit::from_str("X 0\nY 1").unwrap();
         assert!(
             non_empty
-                .insert(2, CircuitInstruction::new("Z", [2u32], [], "").unwrap())
+                .insert(2, CircuitInstruction::new(Gate::Z, [2u32], [], "").unwrap())
                 .is_err()
         );
         assert!(
             non_empty
-                .insert(-3, CircuitInstruction::new("Z", [2u32], [], "").unwrap())
+                .insert(
+                    -3,
+                    CircuitInstruction::new(Gate::Z, [2u32], [], "").unwrap()
+                )
                 .is_err()
         );
     }
@@ -3513,13 +3522,16 @@ mod residual_api_tests {
     #[test]
     fn circuit_insert_copies_inputs_instead_of_aliasing_them() {
         let mut circuit = Circuit::from_str("H 0\nM 0").unwrap();
-        let op = CircuitInstruction::new("X", [1u32], [], "").unwrap();
+        let op = CircuitInstruction::new(Gate::X, [1u32], [], "").unwrap();
         let inserted = Circuit::from_str("S 2").unwrap();
 
         circuit.insert(1, &op).unwrap();
         circuit.insert(0, &inserted).unwrap();
 
-        assert_eq!(op, CircuitInstruction::new("X", [1u32], [], "").unwrap());
+        assert_eq!(
+            op,
+            CircuitInstruction::new(Gate::X, [1u32], [], "").unwrap()
+        );
         assert_eq!(inserted, Circuit::from_str("S 2").unwrap());
         assert_eq!(circuit, Circuit::from_str("S 2\nH 0\nX 1\nM 0").unwrap());
     }
@@ -3746,9 +3758,9 @@ mod residual_api_tests {
         .unwrap();
 
         let mut ticks = BTreeMap::new();
-        ticks.insert(0, PauliString::from_text("+Z_").unwrap());
-        ticks.insert(1, PauliString::from_text("+X_").unwrap());
-        ticks.insert(2, PauliString::from_text("+XX").unwrap());
+        ticks.insert(0, "+Z_".parse::<PauliString>().unwrap());
+        ticks.insert(1, "+X_".parse::<PauliString>().unwrap());
+        ticks.insert(2, "+XX".parse::<PauliString>().unwrap());
 
         let mut expected = BTreeMap::new();
         expected.insert(DemTarget::relative_detector_id(0).unwrap(), ticks);
@@ -3780,7 +3792,7 @@ mod residual_api_tests {
             .unwrap();
 
         let mut ticks = BTreeMap::new();
-        ticks.insert(1, PauliString::from_text("+X").unwrap());
+        ticks.insert(1, "+X".parse::<PauliString>().unwrap());
         let mut expected = BTreeMap::new();
         expected.insert(DemTarget::relative_detector_id(0).unwrap(), ticks);
         assert_eq!(filtered, expected);

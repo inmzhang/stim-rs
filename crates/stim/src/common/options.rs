@@ -111,3 +111,52 @@ impl FromStr for SatProblemFormat {
         }
     }
 }
+
+/// Shot-data file/sample format supported by Stim I/O APIs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ShotDataFormat {
+    Bits01,
+    B8,
+    R8,
+    Ptb64,
+    Hits,
+    Dets,
+}
+
+impl ShotDataFormat {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bits01 => "01",
+            Self::B8 => "b8",
+            Self::R8 => "r8",
+            Self::Ptb64 => "ptb64",
+            Self::Hits => "hits",
+            Self::Dets => "dets",
+        }
+    }
+}
+
+impl Display for ShotDataFormat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ShotDataFormat {
+    type Err = StimError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "01" => Ok(Self::Bits01),
+            "b8" => Ok(Self::B8),
+            "r8" => Ok(Self::R8),
+            "ptb64" => Ok(Self::Ptb64),
+            "hits" => Ok(Self::Hits),
+            "dets" => Ok(Self::Dets),
+            _ => Err(StimError::new(
+                "shot data format not in ['01', 'b8', 'r8', 'ptb64', 'hits', 'dets']",
+            )),
+        }
+    }
+}

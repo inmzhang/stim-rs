@@ -19,7 +19,7 @@ pub fn detecting_region_entries_to_map(
         result
             .entry(target)
             .or_default()
-            .insert(entry.tick, PauliString::from_text(&entry.pauli)?);
+            .insert(entry.tick, entry.pauli.parse::<PauliString>()?);
     }
     Ok(result)
 }
@@ -34,7 +34,7 @@ fn convert_dem_target_with_coords(
     data: stim_cxx::DemTargetWithCoordsData,
 ) -> Result<DemTargetWithCoords> {
     Ok(DemTargetWithCoords::new(
-        DemTarget::from_text(&data.dem_target)?,
+        data.dem_target.parse::<DemTarget>()?,
         data.coords,
     ))
 }
@@ -139,7 +139,7 @@ mod tests {
                 crate::DemTarget::relative_detector_id(0).unwrap(),
                 std::collections::BTreeMap::from([(
                     4,
-                    crate::PauliString::from_text("+X").unwrap()
+                    "+X".parse::<crate::PauliString>().unwrap()
                 )]),
             )])
         );

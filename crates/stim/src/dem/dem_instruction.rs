@@ -153,10 +153,8 @@ impl fmt::Debug for DemInstructionTarget {
 ///   instruction references.
 ///
 /// Instructions can be constructed programmatically via
-/// [`new`](Self::new), parsed from DEM text via
-/// [`from_dem_text`](Self::from_dem_text), or converted from a string
-/// using `str::parse` (the [`FromStr`](std::str::FromStr)
-/// implementation).
+/// [`new`](Self::new) or converted from a string using `str::parse`
+/// (the [`FromStr`](std::str::FromStr) implementation).
 ///
 /// # Examples
 ///
@@ -164,8 +162,8 @@ impl fmt::Debug for DemInstructionTarget {
 /// // Parse from DEM text.
 /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid DEM line");
 /// assert_eq!(inst.r#type(), stim::DemInstructionType::Error);
-/// assert_eq!(inst.args_copy(), vec![0.125]);
-/// assert_eq!(inst.targets_copy().len(), 2);
+/// assert_eq!(inst.args(), &[0.125]);
+/// assert_eq!(inst.targets().len(), 2);
 ///
 /// // Construct programmatically.
 /// let inst = stim::DemInstruction::new(
@@ -240,12 +238,13 @@ impl DemInstruction {
     /// # Examples
     ///
     /// ```
-    /// let inst = stim::DemInstruction::from_dem_text("error(0.125) D5 L6 ^ D4  # comment")
+    /// let inst: stim::DemInstruction = "error(0.125) D5 L6 ^ D4  # comment"
+    ///     .parse()
     ///     .expect("valid DEM text");
     /// assert_eq!(inst.r#type(), stim::DemInstructionType::Error);
     /// assert_eq!(inst.to_string(), "error(0.125) D5 L6 ^ D4");
     /// ```
-    pub fn from_dem_text(text: &str) -> Result<Self> {
+    fn parse_text(text: &str) -> Result<Self> {
         let normalized = DetectorErrorModel::from_str(text)?.to_string();
         if normalized.is_empty() {
             return Err(StimError::new(
@@ -303,46 +302,32 @@ impl DemInstruction {
         &self.tag
     }
 
-    /// Returns a copy of the instruction's parenthesized arguments.
+    /// Returns the instruction's parenthesized arguments.
     ///
     /// For `error` instructions this is typically a single-element list
     /// containing the error probability. For `detector` instructions it
     /// contains the detector's coordinate data. For `shift_detectors`
-    /// it contains the coordinate offsets. The result is a freshly
-    /// allocated copy; editing it will not change the instruction.
+    /// it contains the coordinate offsets.
     ///
     /// # Examples
     ///
     /// ```
     /// let inst: stim::DemInstruction = "error(0.125) D0".parse().expect("valid");
-    /// assert_eq!(inst.args_copy(), vec![0.125]);
+    /// assert_eq!(inst.args(), &[0.125]);
     /// ```
-    #[must_use]
-    pub fn args_copy(&self) -> Vec<f64> {
-        self.args.clone()
-    }
-
     #[must_use]
     pub fn args(&self) -> &[f64] {
         &self.args
     }
 
-    /// Returns a copy of the instruction's target list.
-    ///
-    /// The result is a freshly allocated copy; editing it will not
-    /// change the instruction's targets or future copies.
+    /// Returns the instruction's target list.
     ///
     /// # Examples
     ///
     /// ```
     /// let inst: stim::DemInstruction = "error(0.125) D0 D1".parse().expect("valid");
-    /// assert_eq!(inst.targets_copy().len(), 2);
+    /// assert_eq!(inst.targets().len(), 2);
     /// ```
-    #[must_use]
-    pub fn targets_copy(&self) -> Vec<DemInstructionTarget> {
-        self.targets.clone()
-    }
-
     #[must_use]
     pub fn targets(&self) -> &[DemInstructionTarget] {
         &self.targets
@@ -476,7 +461,7 @@ impl FromStr for DemInstruction {
     type Err = StimError;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::from_dem_text(s)
+        Self::parse_text(s)
     }
 }
 
@@ -518,7 +503,8 @@ fn parse_head(head: &str) -> Result<(DemInstructionType, String, Vec<f64>)> {
 fn parse_targets(text: &str) -> Result<Vec<DemInstructionTarget>> {
     text.split_whitespace()
         .map(|token| {
-            DemTarget::from_text(token)
+            token
+                .parse::<DemTarget>()
                 .map(DemInstructionTarget::from)
                 .or_else(|_| {
                     token
@@ -583,10 +569,10 @@ mod tests {
 
         assert_eq!(instruction.r#type(), DemInstructionType::Error);
         assert_eq!(instruction.tag(), "test-tag");
-        assert_eq!(instruction.args_copy(), vec![0.125]);
+        assert_eq!(instruction.args(), &[0.125]);
         assert_eq!(
-            instruction.targets_copy(),
-            vec![
+            instruction.targets(),
+            [
                 DemInstructionTarget::from(DemTarget::relative_detector_id(5).unwrap()),
                 DemInstructionTarget::from(DemTarget::logical_observable_id(2).unwrap()),
             ]
@@ -600,10 +586,10 @@ mod tests {
 
         assert_eq!(instruction.r#type(), DemInstructionType::Error);
         assert_eq!(instruction.tag(), "");
-        assert_eq!(instruction.args_copy(), vec![0.125]);
+        assert_eq!(instruction.args(), &[0.125]);
         assert_eq!(
-            instruction.targets_copy(),
-            vec![
+            instruction.targets(),
+            [
                 DemInstructionTarget::from(DemTarget::relative_detector_id(5).unwrap()),
                 DemInstructionTarget::from(DemTarget::logical_observable_id(6).unwrap()),
                 DemInstructionTarget::from(DemTarget::separator()),
@@ -719,10 +705,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            instruction.targets_copy(),
-            vec![DemInstructionTarget::from(5u64)]
-        );
+        assert_eq!(instruction.targets(), [DemInstructionTarget::from(5u64)]);
         assert_eq!(instruction.to_string(), "shift_detectors(1,2,3) 5");
         assert_eq!(
             DemInstruction::from_str("shift_detectors(1,2,3) 5").unwrap(),
@@ -755,15 +738,19 @@ mod tests {
 
     #[test]
     fn parsing_and_helper_error_paths_are_covered() {
-        let empty = DemInstruction::from_dem_text("").unwrap_err();
+        let empty = "".parse::<DemInstruction>().unwrap_err();
         assert!(empty.message().contains("got empty text"));
-        let repeat = DemInstruction::from_dem_text("repeat 2 {\n    error(0.1) D0\n}").unwrap_err();
+        let repeat = "repeat 2 {\n    error(0.1) D0\n}"
+            .parse::<DemInstruction>()
+            .unwrap_err();
         assert!(
             repeat
                 .message()
                 .contains("cannot represent DEM repeat blocks")
         );
-        let multiple = DemInstruction::from_dem_text("error(0.1) D0\nerror(0.2) D1").unwrap_err();
+        let multiple = "error(0.1) D0\nerror(0.2) D1"
+            .parse::<DemInstruction>()
+            .unwrap_err();
         assert!(
             multiple
                 .message()

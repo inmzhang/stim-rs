@@ -36,8 +36,7 @@ const TARGET_SWEEP_BIT: u32 = 1u32 << 26;
 ///
 /// `GateTarget` values are cheap to copy (they are a single `u32` internally) and
 /// support equality, ordering, and hashing. They can be parsed from Stim text syntax
-/// with [`GateTarget::from_target_str`] or via the [`FromStr`](std::str::FromStr)
-/// trait.
+/// via the [`FromStr`](std::str::FromStr) trait.
 ///
 /// # Examples
 ///
@@ -90,15 +89,15 @@ impl GateTarget {
     ///
     /// ```
     /// assert_eq!(
-    ///     stim::GateTarget::from_target_str("rec[-4]").unwrap(),
+    ///     "rec[-4]".parse::<stim::GateTarget>().unwrap(),
     ///     stim::GateTarget::rec(-4).unwrap()
     /// );
     /// assert_eq!(
-    ///     stim::GateTarget::from_target_str("!Z3").unwrap(),
+    ///     "!Z3".parse::<stim::GateTarget>().unwrap(),
     ///     stim::GateTarget::z(3u32, true).unwrap()
     /// );
     /// ```
-    pub fn from_target_str(text: &str) -> Result<Self> {
+    fn parse_text(text: &str) -> Result<Self> {
         if text == "*" {
             return Ok(Self::combiner());
         }
@@ -918,7 +917,7 @@ mod tests {
 
     #[test]
     fn gate_target_rejects_unknown_text_and_identity_pauli_maps_to_plain_qubit() {
-        let error = GateTarget::from_target_str("not-a-target").unwrap_err();
+        let error = "not-a-target".parse::<GateTarget>().unwrap_err();
         assert!(error.message().contains("unrecognized target"));
         assert_eq!(
             GateTarget::pauli(5, 'I', true).unwrap(),
@@ -978,7 +977,7 @@ impl FromStr for GateTarget {
     type Err = StimError;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::from_target_str(s)
+        Self::parse_text(s)
     }
 }
 

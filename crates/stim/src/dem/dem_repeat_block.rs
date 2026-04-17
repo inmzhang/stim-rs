@@ -24,7 +24,7 @@ use crate::{DemInstructionType, DetectorErrorModel, Result, StimError};
 /// let block = stim::DemRepeatBlock::new(100, &body).expect("valid repeat block");
 /// assert_eq!(block.repeat_count(), 100);
 /// assert_eq!(block.r#type(), stim::DemInstructionType::Repeat);
-/// assert_eq!(block.body_copy(), body);
+/// assert_eq!(block.body(), &body);
 ///
 /// // Display renders the block in DEM text format.
 /// assert!(block.to_string().starts_with("repeat 100 {"));
@@ -72,15 +72,10 @@ impl DemRepeatBlock {
         self.repeat_count
     }
 
-    /// Returns an independent copy of the repeated body model.
-    ///
-    /// The result is a freshly cloned [`DetectorErrorModel`]; editing it
-    /// will not change the block's body or future copies. This
-    /// copy-on-access design makes it clear that the repeat block is
-    /// immutable after construction.
+    /// Returns the repeated body model.
     #[must_use]
-    pub fn body_copy(&self) -> DetectorErrorModel {
-        self.block.clone()
+    pub fn body(&self) -> &DetectorErrorModel {
+        &self.block
     }
 
     /// Returns the type of this block, always [`DemInstructionType::Repeat`].
@@ -156,7 +151,7 @@ mod tests {
 
         assert_eq!(repeat.repeat_count(), 100);
         assert_eq!(repeat.r#type(), DemInstructionType::Repeat);
-        assert_eq!(repeat.body_copy(), body);
+        assert_eq!(repeat.body(), &body);
     }
 
     #[test]
@@ -198,13 +193,13 @@ mod tests {
     }
 
     #[test]
-    fn body_copy_is_independent_and_zero_repetitions_fail() {
+    fn body_is_borrowed_and_zero_repetitions_fail() {
         let body = DetectorErrorModel::from_str("error(0.125) D0 D1").unwrap();
         let repeat = DemRepeatBlock::new(5, &body).unwrap();
-        let mut copied = repeat.body_copy();
+        let mut copied = repeat.body().clone();
         copied.clear();
 
-        assert_eq!(repeat.body_copy(), body);
+        assert_eq!(repeat.body(), &body);
         assert_eq!(
             DemRepeatBlock::new(0, &body)
                 .expect_err("zero repetitions should fail")

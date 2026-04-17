@@ -152,14 +152,10 @@ impl CircuitRepeatBlock {
         self.body.num_measurements() * self.repeat_count
     }
 
-    /// Returns a clone of the body circuit.
-    ///
-    /// A fresh copy is returned each time to make it clear that editing the
-    /// result will not change the block's body. This follows the same
-    /// semantics as Python's `stim.CircuitRepeatBlock.body_copy()`.
+    /// Returns the repeated body circuit.
     #[must_use]
-    pub fn body_copy(&self) -> Circuit {
-        self.body.clone()
+    pub fn body(&self) -> &Circuit {
+        &self.body
     }
 }
 
@@ -261,7 +257,7 @@ mod tests {
         assert_eq!(block.tag(), "look-at-me");
         assert_eq!(block.repeat_count(), 5);
         assert_eq!(block.num_measurements(), 5);
-        assert_eq!(block.body_copy(), body);
+        assert_eq!(block.body(), &body);
     }
 
     #[test]

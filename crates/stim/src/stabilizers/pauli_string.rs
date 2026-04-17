@@ -75,11 +75,11 @@ pub enum PauliValue {
 /// ```
 /// use stim::{PauliPhase, PauliString};
 ///
-/// let p = PauliString::from_text("-iXYZ").unwrap();
+/// let p = "-iXYZ".parse::<PauliString>().unwrap();
 /// assert_eq!(p.phase(), PauliPhase::NegativeImaginary);
 /// assert!(p.has_imaginary_phase());
 ///
-/// let q = PauliString::from_text("+X").unwrap();
+/// let q = "+X".parse::<PauliString>().unwrap();
 /// assert_eq!(q.phase(), PauliPhase::Positive);
 /// assert!(!q.has_imaginary_phase());
 /// ```
@@ -209,12 +209,12 @@ impl From<char> for PauliValue {
 /// # Examples
 ///
 /// ```
-/// let p = stim::PauliString::from_text("_XYZ").unwrap();
+/// let p = "_XYZ".parse::<stim::PauliString>().unwrap();
 /// let cz = stim::Tableau::from_named_gate("CZ").unwrap();
 ///
 /// // Pass a (&Tableau, &[usize]) tuple — it converts automatically.
 /// let result = p.after((&cz, &[0, 1][..])).unwrap();
-/// assert_eq!(result, stim::PauliString::from_text("+ZXYZ").unwrap());
+/// assert_eq!(result, "+ZXYZ".parse::<stim::PauliString>().unwrap());
 /// ```
 pub enum PauliStringConjugation<'a> {
     /// Conjugate through an entire Clifford circuit. The circuit must not
@@ -296,8 +296,8 @@ impl<'a> From<(&'a crate::Tableau, &'a [usize])> for PauliStringConjugation<'a> 
 ///
 /// # Key operations
 ///
-/// - **Creation**: [`PauliString::new`] (identity), [`PauliString::from_text`]
-///   (parse from string), [`PauliString::random`] (uniformly random),
+/// - **Creation**: [`PauliString::new`] (identity), [`FromStr`](std::str::FromStr)
+///   / `"XYZ".parse::<PauliString>()` (parse from string), [`PauliString::random`] (uniformly random),
 ///   [`PauliString::from_ndarray`] / [`PauliString::from_ndarray_bit_packed`]
 ///   (from X/Z indicator arrays), [`PauliString::from_unitary_matrix`]
 ///   (infer from a unitary matrix).
@@ -328,14 +328,14 @@ impl<'a> From<(&'a crate::Tableau, &'a [usize])> for PauliStringConjugation<'a> 
 /// use stim::PauliString;
 ///
 /// // Create from text and inspect properties
-/// let p = PauliString::from_text("-XYZ").unwrap();
+/// let p = "-XYZ".parse::<PauliString>().unwrap();
 /// assert_eq!(p.num_qubits(), 3);
 /// assert_eq!(p.weight(), 3);
 /// assert_eq!(p.phase(), stim::PauliPhase::Negative);
 ///
 /// // Tensor product via the + operator
-/// let a = PauliString::from_text("X").unwrap();
-/// let b = PauliString::from_text("YZ").unwrap();
+/// let a = "X".parse::<PauliString>().unwrap();
+/// let b = "YZ".parse::<PauliString>().unwrap();
 /// assert_eq!((a + b).to_string(), "+XYZ");
 ///
 /// // Identity Pauli string
@@ -418,11 +418,11 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("-iXYZ").unwrap();
+    /// let p: stim::PauliString = "-iXYZ".parse().unwrap();
     /// assert_eq!(p.phase(), stim::PauliPhase::NegativeImaginary);
     /// assert_eq!(p.to_string(), "-iXYZ");
     /// ```
-    pub fn from_text(text: &str) -> crate::Result<Self> {
+    fn parse_text(text: &str) -> crate::Result<Self> {
         let text = text.trim();
         let (phase, body) = if let Some(rest) = text.strip_prefix("-i") {
             (3, rest)
@@ -474,7 +474,7 @@ impl PauliString {
     /// ```
     /// let all: Vec<_> = stim::PauliString::iter_all(1, 0, 1, "XYZ").collect();
     /// assert_eq!(all.len(), 4);
-    /// assert_eq!(all[0], stim::PauliString::from_text("+_").unwrap());
+    /// assert_eq!(all[0], "+_".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn iter_all(
@@ -516,7 +516,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::PauliString::from_text("+_XYZ").unwrap().weight(), 3);
+    /// assert_eq!("+_XYZ".parse::<stim::PauliString>().unwrap().weight(), 3);
     /// ```
     #[must_use]
     pub fn weight(&self) -> usize {
@@ -528,7 +528,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("_XYZ").unwrap();
+    /// let p = "_XYZ".parse::<stim::PauliString>().unwrap();
     /// let (xs, zs) = p.to_ndarray();
     /// assert_eq!(xs, ndarray::array![false, true, true, false]);
     /// assert_eq!(zs, ndarray::array![false, false, true, true]);
@@ -552,7 +552,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("_XYZ___XYXZYZ").unwrap();
+    /// let p = "_XYZ___XYXZYZ".parse::<stim::PauliString>().unwrap();
     /// let (xs, zs) = p.to_ndarray_bit_packed();
     /// assert_eq!(xs, ndarray::array![0x86, 0x0B]);
     /// assert_eq!(zs, ndarray::array![0x0C, 0x1D]);
@@ -587,7 +587,7 @@ impl PauliString {
     ///     -1,
     /// )
     /// .unwrap();
-    /// assert_eq!(p, stim::PauliString::from_text("-_XYZ").unwrap());
+    /// assert_eq!(p, "-_XYZ".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn from_ndarray(
         xs: ArrayView1<'_, bool>,
@@ -625,7 +625,7 @@ impl PauliString {
     ///     1,
     /// )
     /// .unwrap();
-    /// assert_eq!(p, stim::PauliString::from_text("+_XYZ___XYXZYZ").unwrap());
+    /// assert_eq!(p, "+_XYZ___XYXZYZ".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn from_ndarray_bit_packed(
         xs: ArrayView1<'_, u8>,
@@ -663,7 +663,7 @@ impl PauliString {
     ///
     /// ```
     /// assert_eq!(
-    ///     stim::PauliString::from_text("-YZ")
+    ///     "-YZ".parse::<stim::PauliString>()
     ///         .unwrap()
     ///         .to_unitary_matrix(stim::Endian::Little)
     ///         .unwrap()[0][1],
@@ -721,7 +721,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("+_XYZ").unwrap();
+    /// let p = "+_XYZ".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(p.get(1).unwrap(), 1);
     /// assert_eq!(p.get(-1).unwrap(), 3);
     /// ```
@@ -738,10 +738,10 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let mut p = stim::PauliString::from_text("+_XYZ").unwrap();
+    /// let mut p = "+_XYZ".parse::<stim::PauliString>().unwrap();
     /// p.set(0, 'Z').unwrap();
     /// p.set(-1, 1u8).unwrap();
-    /// assert_eq!(p, stim::PauliString::from_text("+ZXYX").unwrap());
+    /// assert_eq!(p, "+ZXYX".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn set(&mut self, index: isize, new_pauli: impl Into<PauliValue>) -> crate::Result<()> {
         let normalized = crate::normalize_index(index, self.len())
@@ -773,7 +773,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("+_XYZ___XYXZYZ").unwrap();
+    /// let p = "+_XYZ___XYXZYZ".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(p.slice(None, Some(-1), 1).unwrap().to_string(), "+_XYZ___XYXZY");
     /// assert_eq!(p.slice(None, None, 2).unwrap().to_string(), "+_Y__YZZ");
     /// ```
@@ -801,8 +801,8 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let x = stim::PauliString::from_text("+X").unwrap();
-    /// let z = stim::PauliString::from_text("+Z").unwrap();
+    /// let x = "+X".parse::<stim::PauliString>().unwrap();
+    /// let z = "+Z".parse::<stim::PauliString>().unwrap();
     /// assert!(!x.commutes(&z));
     /// assert!(x.commutes(&x));
     /// ```
@@ -816,7 +816,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("+_XYZ___XYXZYZ").unwrap();
+    /// let p = "+_XYZ___XYXZYZ".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(p.pauli_indices("XZ").unwrap(), vec![1, 3, 7, 9, 10, 12]);
     /// ```
     pub fn pauli_indices(&self, included_paulis: &str) -> crate::Result<Vec<usize>> {
@@ -837,7 +837,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// assert_eq!(stim::PauliString::from_text("-iX").unwrap().real_sign(), -1);
+    /// assert_eq!("-iX".parse::<stim::PauliString>().unwrap().real_sign(), -1);
     /// ```
     #[must_use]
     pub fn real_sign(&self) -> i32 {
@@ -849,7 +849,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("iX").unwrap();
+    /// let p = "iX".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(p.phase(), stim::PauliPhase::PositiveImaginary);
     /// assert!(p.has_imaginary_phase());
     /// ```
@@ -881,12 +881,12 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let matrix = stim::PauliString::from_text("-iX")
+    /// let matrix = "-iX".parse::<stim::PauliString>()
     ///     .unwrap()
     ///     .to_unitary_matrix(stim::Endian::Little)
     ///     .unwrap();
     /// let p = stim::PauliString::from_unitary_matrix(&matrix, stim::Endian::Little, false).unwrap();
-    /// assert_eq!(p, stim::PauliString::from_text("-iX").unwrap());
+    /// assert_eq!(p, "-iX".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn from_unitary_matrix(
         matrix: &[Vec<crate::Complex32>],
@@ -1056,10 +1056,10 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("iX").unwrap();
+    /// let p = "iX".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(
     ///     p.div_complex_unit(stim::Complex32::new(0.0, 1.0)).unwrap(),
-    ///     stim::PauliString::from_text("+X").unwrap()
+    ///     "+X".parse::<stim::PauliString>().unwrap()
     /// );
     /// ```
     pub fn div_complex_unit(&self, divisor: crate::Complex32) -> crate::Result<Self> {
@@ -1081,7 +1081,7 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("+X").unwrap();
+    /// let p = "+X".parse::<stim::PauliString>().unwrap();
     /// let t = p.to_tableau();
     /// assert_eq!(t.to_pauli_string().unwrap(), p);
     /// ```
@@ -1097,11 +1097,11 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("_XYZ").unwrap();
+    /// let p = "_XYZ".parse::<stim::PauliString>().unwrap();
     /// let cz = stim::Tableau::from_named_gate("CZ").unwrap();
     /// assert_eq!(
     ///     p.after_tableau(&cz, &[0, 1]).unwrap(),
-    ///     stim::PauliString::from_text("+ZXYZ").unwrap()
+    ///     "+ZXYZ".parse::<stim::PauliString>().unwrap()
     /// );
     /// ```
     pub fn after_tableau(
@@ -1168,11 +1168,11 @@ impl PauliString {
     /// # Examples
     ///
     /// ```
-    /// let p = stim::PauliString::from_text("_XYZ").unwrap();
+    /// let p = "_XYZ".parse::<stim::PauliString>().unwrap();
     /// let cz = stim::Tableau::from_named_gate("CZ").unwrap();
     /// assert_eq!(
     ///     p.after((&cz, &[0, 1][..])).unwrap(),
-    ///     stim::PauliString::from_text("+ZXYZ").unwrap()
+    ///     "+ZXYZ".parse::<stim::PauliString>().unwrap()
     /// );
     /// ```
     pub fn after<'a>(
@@ -1226,7 +1226,7 @@ impl FromStr for PauliString {
     type Err = crate::StimError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_text(s)
+        Self::parse_text(s)
     }
 }
 
@@ -1288,7 +1288,7 @@ mod tests {
 
     #[test]
     fn pauli_string_numpy_style_bit_conversions_match_documented_examples() {
-        let p = PauliString::from_text("_XYZ___XYXZYZ").unwrap();
+        let p = "_XYZ___XYXZYZ".parse::<PauliString>().unwrap();
 
         let (xs, zs) = p.to_ndarray();
         assert_eq!(
@@ -1312,7 +1312,7 @@ mod tests {
 
         assert_eq!(
             PauliString::from_ndarray(xs.view(), zs.view(), -1).unwrap(),
-            PauliString::from_text("-_XYZ___XYXZYZ").unwrap()
+            "-_XYZ___XYXZYZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             PauliString::from_ndarray_bit_packed(xs_packed.view(), zs_packed.view(), 13, 1)
@@ -1324,7 +1324,7 @@ mod tests {
     #[test]
     fn pauli_string_numpy_style_round_trips_and_validates_lengths() {
         for text in ["", "X", "-XYZ", "+_XYZ___XYXZYZ"] {
-            let p = PauliString::from_text(text).unwrap();
+            let p = text.parse::<PauliString>().unwrap();
             let (xs, zs) = p.to_ndarray();
             assert_eq!(
                 PauliString::from_ndarray(xs.view(), zs.view(), p.sign()).unwrap(),
@@ -1376,7 +1376,8 @@ mod tests {
     #[test]
     fn pauli_string_to_unitary_matrix_matches_documented_real_sign_examples() {
         assert_eq!(
-            PauliString::from_text("-YZ")
+            "-YZ"
+                .parse::<PauliString>()
                 .unwrap()
                 .to_unitary_matrix(crate::Endian::Little)
                 .unwrap(),
@@ -1409,7 +1410,8 @@ mod tests {
         );
 
         assert_eq!(
-            PauliString::from_text("ZYX")
+            "ZYX"
+                .parse::<PauliString>()
                 .unwrap()
                 .to_unitary_matrix(crate::Endian::Big)
                 .unwrap(),
@@ -1505,9 +1507,10 @@ mod tests {
 
     #[test]
     fn pauli_string_len_matches_documented_examples() {
-        assert_eq!(PauliString::from_text("XY_ZZ").unwrap().len(), 5);
+        assert_eq!("XY_ZZ".parse::<PauliString>().unwrap().len(), 5);
         assert_eq!(
-            PauliString::from_text(&format!("X{}Z", "_".repeat(98)))
+            format!("X{}Z", "_".repeat(98))
+                .parse::<PauliString>()
                 .unwrap()
                 .len(),
             100
@@ -1516,59 +1519,59 @@ mod tests {
 
     #[test]
     fn pauli_string_weight_matches_documented_examples() {
-        assert_eq!(PauliString::from_text("+___").unwrap().weight(), 0);
-        assert_eq!(PauliString::from_text("+__X").unwrap().weight(), 1);
-        assert_eq!(PauliString::from_text("+XYZ").unwrap().weight(), 3);
-        assert_eq!(PauliString::from_text("-XXX___XXYZ").unwrap().weight(), 7);
+        assert_eq!("+___".parse::<PauliString>().unwrap().weight(), 0);
+        assert_eq!("+__X".parse::<PauliString>().unwrap().weight(), 1);
+        assert_eq!("+XYZ".parse::<PauliString>().unwrap().weight(), 3);
+        assert_eq!("-XXX___XXYZ".parse::<PauliString>().unwrap().weight(), 7);
     }
 
     #[test]
     fn pauli_string_after_matches_documented_examples() {
-        let p = PauliString::from_text("_XYZ").unwrap();
+        let p = "_XYZ".parse::<PauliString>().unwrap();
         let cz = Tableau::from_named_gate("CZ").unwrap();
 
         assert_eq!(
             p.after_instruction(&CircuitInstruction::from_str("H 1").unwrap())
                 .unwrap(),
-            PauliString::from_text("+_ZYZ").unwrap()
+            "+_ZYZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.after_circuit(&Circuit::from_str("C_XYZ 1 2 3").unwrap())
                 .unwrap(),
-            PauliString::from_text("+_YZX").unwrap()
+            "+_YZX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.after_tableau(&cz, &[0, 1]).unwrap(),
-            PauliString::from_text("+ZXYZ").unwrap()
+            "+ZXYZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.after((&cz, &[0, 1][..])).unwrap(),
-            PauliString::from_text("+ZXYZ").unwrap()
+            "+ZXYZ".parse::<PauliString>().unwrap()
         );
     }
 
     #[test]
     fn pauli_string_before_matches_documented_examples() {
-        let p = PauliString::from_text("_XYZ").unwrap();
+        let p = "_XYZ".parse::<PauliString>().unwrap();
         let cz = Tableau::from_named_gate("CZ").unwrap();
 
         assert_eq!(
             p.before_instruction(&CircuitInstruction::from_str("H 1").unwrap())
                 .unwrap(),
-            PauliString::from_text("+_ZYZ").unwrap()
+            "+_ZYZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.before_circuit(&Circuit::from_str("C_XYZ 1 2 3").unwrap())
                 .unwrap(),
-            PauliString::from_text("+_ZXY").unwrap()
+            "+_ZXY".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.before_tableau(&cz, &[0, 1]).unwrap(),
-            PauliString::from_text("+ZXYZ").unwrap()
+            "+ZXYZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.before((&cz, &[0, 1][..])).unwrap(),
-            PauliString::from_text("+ZXYZ").unwrap()
+            "+ZXYZ".parse::<PauliString>().unwrap()
         );
     }
 
@@ -1589,7 +1592,7 @@ mod tests {
 
     #[test]
     fn pauli_string_get_matches_documented_examples() {
-        let p = PauliString::from_text("_XYZ").unwrap();
+        let p = "_XYZ".parse::<PauliString>().unwrap();
 
         assert_eq!(p.get(2).unwrap(), 2);
         assert_eq!(p.get(-1).unwrap(), 3);
@@ -1597,21 +1600,21 @@ mod tests {
 
     #[test]
     fn pauli_string_slice_matches_documented_examples() {
-        let p = PauliString::from_text("_XYZ").unwrap();
+        let p = "_XYZ".parse::<PauliString>().unwrap();
 
         assert_eq!(
             p.slice(None, Some(2), 1).unwrap(),
-            PauliString::from_text("+_X").unwrap()
+            "+_X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             p.slice(None, None, -1).unwrap(),
-            PauliString::from_text("+ZYX_").unwrap()
+            "+ZYX_".parse::<PauliString>().unwrap()
         );
     }
 
     #[test]
     fn pauli_string_indexing_rejects_out_of_range_and_zero_step() {
-        let p = PauliString::from_text("_XYZ").unwrap();
+        let p = "_XYZ".parse::<PauliString>().unwrap();
 
         assert!(p.get(4).unwrap_err().to_string().contains("out of range"));
         assert!(p.get(-5).unwrap_err().to_string().contains("out of range"));
@@ -1641,61 +1644,61 @@ mod tests {
     #[test]
     fn pauli_string_tensor_power_matches_real_sign_examples() {
         assert_eq!(
-            PauliString::from_text("X").unwrap() * 1_u64,
-            PauliString::from_text("+X").unwrap()
+            "X".parse::<PauliString>().unwrap() * 1_u64,
+            "+X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("X").unwrap() * 2_u64,
-            PauliString::from_text("+XX").unwrap()
+            "X".parse::<PauliString>().unwrap() * 2_u64,
+            "+XX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("-X").unwrap() * 2_u64,
-            PauliString::from_text("+XX").unwrap()
+            "-X".parse::<PauliString>().unwrap() * 2_u64,
+            "+XX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("X").unwrap() * 3_u64,
-            PauliString::from_text("+XXX").unwrap()
+            "X".parse::<PauliString>().unwrap() * 3_u64,
+            "+XXX".parse::<PauliString>().unwrap()
         );
     }
 
     #[test]
     fn pauli_string_tensor_power_assign_preserves_alias_identity() {
-        let mut p = PauliString::from_text("-X").unwrap();
+        let mut p = "-X".parse::<PauliString>().unwrap();
         let alias = &mut p as *mut PauliString;
         p *= 3_u64;
-        assert_eq!(p, PauliString::from_text("-XXX").unwrap());
+        assert_eq!(p, "-XXX".parse::<PauliString>().unwrap());
         assert_eq!(alias, &mut p as *mut PauliString);
     }
 
     #[test]
     fn pauli_string_left_tensor_power_matches_documented_real_sign_examples() {
         assert_eq!(
-            2_u64 * PauliString::from_text("X").unwrap(),
-            PauliString::from_text("+XX").unwrap()
+            2_u64 * "X".parse::<PauliString>().unwrap(),
+            "+XX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            2_u64 * PauliString::from_text("-X").unwrap(),
-            PauliString::from_text("+XX").unwrap()
+            2_u64 * "-X".parse::<PauliString>().unwrap(),
+            "+XX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            3_u64 * PauliString::from_text("X").unwrap(),
-            PauliString::from_text("+XXX").unwrap()
+            3_u64 * "X".parse::<PauliString>().unwrap(),
+            "+XXX".parse::<PauliString>().unwrap()
         );
     }
 
     #[test]
     fn pauli_string_pos_and_set_match_documented_examples() {
         assert_eq!(
-            PauliString::from_text("+X").unwrap().pos(),
-            PauliString::from_text("+X").unwrap()
+            "+X".parse::<PauliString>().unwrap().pos(),
+            "+X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("-YY").unwrap().pos(),
-            PauliString::from_text("-YY").unwrap()
+            "-YY".parse::<PauliString>().unwrap().pos(),
+            "-YY".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("iZZZ").unwrap().pos(),
-            PauliString::from_text("+iZZZ").unwrap()
+            "iZZZ".parse::<PauliString>().unwrap().pos(),
+            "+iZZZ".parse::<PauliString>().unwrap()
         );
 
         let mut p = PauliString::new(4);
@@ -1722,20 +1725,20 @@ mod tests {
 
     #[test]
     fn pauli_string_commutes_matches_documented_examples() {
-        let xx = PauliString::from_text("XX").unwrap();
+        let xx = "XX".parse::<PauliString>().unwrap();
 
-        assert!(xx.commutes(&PauliString::from_text("X_").unwrap()));
-        assert!(xx.commutes(&PauliString::from_text("XX").unwrap()));
-        assert!(!xx.commutes(&PauliString::from_text("XY").unwrap()));
-        assert!(!xx.commutes(&PauliString::from_text("XZ").unwrap()));
-        assert!(xx.commutes(&PauliString::from_text("ZZ").unwrap()));
-        assert!(xx.commutes(&PauliString::from_text("X_Y__").unwrap()));
-        assert!(xx.commutes(&PauliString::from_text("").unwrap()));
+        assert!(xx.commutes(&"X_".parse::<PauliString>().unwrap()));
+        assert!(xx.commutes(&"XX".parse::<PauliString>().unwrap()));
+        assert!(!xx.commutes(&"XY".parse::<PauliString>().unwrap()));
+        assert!(!xx.commutes(&"XZ".parse::<PauliString>().unwrap()));
+        assert!(xx.commutes(&"ZZ".parse::<PauliString>().unwrap()));
+        assert!(xx.commutes(&"X_Y__".parse::<PauliString>().unwrap()));
+        assert!(xx.commutes(&"".parse::<PauliString>().unwrap()));
     }
 
     #[test]
     fn pauli_string_pauli_indices_matches_documented_examples() {
-        let ps = PauliString::from_text("_____X___Y____Z___").unwrap();
+        let ps = "_____X___Y____Z___".parse::<PauliString>().unwrap();
 
         assert_eq!(ps.pauli_indices("XYZ").unwrap(), vec![5, 9, 14]);
         assert_eq!(ps.pauli_indices("XZ").unwrap(), vec![5, 14]);
@@ -1746,7 +1749,7 @@ mod tests {
             vec![0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17]
         );
         assert_eq!(
-            PauliString::from_text(&format!(
+            format!(
                 "-{}",
                 (0..104)
                     .map(|k| match k {
@@ -1755,7 +1758,8 @@ mod tests {
                         _ => '_',
                     })
                     .collect::<String>()
-            ))
+            )
+            .parse::<PauliString>()
             .unwrap()
             .pauli_indices("XYZ")
             .unwrap(),
@@ -1765,7 +1769,7 @@ mod tests {
 
     #[test]
     fn pauli_string_pauli_indices_support_case_insensitive_filters_and_reject_invalid_chars() {
-        let ps = PauliString::from_text("_XYZ").unwrap();
+        let ps = "_XYZ".parse::<PauliString>().unwrap();
 
         assert_eq!(ps.pauli_indices("x").unwrap(), vec![1]);
         assert_eq!(ps.pauli_indices("y").unwrap(), vec![2]);
@@ -1790,25 +1794,25 @@ mod tests {
 
     #[test]
     fn pauli_string_phase_accessors_match_sign_model() {
-        let p = PauliString::from_text("+X").unwrap();
+        let p = "+X".parse::<PauliString>().unwrap();
         assert_eq!(p.phase(), PauliPhase::Positive);
         assert_eq!(p.real_sign(), 1);
         assert_eq!(p.complex_phase(), crate::Complex32::new(1.0, 0.0));
         assert!(!p.has_imaginary_phase());
 
-        let p = PauliString::from_text("-X").unwrap();
+        let p = "-X".parse::<PauliString>().unwrap();
         assert_eq!(p.phase(), PauliPhase::Negative);
         assert_eq!(p.real_sign(), -1);
         assert_eq!(p.complex_phase(), crate::Complex32::new(-1.0, 0.0));
         assert!(!p.has_imaginary_phase());
 
-        let p = PauliString::from_text("iX").unwrap();
+        let p = "iX".parse::<PauliString>().unwrap();
         assert_eq!(p.phase(), PauliPhase::PositiveImaginary);
         assert_eq!(p.real_sign(), 1);
         assert_eq!(p.complex_phase(), crate::Complex32::new(0.0, 1.0));
         assert!(p.has_imaginary_phase());
 
-        let p = PauliString::from_text("-iX").unwrap();
+        let p = "-iX".parse::<PauliString>().unwrap();
         assert_eq!(p.phase(), PauliPhase::NegativeImaginary);
         assert_eq!(p.real_sign(), -1);
         assert_eq!(p.complex_phase(), crate::Complex32::new(0.0, -1.0));
@@ -1818,50 +1822,51 @@ mod tests {
     #[test]
     fn pauli_string_add_and_add_assign_match_real_sign_tensor_product_examples() {
         assert_eq!(
-            PauliString::from_text("X").unwrap() + PauliString::from_text("YZ").unwrap(),
-            PauliString::from_text("+XYZ").unwrap()
+            "X".parse::<PauliString>().unwrap() + "YZ".parse::<PauliString>().unwrap(),
+            "+XYZ".parse::<PauliString>().unwrap()
         );
 
-        let mut p = PauliString::from_text("-X").unwrap();
+        let mut p = "-X".parse::<PauliString>().unwrap();
         let alias = &mut p as *mut PauliString;
-        p += PauliString::from_text("YY").unwrap();
-        assert_eq!(p, PauliString::from_text("-XYY").unwrap());
+        p += "YY".parse::<PauliString>().unwrap();
+        assert_eq!(p, "-XYY".parse::<PauliString>().unwrap());
         assert_eq!(alias, &mut p as *mut PauliString);
     }
 
     #[test]
     fn pauli_string_neg_matches_real_sign_examples() {
         assert_eq!(
-            -PauliString::from_text("X").unwrap(),
-            PauliString::from_text("-X").unwrap()
+            -"X".parse::<PauliString>().unwrap(),
+            "-X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            -PauliString::from_text("-Y").unwrap(),
-            PauliString::from_text("+Y").unwrap()
+            -"-Y".parse::<PauliString>().unwrap(),
+            "+Y".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            -PauliString::from_text("iZZZ").unwrap(),
-            PauliString::from_text("-iZZZ").unwrap()
+            -"iZZZ".parse::<PauliString>().unwrap(),
+            "-iZZZ".parse::<PauliString>().unwrap()
         );
     }
 
     #[test]
     fn pauli_string_complex_unit_division_matches_documented_examples() {
-        let p = PauliString::from_text("X")
+        let p = "X"
+            .parse::<PauliString>()
             .unwrap()
             .div_complex_unit(crate::Complex32::new(0.0, 1.0))
             .unwrap();
-        assert_eq!(p, PauliString::from_text("-iX").unwrap());
+        assert_eq!(p, "-iX".parse::<PauliString>().unwrap());
 
-        let mut p = PauliString::from_text("X").unwrap();
+        let mut p = "X".parse::<PauliString>().unwrap();
         p.div_assign_complex_unit(crate::Complex32::new(0.0, 1.0))
             .unwrap();
-        assert_eq!(p, PauliString::from_text("-iX").unwrap());
+        assert_eq!(p, "-iX".parse::<PauliString>().unwrap());
     }
 
     #[test]
     fn pauli_string_remaining_public_entrypoints_and_error_paths_are_exercised() {
-        let empty = PauliString::from_text("").unwrap();
+        let empty = "".parse::<PauliString>().unwrap();
         assert!(empty.is_empty());
         assert_eq!(
             PauliString::from_unitary_matrix(&[], crate::Endian::Little, false).unwrap(),
@@ -1888,14 +1893,15 @@ mod tests {
         assert!(too_wide.to_string().contains("Too many qubits"));
 
         assert_eq!(
-            PauliString::from_text("-X")
+            "-X".parse::<PauliString>()
                 .unwrap()
                 .to_unitary_matrix(crate::Endian::Little)
                 .unwrap()[0][1],
             Complex32::new(-1.0, 0.0)
         );
         assert_eq!(
-            PauliString::from_text("-iX")
+            "-iX"
+                .parse::<PauliString>()
                 .unwrap()
                 .to_unitary_matrix(crate::Endian::Little)
                 .unwrap()[0][1],
@@ -1903,7 +1909,8 @@ mod tests {
         );
         assert_eq!(
             PauliString::from_unitary_matrix(
-                &PauliString::from_text("+XZ")
+                &"+XZ"
+                    .parse::<PauliString>()
                     .unwrap()
                     .to_unitary_matrix(crate::Endian::Big)
                     .unwrap(),
@@ -1911,31 +1918,32 @@ mod tests {
                 false,
             )
             .unwrap(),
-            PauliString::from_text("+XZ").unwrap()
+            "+XZ".parse::<PauliString>().unwrap()
         );
 
         assert_eq!(
-            PauliString::from_text("iX")
+            "iX".parse::<PauliString>()
                 .unwrap()
                 .div_complex_unit(Complex32::new(1.0, 0.0))
                 .unwrap(),
-            PauliString::from_text("iX").unwrap()
+            "iX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("iX")
+            "iX".parse::<PauliString>()
                 .unwrap()
                 .div_complex_unit(Complex32::new(-1.0, 0.0))
                 .unwrap(),
-            PauliString::from_text("-iX").unwrap()
+            "-iX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("iX")
+            "iX".parse::<PauliString>()
                 .unwrap()
                 .div_complex_unit(Complex32::new(0.0, -1.0))
                 .unwrap(),
-            PauliString::from_text("-X").unwrap()
+            "-X".parse::<PauliString>().unwrap()
         );
-        let invalid_divisor = PauliString::from_text("X")
+        let invalid_divisor = "X"
+            .parse::<PauliString>()
             .unwrap()
             .div_complex_unit(Complex32::new(0.5, 0.0))
             .unwrap_err();
@@ -1944,23 +1952,20 @@ mod tests {
                 .to_string()
                 .contains("divisor not in (1, -1, 1j, -1j)")
         );
-        assert_eq!(format!("{}", PauliString::from_text("iX").unwrap()), "+iX");
+        assert_eq!(format!("{}", "iX".parse::<PauliString>().unwrap()), "+iX");
 
         let circuit: Circuit = "H 0".parse().unwrap();
-        let instruction = CircuitInstruction::parse("H 0").unwrap();
+        let instruction = "H 0".parse::<CircuitInstruction>().unwrap();
         assert_eq!(
-            PauliString::from_text("Z")
-                .unwrap()
-                .after(&circuit)
-                .unwrap(),
-            PauliString::from_text("X").unwrap()
+            "Z".parse::<PauliString>().unwrap().after(&circuit).unwrap(),
+            "X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            PauliString::from_text("X")
+            "X".parse::<PauliString>()
                 .unwrap()
                 .before(&instruction)
                 .unwrap(),
-            PauliString::from_text("Z").unwrap()
+            "Z".parse::<PauliString>().unwrap()
         );
     }
 
@@ -1982,7 +1987,7 @@ mod tests {
                 false,
             )
             .unwrap(),
-            PauliString::from_text("+iZ").unwrap()
+            "+iZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             PauliString::from_unitary_matrix(
@@ -2000,7 +2005,7 @@ mod tests {
                 true,
             )
             .unwrap(),
-            PauliString::from_text("+Z").unwrap()
+            "+Z".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             PauliString::from_unitary_matrix(
@@ -2034,7 +2039,7 @@ mod tests {
                 false,
             )
             .unwrap(),
-            PauliString::from_text("+XZ").unwrap()
+            "+XZ".parse::<PauliString>().unwrap()
         );
     }
 

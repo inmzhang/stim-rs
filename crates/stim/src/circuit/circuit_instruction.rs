@@ -57,15 +57,15 @@ use crate::{Circuit, Gate, GateTarget, Result, StimError};
 /// use stim::CircuitInstruction;
 ///
 /// let h = CircuitInstruction::new(
-///     "H", [0u32, 1u32], std::iter::empty::<f64>(), "",
+///     stim::Gate::H, [0u32, 1u32], std::iter::empty::<f64>(), "",
 /// ).expect("H is a valid gate");
 /// assert_eq!(h.name(), "H");
 /// assert_eq!(h.num_measurements(), 0);
 ///
-/// // Aliases are canonicalized automatically.
+/// // Parsed text still canonicalizes aliases automatically.
 /// let cx = CircuitInstruction::new(
-///     "cnot", [0u32, 1u32], std::iter::empty::<f64>(), "",
-/// ).expect("cnot is an alias for CX");
+///     stim::Gate::CX, [0u32, 1u32], std::iter::empty::<f64>(), "",
+/// ).expect("CX is a valid gate");
 /// assert_eq!(cx.name(), "CX");
 /// ```
 ///
@@ -74,7 +74,7 @@ use crate::{Circuit, Gate, GateTarget, Result, StimError};
 /// ```
 /// use stim::CircuitInstruction;
 ///
-/// let inst = CircuitInstruction::parse("DEPOLARIZE1(0.25) 5")
+/// let inst: CircuitInstruction = "DEPOLARIZE1(0.25) 5".parse()
 ///     .expect("valid instruction text");
 /// assert_eq!(inst.name(), "DEPOLARIZE1");
 /// assert_eq!(inst.gate_args(), &[0.25]);
@@ -85,7 +85,7 @@ use crate::{Circuit, Gate, GateTarget, Result, StimError};
 /// ```
 /// use stim::CircuitInstruction;
 ///
-/// let inst = CircuitInstruction::parse("I[100ns] 2")
+/// let inst: CircuitInstruction = "I[100ns] 2".parse()
 ///     .expect("valid instruction");
 /// assert_eq!(inst.tag(), "100ns");
 /// assert_eq!(inst.to_string(), "I[100ns] 2");
@@ -130,27 +130,26 @@ impl CircuitInstruction {
     ///
     /// # Errors
     ///
-    /// Returns an error if the combination of gate name, targets, and
+    /// Returns an error if the combination of gate, targets, and
     /// arguments is not valid according to Stim's gate definitions — for
-    /// example, if a two-qubit gate receives an odd number of targets, or
-    /// if an unknown gate name is provided.
+    /// example, if a two-qubit gate receives an odd number of targets.
     ///
     /// # Examples
     ///
     /// ```
     /// let inst = stim::CircuitInstruction::new(
-    ///     "X_ERROR", [5u32, 7u32], [0.125], "",
+    ///     stim::Gate::X_ERROR, [5u32, 7u32], [0.125], "",
     /// ).expect("valid instruction");
     /// assert_eq!(inst.to_string(), "X_ERROR(0.125) 5 7");
     /// ```
     pub fn new(
-        name: impl AsRef<str>,
+        gate: Gate,
         targets: impl IntoIterator<Item = impl Into<GateTarget>>,
         gate_args: impl IntoIterator<Item = f64>,
         tag: impl Into<String>,
     ) -> Result<Self> {
         let instruction = Self {
-            gate: Gate::new(name.as_ref())?,
+            gate,
             tag: tag.into(),
             gate_args: gate_args.into_iter().collect(),
             targets: targets.into_iter().map(Into::into).collect(),
@@ -189,7 +188,7 @@ impl CircuitInstruction {
     /// ```
     /// use stim::CircuitInstruction;
     ///
-    /// let inst = CircuitInstruction::parse("H 0 1")
+    /// let inst: CircuitInstruction = "H 0 1".parse()
     ///     .expect("valid instruction text");
     /// assert_eq!(inst.name(), "H");
     ///
@@ -197,7 +196,7 @@ impl CircuitInstruction {
     /// let cx: CircuitInstruction = "CX 0 1".parse().expect("valid");
     /// assert_eq!(cx.name(), "CX");
     /// ```
-    pub fn parse(text: &str) -> Result<Self> {
+    fn parse_text(text: &str) -> Result<Self> {
         let circuit = Circuit::from_str(text)?;
         let normalized = circuit.to_string();
         if normalized.contains('\n') {
@@ -214,12 +213,7 @@ impl CircuitInstruction {
         let (head, tail) = split_head_and_tail(&normalized);
         let (name, tag, gate_args) = parse_head(head)?;
         let targets = parse_targets(tail)?;
-        Self::new(name, targets, gate_args, tag)
-    }
-
-    /// Parses a single instruction from Stim program text.
-    pub fn from_stim_program_text(text: &str) -> Result<Self> {
-        Self::parse(text)
+        Self::new(Gate::new(&name)?, targets, gate_args, tag)
     }
 
     /// Returns the instruction's validated gate metadata.
@@ -254,7 +248,7 @@ impl CircuitInstruction {
         &self.tag
     }
 
-    /// Returns a copy of the gate's numeric arguments.
+    /// Returns the gate's numeric arguments.
     ///
     /// Gate arguments are the numbers that parameterize a gate. For noisy
     /// gates this is typically a list of probabilities — for example,
@@ -263,39 +257,21 @@ impl CircuitInstruction {
     /// `OBSERVABLE_INCLUDE` it is a singleton list containing the logical
     /// observable index. Most unitary gates like `H` have an empty argument
     /// list.
-    ///
-    /// Each call returns a fresh `Vec`, so callers can mutate the result
-    /// without affecting the instruction.
     #[must_use]
     pub fn gate_args(&self) -> &[f64] {
         &self.gate_args
     }
 
-    /// Returns a copy of the gate's numeric arguments.
-    #[must_use]
-    pub fn gate_args_copy(&self) -> Vec<f64> {
-        self.gate_args.to_vec()
-    }
-
-    /// Returns a copy of all targets the instruction acts on.
+    /// Returns all targets the instruction acts on.
     ///
     /// The returned targets are in the same order they appeared when the
     /// instruction was constructed. For Pauli-product gates like `MPP`, the
     /// list includes combiner targets (`*`) interleaved with Pauli targets.
     /// Use [`target_groups()`](Self::target_groups) if you need the targets
     /// already split into logical groups.
-    ///
-    /// Each call returns a fresh `Vec`, so callers can mutate the result
-    /// without affecting the instruction.
     #[must_use]
     pub fn targets(&self) -> &[GateTarget] {
         &self.targets
-    }
-
-    /// Returns a copy of all targets the instruction acts on.
-    #[must_use]
-    pub fn targets_copy(&self) -> Vec<GateTarget> {
-        self.targets.to_vec()
     }
 
     /// Returns the number of measurement results (bits) this instruction
@@ -473,7 +449,7 @@ impl Circuit {
     /// ```
     /// let mut circuit = stim::Circuit::new();
     /// let h = stim::CircuitInstruction::new(
-    ///     "H", [0u32], std::iter::empty::<f64>(), "",
+    ///     stim::Gate::H, [0u32], std::iter::empty::<f64>(), "",
     /// ).expect("valid instruction");
     /// circuit.append_instruction(&h).expect("append succeeds");
     /// assert_eq!(circuit.to_string(), "H 0");
@@ -530,7 +506,7 @@ impl FromStr for CircuitInstruction {
     type Err = StimError;
 
     fn from_str(s: &str) -> Result<Self> {
-        Self::parse(s)
+        Self::parse_text(s)
     }
 }
 
@@ -593,7 +569,7 @@ fn parse_targets(targets_text: &str) -> Result<Vec<GateTarget>> {
         let mut parts = group.split('*').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
-                targets.push(GateTarget::from_target_str(part)?);
+                targets.push(part.parse::<GateTarget>()?);
             }
             if parts.peek().is_some() {
                 targets.push(GateTarget::combiner());
@@ -611,7 +587,8 @@ mod tests {
 
     #[test]
     fn constructor_and_accessors_preserve_values() {
-        let instruction = CircuitInstruction::new("X_ERROR", [5u32, 7u32], [0.125], "").unwrap();
+        let instruction =
+            CircuitInstruction::new(Gate::X_ERROR, [5u32, 7u32], [0.125], "").unwrap();
 
         assert_eq!(instruction.gate(), crate::Gate::X_ERROR);
         assert_eq!(instruction.name(), "X_ERROR");
@@ -628,7 +605,7 @@ mod tests {
     #[test]
     fn constructor_canonicalizes_aliases_and_parser_roundtrips_lines() {
         let aliased = CircuitInstruction::new(
-            "cnot",
+            Gate::new("cnot").unwrap(),
             [GateTarget::rec(-1).unwrap(), GateTarget::from(5u32)],
             std::iter::empty::<f64>(),
             "annotated",
@@ -671,7 +648,9 @@ mod tests {
 
     #[test]
     fn parse_aliases_single_instruction_text() {
-        let instruction = CircuitInstruction::parse("cnot 0 1").expect("instruction should parse");
+        let instruction = "cnot 0 1"
+            .parse::<CircuitInstruction>()
+            .expect("instruction should parse");
 
         assert_eq!(instruction.gate(), crate::Gate::CX);
         assert_eq!(instruction.name(), "CX");
@@ -680,7 +659,7 @@ mod tests {
     #[test]
     fn display_debug_and_tagged_append_match_binding_conventions() {
         let instruction =
-            CircuitInstruction::new("I", [2u32], std::iter::empty::<f64>(), "100ns").unwrap();
+            CircuitInstruction::new(Gate::I, [2u32], std::iter::empty::<f64>(), "100ns").unwrap();
 
         assert_eq!(instruction.to_string(), "I[100ns] 2");
         assert_eq!(
@@ -695,14 +674,14 @@ mod tests {
 
     #[test]
     fn equality_hash_and_order_follow_name_tag_args_then_targets() {
-        let first =
-            CircuitInstruction::new("X_ERROR", [5u32], [0.125], "").expect("instruction builds");
-        let same =
-            CircuitInstruction::new("X_ERROR", [5u32], [0.125], "").expect("instruction builds");
-        let different_tag =
-            CircuitInstruction::new("X_ERROR", [5u32], [0.125], "tag").expect("instruction builds");
-        let different_name =
-            CircuitInstruction::new("Y_ERROR", [5u32], [0.125], "").expect("instruction builds");
+        let first = CircuitInstruction::new(Gate::X_ERROR, [5u32], [0.125], "")
+            .expect("instruction builds");
+        let same = CircuitInstruction::new(Gate::X_ERROR, [5u32], [0.125], "")
+            .expect("instruction builds");
+        let different_tag = CircuitInstruction::new(Gate::X_ERROR, [5u32], [0.125], "tag")
+            .expect("instruction builds");
+        let different_name = CircuitInstruction::new(Gate::Y_ERROR, [5u32], [0.125], "")
+            .expect("instruction builds");
 
         assert_eq!(first, same);
         assert_ne!(first, different_tag);
@@ -730,17 +709,17 @@ mod tests {
     #[test]
     fn target_groups_follow_documented_shapes() {
         let single =
-            CircuitInstruction::new("H", [0u32, 1u32, 2u32], std::iter::empty::<f64>(), "")
+            CircuitInstruction::new(Gate::H, [0u32, 1u32, 2u32], std::iter::empty::<f64>(), "")
                 .unwrap();
         let two_qubit = CircuitInstruction::new(
-            "CX",
+            Gate::CX,
             [0u32, 1u32, 2u32, 3u32],
             std::iter::empty::<f64>(),
             "",
         )
         .unwrap();
         let mpp = CircuitInstruction::new(
-            "MPP",
+            Gate::MPP,
             [
                 GateTarget::x(0u32, false).unwrap(),
                 GateTarget::combiner(),
@@ -754,14 +733,14 @@ mod tests {
         )
         .unwrap();
         let detector = CircuitInstruction::new(
-            "DETECTOR",
+            Gate::DETECTOR,
             [GateTarget::rec(-1).unwrap(), GateTarget::rec(-2).unwrap()],
             [2.0, 3.0],
             "",
         )
         .unwrap();
         let correlated = CircuitInstruction::new(
-            "CORRELATED_ERROR",
+            Gate::E,
             [
                 GateTarget::x(0u32, false).unwrap(),
                 GateTarget::y(1u32, false).unwrap(),
@@ -818,20 +797,20 @@ mod tests {
     #[test]
     fn num_measurements_matches_instruction_semantics() {
         assert_eq!(
-            CircuitInstruction::new("H", [0u32], std::iter::empty::<f64>(), "")
+            CircuitInstruction::new(Gate::H, [0u32], std::iter::empty::<f64>(), "")
                 .unwrap()
                 .num_measurements(),
             0
         );
         assert_eq!(
-            CircuitInstruction::new("M", [0u32], std::iter::empty::<f64>(), "")
+            CircuitInstruction::new(Gate::M, [0u32], std::iter::empty::<f64>(), "")
                 .unwrap()
                 .num_measurements(),
             1
         );
         assert_eq!(
             CircuitInstruction::new(
-                "M",
+                Gate::M,
                 [2u32, 3u32, 5u32, 7u32, 11u32],
                 std::iter::empty::<f64>(),
                 "",
@@ -842,7 +821,7 @@ mod tests {
         );
         assert_eq!(
             CircuitInstruction::new(
-                "MXX",
+                Gate::MXX,
                 [0u32, 1u32, 4u32, 5u32, 11u32, 13u32],
                 std::iter::empty::<f64>(),
                 "",
@@ -853,7 +832,7 @@ mod tests {
         );
         assert_eq!(
             CircuitInstruction::new(
-                "MPP",
+                Gate::MPP,
                 [
                     GateTarget::x(0u32, false).unwrap(),
                     GateTarget::combiner(),
@@ -872,7 +851,7 @@ mod tests {
             2
         );
         assert_eq!(
-            CircuitInstruction::new("HERALDED_ERASE", [0u32], [0.25], "")
+            CircuitInstruction::new(Gate::HERALDED_ERASE, [0u32], [0.25], "")
                 .unwrap()
                 .num_measurements(),
             1
@@ -881,14 +860,16 @@ mod tests {
 
     #[test]
     fn parser_rejects_multi_operation_and_repeat_inputs_and_covers_remaining_formats() {
-        let multiple = CircuitInstruction::parse("H 0\nX 1").unwrap_err();
+        let multiple = "H 0\nX 1".parse::<CircuitInstruction>().unwrap_err();
         assert!(
             multiple
                 .message()
                 .contains("expected a single circuit instruction")
         );
 
-        let repeat = CircuitInstruction::parse("REPEAT 2 {\n    H 0\n}").unwrap_err();
+        let repeat = "REPEAT 2 {\n    H 0\n}"
+            .parse::<CircuitInstruction>()
+            .unwrap_err();
         assert!(
             repeat.message().contains("REPEAT")
                 || repeat.message().contains("single circuit instruction")
@@ -897,18 +878,17 @@ mod tests {
         let tick = CircuitInstruction::from_str("TICK").unwrap();
         assert!(tick.target_groups().is_empty());
 
-        let multi_args = CircuitInstruction::parse("PAULI_CHANNEL_1(0.1,0.2,0.3) 0").unwrap();
+        let multi_args = "PAULI_CHANNEL_1(0.1,0.2,0.3) 0"
+            .parse::<CircuitInstruction>()
+            .unwrap();
         assert_eq!(multi_args.to_string(), "PAULI_CHANNEL_1(0.1,0.2,0.3) 0");
 
         let mpp = CircuitInstruction::from_str("MPP X0*Y1").unwrap();
         assert_eq!(mpp.to_string(), "MPP X0* Y1");
         assert!(format!("{mpp:?}").contains("CircuitInstruction"));
 
-        let invalid = CircuitInstruction::new(" ", std::iter::empty::<u32>(), [], "").unwrap_err();
-        assert!(!invalid.message().is_empty());
-
-        let low = CircuitInstruction::new("X_ERROR", [0u32], [0.1], "").unwrap();
-        let high = CircuitInstruction::new("X_ERROR", [0u32], [0.2], "").unwrap();
+        let low = CircuitInstruction::new(Gate::X_ERROR, [0u32], [0.1], "").unwrap();
+        let high = CircuitInstruction::new(Gate::X_ERROR, [0u32], [0.2], "").unwrap();
         assert!(low < high);
     }
 }

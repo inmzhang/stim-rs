@@ -99,8 +99,8 @@ impl FromStr for TableauSynthesisMethod {
 /// ```
 /// // The Hadamard gate swaps X and Z:
 /// let h = stim::Tableau::from_named_gate("H").unwrap();
-/// assert_eq!(h.x_output(0), stim::PauliString::from_text("+Z").unwrap());
-/// assert_eq!(h.z_output(0), stim::PauliString::from_text("+X").unwrap());
+/// assert_eq!(h.x_output(0), "+Z".parse::<stim::PauliString>().unwrap());
+/// assert_eq!(h.z_output(0), "+X".parse::<stim::PauliString>().unwrap());
 ///
 /// // Composing a random tableau with its inverse yields the identity:
 /// let t = stim::Tableau::random(5);
@@ -130,11 +130,11 @@ impl Tableau {
     /// // Every generator maps to itself:
     /// assert_eq!(
     ///     identity.x_output(0),
-    ///     stim::PauliString::from_text("+X__").unwrap(),
+    ///     "+X__".parse::<stim::PauliString>().unwrap(),
     /// );
     /// assert_eq!(
     ///     identity.z_output(2),
-    ///     stim::PauliString::from_text("+__Z").unwrap(),
+    ///     "+__Z".parse::<stim::PauliString>().unwrap(),
     /// );
     /// ```
     #[must_use]
@@ -222,7 +222,7 @@ impl Tableau {
     /// assert_eq!(tableau.num_qubits(), 2);
     /// assert_eq!(
     ///     tableau.x_output(0),
-    ///     stim::PauliString::from_text("+Z_").unwrap(),
+    ///     "+Z_".parse::<stim::PauliString>().unwrap(),
     /// );
     /// ```
     /// Returns the tableau of a named Clifford gate known to Stim.
@@ -244,12 +244,12 @@ impl Tableau {
     ///
     /// ```
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
-    /// assert_eq!(h.x_output(0), stim::PauliString::from_text("+Z").unwrap());
-    /// assert_eq!(h.z_output(0), stim::PauliString::from_text("+X").unwrap());
+    /// assert_eq!(h.x_output(0), "+Z".parse::<stim::PauliString>().unwrap());
+    /// assert_eq!(h.z_output(0), "+X".parse::<stim::PauliString>().unwrap());
     ///
     /// let cnot = stim::Tableau::from_named_gate("CNOT").unwrap();
     /// assert_eq!(cnot.num_qubits(), 2);
-    /// assert_eq!(cnot.x_output(0), stim::PauliString::from_text("+XX").unwrap());
+    /// assert_eq!(cnot.x_output(0), "+XX".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn from_named_gate(name: &str) -> crate::Result<Self> {
         let gate = crate::Gate::new(name)?;
@@ -297,8 +297,8 @@ impl Tableau {
     /// assert_eq!(
     ///     t,
     ///     stim::Tableau::from_conjugated_generators(
-    ///         &[stim::PauliString::from_text("+Z").unwrap()],
-    ///         &[stim::PauliString::from_text("+Y").unwrap()],
+    ///         &["+Z".parse::<stim::PauliString>().unwrap()],
+    ///         &["+Y".parse::<stim::PauliString>().unwrap()],
     ///     )
     ///     .unwrap()
     /// );
@@ -357,8 +357,8 @@ impl Tableau {
     /// assert_eq!(
     ///     t,
     ///     stim::Tableau::from_conjugated_generators(
-    ///         &[stim::PauliString::from_text("+Y").unwrap()],
-    ///         &[stim::PauliString::from_text("+Z").unwrap()],
+    ///         &["+Y".parse::<stim::PauliString>().unwrap()],
+    ///         &["+Z".parse::<stim::PauliString>().unwrap()],
     ///     )
     ///     .unwrap()
     /// );
@@ -584,8 +584,8 @@ impl Tableau {
     /// ```
     /// // Construct the Hadamard gate: X → Z, Z → X
     /// let h = stim::Tableau::from_conjugated_generators(
-    ///     &[stim::PauliString::from_text("+Z").unwrap()],
-    ///     &[stim::PauliString::from_text("+X").unwrap()],
+    ///     &["+Z".parse::<stim::PauliString>().unwrap()],
+    ///     &["+X".parse::<stim::PauliString>().unwrap()],
     /// )
     /// .unwrap();
     /// assert_eq!(h, stim::Tableau::from_named_gate("H").unwrap());
@@ -593,14 +593,14 @@ impl Tableau {
     /// // Construct the 3-qubit identity:
     /// let id3 = stim::Tableau::from_conjugated_generators(
     ///     &[
-    ///         stim::PauliString::from_text("X__").unwrap(),
-    ///         stim::PauliString::from_text("_X_").unwrap(),
-    ///         stim::PauliString::from_text("__X").unwrap(),
+    ///         "X__".parse::<stim::PauliString>().unwrap(),
+    ///         "_X_".parse::<stim::PauliString>().unwrap(),
+    ///         "__X".parse::<stim::PauliString>().unwrap(),
     ///     ],
     ///     &[
-    ///         stim::PauliString::from_text("Z__").unwrap(),
-    ///         stim::PauliString::from_text("_Z_").unwrap(),
-    ///         stim::PauliString::from_text("__Z").unwrap(),
+    ///         "Z__".parse::<stim::PauliString>().unwrap(),
+    ///         "_Z_".parse::<stim::PauliString>().unwrap(),
+    ///         "__Z".parse::<stim::PauliString>().unwrap(),
     ///     ],
     /// )
     /// .unwrap();
@@ -653,16 +653,16 @@ impl Tableau {
     /// ```
     /// let t = stim::Tableau::from_stabilizers(
     ///     &[
-    ///         stim::PauliString::from_text("XX").unwrap(),
-    ///         stim::PauliString::from_text("ZZ").unwrap(),
+    ///         "XX".parse::<stim::PauliString>().unwrap(),
+    ///         "ZZ".parse::<stim::PauliString>().unwrap(),
     ///     ],
     ///     false,
     ///     false,
     /// )
     /// .unwrap();
     /// // The Z outputs of the resulting tableau are the stabilizers:
-    /// assert_eq!(t.z_output(0), stim::PauliString::from_text("+XX").unwrap());
-    /// assert_eq!(t.z_output(1), stim::PauliString::from_text("+ZZ").unwrap());
+    /// assert_eq!(t.z_output(0), "+XX".parse::<stim::PauliString>().unwrap());
+    /// assert_eq!(t.z_output(1), "+ZZ".parse::<stim::PauliString>().unwrap());
     /// ```
     pub fn from_stabilizers(
         stabilizers: &[crate::PauliString],
@@ -701,7 +701,7 @@ impl Tableau {
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// let z = stim::Tableau::from_named_gate("Z").unwrap();
     /// let combined = h.then(&z).unwrap();
-    /// let x = stim::PauliString::from_text("+X").unwrap();
+    /// let x = "+X".parse::<stim::PauliString>().unwrap();
     /// assert_eq!(combined.conjugate(&x), z.conjugate(&h.conjugate(&x)));
     /// ```
     pub fn then(&self, second: &Self) -> crate::Result<Self> {
@@ -743,7 +743,7 @@ impl Tableau {
     /// let mut t = stim::Tableau::new(2);
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// t.append(&h, &[1]).unwrap();
-    /// assert_eq!(t.x_output(1), stim::PauliString::from_text("+_Z").unwrap());
+    /// assert_eq!(t.x_output(1), "+_Z".parse::<stim::PauliString>().unwrap());
     ///
     /// // Three CNOTs in a row make a SWAP:
     /// let mut t = stim::Tableau::new(2);
@@ -1125,13 +1125,13 @@ impl Tableau {
     /// ```
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// // H conjugates X to Z:
-    /// assert_eq!(h.x_output(0), stim::PauliString::from_text("+Z").unwrap());
+    /// assert_eq!(h.x_output(0), "+Z".parse::<stim::PauliString>().unwrap());
     ///
     /// let cnot = stim::Tableau::from_named_gate("CNOT").unwrap();
     /// // CNOT conjugates X₀ to X₀⊗X₁:
-    /// assert_eq!(cnot.x_output(0), stim::PauliString::from_text("+XX").unwrap());
+    /// assert_eq!(cnot.x_output(0), "+XX".parse::<stim::PauliString>().unwrap());
     /// // CNOT conjugates X₁ to I⊗X₁:
-    /// assert_eq!(cnot.x_output(1), stim::PauliString::from_text("+_X").unwrap());
+    /// assert_eq!(cnot.x_output(1), "+_X".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn x_output(&self, target: usize) -> crate::PauliString {
@@ -1153,11 +1153,11 @@ impl Tableau {
     /// ```
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// // H conjugates Y to -Y:
-    /// assert_eq!(h.y_output(0), stim::PauliString::from_text("-Y").unwrap());
+    /// assert_eq!(h.y_output(0), "-Y".parse::<stim::PauliString>().unwrap());
     ///
     /// let cnot = stim::Tableau::from_named_gate("CNOT").unwrap();
-    /// assert_eq!(cnot.y_output(0), stim::PauliString::from_text("+YX").unwrap());
-    /// assert_eq!(cnot.y_output(1), stim::PauliString::from_text("+ZY").unwrap());
+    /// assert_eq!(cnot.y_output(0), "+YX".parse::<stim::PauliString>().unwrap());
+    /// assert_eq!(cnot.y_output(1), "+ZY".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn y_output(&self, target: usize) -> crate::PauliString {
@@ -1180,11 +1180,11 @@ impl Tableau {
     /// ```
     /// let h = stim::Tableau::from_named_gate("H").unwrap();
     /// // H conjugates Z to X:
-    /// assert_eq!(h.z_output(0), stim::PauliString::from_text("+X").unwrap());
+    /// assert_eq!(h.z_output(0), "+X".parse::<stim::PauliString>().unwrap());
     ///
     /// let cnot = stim::Tableau::from_named_gate("CNOT").unwrap();
-    /// assert_eq!(cnot.z_output(0), stim::PauliString::from_text("+Z_").unwrap());
-    /// assert_eq!(cnot.z_output(1), stim::PauliString::from_text("+ZZ").unwrap());
+    /// assert_eq!(cnot.z_output(0), "+Z_".parse::<stim::PauliString>().unwrap());
+    /// assert_eq!(cnot.z_output(1), "+ZZ".parse::<stim::PauliString>().unwrap());
     /// ```
     #[must_use]
     pub fn z_output(&self, target: usize) -> crate::PauliString {
@@ -1269,20 +1269,20 @@ impl Tableau {
     ///
     /// // X on the control qubit spreads to both qubits:
     /// assert_eq!(
-    ///     cnot.conjugate(&stim::PauliString::from_text("X_").unwrap()),
-    ///     stim::PauliString::from_text("XX").unwrap(),
+    ///     cnot.conjugate(&"X_".parse::<stim::PauliString>().unwrap()),
+    ///     "XX".parse::<stim::PauliString>().unwrap(),
     /// );
     ///
     /// // Z on the target qubit spreads to both qubits:
     /// assert_eq!(
-    ///     cnot.conjugate(&stim::PauliString::from_text("_Z").unwrap()),
-    ///     stim::PauliString::from_text("ZZ").unwrap(),
+    ///     cnot.conjugate(&"_Z".parse::<stim::PauliString>().unwrap()),
+    ///     "ZZ".parse::<stim::PauliString>().unwrap(),
     /// );
     ///
     /// // Conjugation preserves signs correctly:
     /// assert_eq!(
-    ///     cnot.conjugate(&stim::PauliString::from_text("YY").unwrap()),
-    ///     stim::PauliString::from_text("-XZ").unwrap(),
+    ///     cnot.conjugate(&"YY".parse::<stim::PauliString>().unwrap()),
+    ///     "-XZ".parse::<stim::PauliString>().unwrap(),
     /// );
     /// ```
     #[must_use]
@@ -1333,8 +1333,8 @@ impl Tableau {
     /// assert_eq!(
     ///     cnot.to_stabilizers(false).unwrap(),
     ///     vec![
-    ///         stim::PauliString::from_text("+Z_").unwrap(),
-    ///         stim::PauliString::from_text("+ZZ").unwrap(),
+    ///         "+Z_".parse::<stim::PauliString>().unwrap(),
+    ///         "+ZZ".parse::<stim::PauliString>().unwrap(),
     ///     ]
     /// );
     ///
@@ -1342,8 +1342,8 @@ impl Tableau {
     /// assert_eq!(
     ///     cnot.to_stabilizers(true).unwrap(),
     ///     vec![
-    ///         stim::PauliString::from_text("+Z_").unwrap(),
-    ///         stim::PauliString::from_text("+_Z").unwrap(),
+    ///         "+Z_".parse::<stim::PauliString>().unwrap(),
+    ///         "+_Z".parse::<stim::PauliString>().unwrap(),
     ///     ]
     /// );
     /// ```
@@ -1351,7 +1351,7 @@ impl Tableau {
         self.inner
             .to_stabilizer_texts(canonicalize)
             .into_iter()
-            .map(|text| crate::PauliString::from_text(&text))
+            .map(|text| text.parse::<crate::PauliString>())
             .collect()
     }
 
@@ -1548,12 +1548,12 @@ mod tests {
     fn tableau_to_unitary_matrix_matches_documented_example() {
         let cnot = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("XX").unwrap(),
-                PauliString::from_text("_X").unwrap(),
+                "XX".parse::<PauliString>().unwrap(),
+                "_X".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("Z_").unwrap(),
-                PauliString::from_text("ZZ").unwrap(),
+                "Z_".parse::<PauliString>().unwrap(),
+                "ZZ".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap();
@@ -1655,8 +1655,8 @@ mod tests {
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("+Z").unwrap()],
-                &[PauliString::from_text("+Y").unwrap()],
+                &["+Z".parse::<PauliString>().unwrap()],
+                &["+Y".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
@@ -1674,12 +1674,12 @@ mod tests {
             .unwrap(),
             Tableau::from_conjugated_generators(
                 &[
-                    PauliString::from_text("+Z_").unwrap(),
-                    PauliString::from_text("+_X").unwrap(),
+                    "+Z_".parse::<PauliString>().unwrap(),
+                    "+_X".parse::<PauliString>().unwrap(),
                 ],
                 &[
-                    PauliString::from_text("+XX").unwrap(),
-                    PauliString::from_text("+ZZ").unwrap(),
+                    "+XX".parse::<PauliString>().unwrap(),
+                    "+ZZ".parse::<PauliString>().unwrap(),
                 ],
             )
             .unwrap()
@@ -1717,8 +1717,8 @@ mod tests {
             )
             .unwrap(),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("+Y").unwrap()],
-                &[PauliString::from_text("+Z").unwrap()],
+                &["+Y".parse::<PauliString>().unwrap()],
+                &["+Z".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
@@ -1756,12 +1756,12 @@ mod tests {
             .unwrap(),
             Tableau::from_conjugated_generators(
                 &[
-                    PauliString::from_text("+XZ").unwrap(),
-                    PauliString::from_text("+YX").unwrap(),
+                    "+XZ".parse::<PauliString>().unwrap(),
+                    "+YX".parse::<PauliString>().unwrap(),
                 ],
                 &[
-                    PauliString::from_text("+ZZ").unwrap(),
-                    PauliString::from_text("+_Z").unwrap(),
+                    "+ZZ".parse::<PauliString>().unwrap(),
+                    "+_Z".parse::<PauliString>().unwrap(),
                 ],
             )
             .unwrap()
@@ -1826,16 +1826,16 @@ mod tests {
 
         let t = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("-Y_ZY").unwrap(),
-                PauliString::from_text("-Y_YZ").unwrap(),
-                PauliString::from_text("-XXX_").unwrap(),
-                PauliString::from_text("+ZYX_").unwrap(),
+                "-Y_ZY".parse::<PauliString>().unwrap(),
+                "-Y_YZ".parse::<PauliString>().unwrap(),
+                "-XXX_".parse::<PauliString>().unwrap(),
+                "+ZYX_".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("-_ZZX").unwrap(),
-                PauliString::from_text("+YZXZ").unwrap(),
-                PauliString::from_text("+XZ_X").unwrap(),
-                PauliString::from_text("-YYXX").unwrap(),
+                "-_ZZX".parse::<PauliString>().unwrap(),
+                "+YZXZ".parse::<PauliString>().unwrap(),
+                "+XZ_X".parse::<PauliString>().unwrap(),
+                "-YYXX".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap();
@@ -1918,7 +1918,7 @@ mod tests {
     #[test]
     fn tableau_pow_and_call_aliases_match_existing_behavior() {
         let tableau = Tableau::from_named_gate("H").unwrap();
-        let pauli = PauliString::from_text("+X").unwrap();
+        let pauli = "+X".parse::<PauliString>().unwrap();
 
         assert_eq!(tableau.pow(3), tableau.raised_to(3));
         assert_eq!(tableau.call(&pauli), tableau.conjugate(&pauli));
@@ -1974,16 +1974,16 @@ mod circuit_interop_tests {
     fn documented_to_circuit_tableau() -> Tableau {
         Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("+YZ__").unwrap(),
-                PauliString::from_text("-Y_XY").unwrap(),
-                PauliString::from_text("+___Y").unwrap(),
-                PauliString::from_text("+YZX_").unwrap(),
+                "+YZ__".parse::<PauliString>().unwrap(),
+                "-Y_XY".parse::<PauliString>().unwrap(),
+                "+___Y".parse::<PauliString>().unwrap(),
+                "+YZX_".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("+XZYY").unwrap(),
-                PauliString::from_text("-XYX_").unwrap(),
-                PauliString::from_text("-ZXXZ").unwrap(),
-                PauliString::from_text("+XXZ_").unwrap(),
+                "+XZYY".parse::<PauliString>().unwrap(),
+                "-XYX_".parse::<PauliString>().unwrap(),
+                "-ZXXZ".parse::<PauliString>().unwrap(),
+                "+XXZ_".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap()
@@ -2047,8 +2047,8 @@ mod circuit_interop_tests {
         assert_eq!(
             Tableau::from_stabilizers(
                 &[
-                    PauliString::from_text("XX").unwrap(),
-                    PauliString::from_text("ZZ").unwrap(),
+                    "XX".parse::<PauliString>().unwrap(),
+                    "ZZ".parse::<PauliString>().unwrap(),
                 ],
                 false,
                 false,
@@ -2056,12 +2056,12 @@ mod circuit_interop_tests {
             .unwrap(),
             Tableau::from_conjugated_generators(
                 &[
-                    PauliString::from_text("+Z_").unwrap(),
-                    PauliString::from_text("+_X").unwrap(),
+                    "+Z_".parse::<PauliString>().unwrap(),
+                    "+_X".parse::<PauliString>().unwrap(),
                 ],
                 &[
-                    PauliString::from_text("+XX").unwrap(),
-                    PauliString::from_text("+ZZ").unwrap(),
+                    "+XX".parse::<PauliString>().unwrap(),
+                    "+ZZ".parse::<PauliString>().unwrap(),
                 ],
             )
             .unwrap()
@@ -2070,10 +2070,10 @@ mod circuit_interop_tests {
         assert!(
             Tableau::from_stabilizers(
                 &[
-                    PauliString::from_text("XX_").unwrap(),
-                    PauliString::from_text("ZZ_").unwrap(),
-                    PauliString::from_text("-YY_").unwrap(),
-                    PauliString::from_text("").unwrap(),
+                    "XX_".parse::<PauliString>().unwrap(),
+                    "ZZ_".parse::<PauliString>().unwrap(),
+                    "-YY_".parse::<PauliString>().unwrap(),
+                    "".parse::<PauliString>().unwrap(),
                 ],
                 true,
                 true,
@@ -2084,8 +2084,8 @@ mod circuit_interop_tests {
         assert!(
             Tableau::from_stabilizers(
                 &[
-                    PauliString::from_text("Z").unwrap(),
-                    PauliString::from_text("X").unwrap(),
+                    "Z".parse::<PauliString>().unwrap(),
+                    "X".parse::<PauliString>().unwrap(),
                 ],
                 false,
                 false,
@@ -2098,9 +2098,9 @@ mod circuit_interop_tests {
         assert!(
             Tableau::from_stabilizers(
                 &[
-                    PauliString::from_text("Z_").unwrap(),
-                    PauliString::from_text("-_Z").unwrap(),
-                    PauliString::from_text("ZZ").unwrap(),
+                    "Z_".parse::<PauliString>().unwrap(),
+                    "-_Z".parse::<PauliString>().unwrap(),
+                    "ZZ".parse::<PauliString>().unwrap(),
                 ],
                 false,
                 false,
@@ -2117,14 +2117,14 @@ mod circuit_interop_tests {
             Tableau::new(3),
             Tableau::from_conjugated_generators(
                 &[
-                    PauliString::from_text("X__").unwrap(),
-                    PauliString::from_text("_X_").unwrap(),
-                    PauliString::from_text("__X").unwrap(),
+                    "X__".parse::<PauliString>().unwrap(),
+                    "_X_".parse::<PauliString>().unwrap(),
+                    "__X".parse::<PauliString>().unwrap(),
                 ],
                 &[
-                    PauliString::from_text("Z__").unwrap(),
-                    PauliString::from_text("_Z_").unwrap(),
-                    PauliString::from_text("__Z").unwrap(),
+                    "Z__".parse::<PauliString>().unwrap(),
+                    "_Z_".parse::<PauliString>().unwrap(),
+                    "__Z".parse::<PauliString>().unwrap(),
                 ],
             )
             .unwrap()
@@ -2132,25 +2132,25 @@ mod circuit_interop_tests {
         assert_eq!(
             Tableau::from_named_gate("S").unwrap(),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("Y").unwrap()],
-                &[PauliString::from_text("Z").unwrap()],
+                &["Y".parse::<PauliString>().unwrap()],
+                &["Z".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
         assert_eq!(
             Tableau::from_named_gate("S_DAG").unwrap(),
             Tableau::from_conjugated_generators(
-                &[PauliString::from_text("-Y").unwrap()],
-                &[PauliString::from_text("Z").unwrap()],
+                &["-Y".parse::<PauliString>().unwrap()],
+                &["Z".parse::<PauliString>().unwrap()],
             )
             .unwrap()
         );
 
         let err = Tableau::from_conjugated_generators(
-            &[PauliString::from_text("X_").unwrap()],
+            &["X_".parse::<PauliString>().unwrap()],
             &[
-                PauliString::from_text("Z_").unwrap(),
-                PauliString::from_text("_Z").unwrap(),
+                "Z_".parse::<PauliString>().unwrap(),
+                "_Z".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap_err();
@@ -2158,12 +2158,12 @@ mod circuit_interop_tests {
 
         let err = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("X_").unwrap(),
-                PauliString::from_text("_X_").unwrap(),
+                "X_".parse::<PauliString>().unwrap(),
+                "_X_".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("Z_").unwrap(),
-                PauliString::from_text("_Z").unwrap(),
+                "Z_".parse::<PauliString>().unwrap(),
+                "_Z".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap_err();
@@ -2171,12 +2171,12 @@ mod circuit_interop_tests {
 
         let err = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("X_").unwrap(),
-                PauliString::from_text("_X").unwrap(),
+                "X_".parse::<PauliString>().unwrap(),
+                "_X".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("Z_").unwrap(),
-                PauliString::from_text("_Z_").unwrap(),
+                "Z_".parse::<PauliString>().unwrap(),
+                "_Z_".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap_err();
@@ -2184,12 +2184,12 @@ mod circuit_interop_tests {
 
         let err = Tableau::from_conjugated_generators(
             &[
-                PauliString::from_text("X_").unwrap(),
-                PauliString::from_text("_Z").unwrap(),
+                "X_".parse::<PauliString>().unwrap(),
+                "_Z".parse::<PauliString>().unwrap(),
             ],
             &[
-                PauliString::from_text("Z_").unwrap(),
-                PauliString::from_text("_Z").unwrap(),
+                "Z_".parse::<PauliString>().unwrap(),
+                "_Z".parse::<PauliString>().unwrap(),
             ],
         )
         .unwrap_err();
@@ -2232,7 +2232,7 @@ mod circuit_interop_tests {
         let via_then = h.then(&s).unwrap();
 
         assert_eq!(product, via_then);
-        let p = PauliString::from_text("X").unwrap();
+        let p = "X".parse::<PauliString>().unwrap();
         assert_eq!(product.conjugate(&p), s.conjugate(&h.conjugate(&p)));
     }
 
@@ -2241,44 +2241,44 @@ mod circuit_interop_tests {
         let t = Tableau::from_named_gate("CNOT").unwrap();
 
         assert_eq!(
-            t.conjugate(&PauliString::from_text("__").unwrap()),
-            PauliString::from_text("__").unwrap()
+            t.conjugate(&"__".parse::<PauliString>().unwrap()),
+            "__".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("-__").unwrap()),
-            PauliString::from_text("-__").unwrap()
+            t.conjugate(&"-__".parse::<PauliString>().unwrap()),
+            "-__".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("X_").unwrap()),
-            PauliString::from_text("XX").unwrap()
+            t.conjugate(&"X_".parse::<PauliString>().unwrap()),
+            "XX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("Y_").unwrap()),
-            PauliString::from_text("YX").unwrap()
+            t.conjugate(&"Y_".parse::<PauliString>().unwrap()),
+            "YX".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("Z_").unwrap()),
-            PauliString::from_text("Z_").unwrap()
+            t.conjugate(&"Z_".parse::<PauliString>().unwrap()),
+            "Z_".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("_X").unwrap()),
-            PauliString::from_text("_X").unwrap()
+            t.conjugate(&"_X".parse::<PauliString>().unwrap()),
+            "_X".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("_Y").unwrap()),
-            PauliString::from_text("ZY").unwrap()
+            t.conjugate(&"_Y".parse::<PauliString>().unwrap()),
+            "ZY".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("_Z").unwrap()),
-            PauliString::from_text("ZZ").unwrap()
+            t.conjugate(&"_Z".parse::<PauliString>().unwrap()),
+            "ZZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("YY").unwrap()),
-            PauliString::from_text("-XZ").unwrap()
+            t.conjugate(&"YY".parse::<PauliString>().unwrap()),
+            "-XZ".parse::<PauliString>().unwrap()
         );
         assert_eq!(
-            t.conjugate(&PauliString::from_text("-YY").unwrap()),
-            PauliString::from_text("XZ").unwrap()
+            t.conjugate(&"-YY".parse::<PauliString>().unwrap()),
+            "XZ".parse::<PauliString>().unwrap()
         );
     }
 
@@ -2289,15 +2289,15 @@ mod circuit_interop_tests {
         assert_eq!(
             t.to_stabilizers(false).unwrap(),
             vec![
-                PauliString::from_text("+Z_").unwrap(),
-                PauliString::from_text("+ZZ").unwrap(),
+                "+Z_".parse::<PauliString>().unwrap(),
+                "+ZZ".parse::<PauliString>().unwrap(),
             ]
         );
         assert_eq!(
             t.to_stabilizers(true).unwrap(),
             vec![
-                PauliString::from_text("+Z_").unwrap(),
-                PauliString::from_text("+_Z").unwrap(),
+                "+Z_".parse::<PauliString>().unwrap(),
+                "+_Z".parse::<PauliString>().unwrap(),
             ]
         );
     }
@@ -2409,8 +2409,8 @@ mod circuit_interop_tests {
             Tableau::new(1).then(&Tableau::new(1)).unwrap(),
             Tableau::new(1)
         );
-        assert_eq!(hs.x_output(0), PauliString::from_text("+Z").unwrap());
-        assert_eq!(hs.z_output(0), PauliString::from_text("+Y").unwrap());
+        assert_eq!(hs.x_output(0), "+Z".parse::<PauliString>().unwrap());
+        assert_eq!(hs.z_output(0), "+Y".parse::<PauliString>().unwrap());
 
         let err = Tableau::new(3).then(&Tableau::new(4)).unwrap_err();
         assert!(err.to_string().contains("len(self) != len(second)"));
@@ -2520,18 +2520,18 @@ mod circuit_interop_tests {
 
         assert_eq!(
             Tableau::from_named_gate("H").unwrap().x_output(0),
-            PauliString::from_text("+Z").unwrap()
+            "+Z".parse::<PauliString>().unwrap()
         );
         assert_eq!(
             Tableau::from_named_gate("H").unwrap().z_output(0),
-            PauliString::from_text("+X").unwrap()
+            "+X".parse::<PauliString>().unwrap()
         );
-        assert_eq!(cnot.x_output(0), PauliString::from_text("+XX").unwrap());
-        assert_eq!(cnot.x_output(1), PauliString::from_text("+_X").unwrap());
-        assert_eq!(cnot.y_output(0), PauliString::from_text("+YX").unwrap());
-        assert_eq!(cnot.y_output(1), PauliString::from_text("+ZY").unwrap());
-        assert_eq!(cnot.z_output(0), PauliString::from_text("+Z_").unwrap());
-        assert_eq!(cnot.z_output(1), PauliString::from_text("+ZZ").unwrap());
+        assert_eq!(cnot.x_output(0), "+XX".parse::<PauliString>().unwrap());
+        assert_eq!(cnot.x_output(1), "+_X".parse::<PauliString>().unwrap());
+        assert_eq!(cnot.y_output(0), "+YX".parse::<PauliString>().unwrap());
+        assert_eq!(cnot.y_output(1), "+ZY".parse::<PauliString>().unwrap());
+        assert_eq!(cnot.z_output(0), "+Z_".parse::<PauliString>().unwrap());
+        assert_eq!(cnot.z_output(1), "+ZZ".parse::<PauliString>().unwrap());
     }
 
     #[test]
@@ -2608,17 +2608,17 @@ mod circuit_interop_tests {
 
     #[test]
     fn pauli_string_sign_and_to_tableau_match_documented_examples() {
-        assert_eq!(PauliString::from_text("X").unwrap().sign(), 1);
-        assert_eq!(PauliString::from_text("-X").unwrap().sign(), -1);
+        assert_eq!("X".parse::<PauliString>().unwrap().sign(), 1);
+        assert_eq!("-X".parse::<PauliString>().unwrap().sign(), -1);
 
-        let zz = PauliString::from_text("ZZ").unwrap();
+        let zz = "ZZ".parse::<PauliString>().unwrap();
         let tableau = zz.to_tableau();
         assert_eq!(
             format!("{tableau:?}"),
             "stim.Tableau.from_conjugated_generators(\n    xs=[\n        stim.PauliString(\"-X_\"),\n        stim.PauliString(\"-_X\"),\n    ],\n    zs=[\n        stim.PauliString(\"+Z_\"),\n        stim.PauliString(\"+_Z\"),\n    ],\n)"
         );
 
-        let p = PauliString::from_text("+YX_Z").unwrap();
+        let p = "+YX_Z".parse::<PauliString>().unwrap();
         assert_eq!(p.to_tableau().to_pauli_string().unwrap(), p);
 
         let err = Tableau::from_named_gate("CNOT")
