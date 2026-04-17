@@ -37,16 +37,29 @@ cargo add stim
 
 Issues and pull requests are very welcome, whether they relate to performance, ergonomics, or bugs.
 
-### Git Hooks
+### Pre-commit
 
-This repo includes a committed pre-commit hook under `.githooks/pre-commit`.
+This repo ships a committed [pre-commit](https://pre-commit.com/) configuration.
 Install it locally with:
 
 ```bash
-bash tools/install-git-hooks.sh
+pre-commit install
 ```
 
-The hook runs:
+Run the full hook suite manually with:
+
+```bash
+pre-commit run --all-files
+```
+
+Common local workflows are also exposed through the repo `justfile`:
+
+```bash
+just verify
+just pre-commit-run
+```
+
+The configured hooks run:
 
 ```bash
 cargo fmt --all --check
