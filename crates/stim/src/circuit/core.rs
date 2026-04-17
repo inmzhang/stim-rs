@@ -1910,7 +1910,7 @@ mod api_tests {
 
     use ndarray::Array2;
 
-    use crate::{Circuit, Gate, all_gates};
+    use crate::{Circuit, Gate};
 
     fn unique_temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -2814,7 +2814,7 @@ mod api_tests {
 
     #[test]
     fn all_gate_data_returns_canonical_gate_inventory() {
-        let inventory = all_gates();
+        let inventory = Gate::ALL;
 
         assert!(inventory.contains(&Gate::CX));
         assert!(inventory.contains(&Gate::DETECTOR));
@@ -3129,27 +3129,20 @@ mod residual_api_tests {
     fn circuit_append_gate_targets_supports_combined_pauli_products_for_mpp() {
         let mut circuit = Circuit::new();
 
-        let mut targets = crate::target_combined_paulis(
-            &[
-                crate::GateTarget::x(1_u32, false).expect("X target should construct"),
-                crate::GateTarget::y(2_u32, false).expect("Y target should construct"),
-                crate::GateTarget::z(3_u32, false).expect("Z target should construct"),
-            ],
-            false,
-        )
-        .expect("combined pauli product should construct");
+        let mut targets = vec![
+            crate::GateTarget::x(1_u32, false).expect("X target should construct"),
+            crate::GateTarget::combiner(),
+            crate::GateTarget::y(2_u32, false).expect("Y target should construct"),
+            crate::GateTarget::combiner(),
+            crate::GateTarget::z(3_u32, false).expect("Z target should construct"),
+        ];
         targets.push(crate::GateTarget::y(4_u32, false).expect("single Y target should construct"));
         targets.push(crate::GateTarget::z(5_u32, false).expect("single Z target should construct"));
-        targets.extend(
-            crate::target_combined_paulis(
-                &[
-                    crate::GateTarget::x(1_u32, false).expect("X target should construct"),
-                    crate::GateTarget::x(2_u32, false).expect("X target should construct"),
-                ],
-                true,
-            )
-            .expect("inverted combined pauli product should construct"),
-        );
+        targets.extend([
+            crate::GateTarget::x(1_u32, true).expect("inverted X target should construct"),
+            crate::GateTarget::combiner(),
+            crate::GateTarget::x(2_u32, false).expect("X target should construct"),
+        ]);
 
         circuit
             .append_gate_targets(gate("MPP"), &targets, &[])

@@ -95,7 +95,6 @@ pub use dem::{
 };
 pub use metadata::{
     ExplainedError, FlippedMeasurement, Gate, GateData, GateTarget, GateTargetWithCoords,
-    all_gates, target_combined_paulis,
 };
 pub use noise::{NoiseModel, Si1000, UniformDepolarizing};
 pub use simulators::{

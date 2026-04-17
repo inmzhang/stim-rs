@@ -742,27 +742,6 @@ impl GateData {
     }
 }
 
-/// Returns the full canonical gate inventory, keyed by canonical gate name.
-///
-/// The returned map contains one entry per canonical Stim gate. Aliases are *not*
-/// included as separate keys — for example, the map contains `"CX"` but not `"CNOT"`.
-/// To look up a gate by alias, use [`Gate::new`] instead.
-///
-/// This is useful for enumerating all gates that Stim supports, for example to build
-/// a gate reference or to iterate over gate properties programmatically.
-///
-/// # Examples
-///
-/// ```
-/// let gates = stim::all_gates();
-/// assert!(gates.contains(&stim::Gate::H));
-/// assert!(gates.contains(&stim::Gate::CX));
-/// ```
-#[must_use]
-pub fn all_gates() -> &'static [Gate] {
-    Gate::ALL
-}
-
 impl Clone for GateData {
     fn clone(&self) -> Self {
         Self {
@@ -809,7 +788,7 @@ impl fmt::Debug for GateData {
 #[cfg(test)]
 mod tests {
     use super::Gate;
-    use crate::{Complex32, Flow, all_gates};
+    use crate::{Complex32, Flow};
 
     #[test]
     fn gate_data_new_matches_lookup() {
@@ -942,7 +921,7 @@ mod tests {
 
     #[test]
     fn all_gate_data_enumerates_canonical_inventory_with_roundtrip_invariants() {
-        let inventory = all_gates();
+        let inventory = Gate::ALL;
 
         assert!(inventory.contains(&Gate::CX));
         assert!(inventory.contains(&Gate::DETECTOR));

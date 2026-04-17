@@ -422,7 +422,7 @@ impl From<u32> for GateTarget {
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
-    use super::{GateTarget, target_combined_paulis};
+    use super::GateTarget;
     use std::collections::{BTreeSet, HashSet};
 
     fn target_rec(lookback_index: i32) -> crate::Result<GateTarget> {
@@ -853,69 +853,6 @@ mod tests {
     }
 
     #[test]
-    fn target_combined_paulis_inserts_combiners_and_applies_sign_rules() {
-        let x5 = target_x(5, false).expect("X target should be constructible");
-        let z9 = target_z(9, false).expect("Z target should be constructible");
-
-        assert_eq!(
-            target_combined_paulis(&[x5, z9], false).expect("pauli product should combine"),
-            vec![x5, target_combiner(), z9]
-        );
-        assert_eq!(
-            target_combined_paulis(&[x5, z9], true)
-                .expect("explicit inversion should flip the product sign"),
-            vec![
-                target_x(5, true).expect("inverted X target should be constructible"),
-                target_combiner(),
-                z9,
-            ]
-        );
-
-        assert_eq!(
-            target_combined_paulis(
-                &[
-                    target_x(5, false).expect("X target should be constructible"),
-                    target_z(9, true).expect("inverted Z target should be constructible"),
-                ],
-                false,
-            )
-            .expect("inverted member should fold into overall sign"),
-            vec![
-                target_x(5, true).expect("inverted X target should be constructible"),
-                target_combiner(),
-                target_z(9, false).expect("Z target should be constructible"),
-            ]
-        );
-    }
-
-    #[test]
-    fn target_combined_paulis_rejects_identity_and_non_pauli_targets() {
-        let identity =
-            target_combined_paulis(&[], false).expect_err("empty pauli product should be rejected");
-        assert!(
-            identity.message().contains("identity pauli product"),
-            "unexpected identity error: {identity}"
-        );
-
-        let qubit = target_combined_paulis(&[GateTarget::from(5u32)], false)
-            .expect_err("plain qubit targets are not pauli targets");
-        assert!(
-            qubit.message().contains("expected pauli targets"),
-            "unexpected qubit error: {qubit}"
-        );
-
-        let record = target_combined_paulis(
-            &[target_rec(-2).expect("record target should be constructible")],
-            false,
-        )
-        .expect_err("record targets are not pauli targets");
-        assert!(
-            record.message().contains("expected pauli targets"),
-            "unexpected record error: {record}"
-        );
-    }
-
-    #[test]
     fn gate_target_rejects_unknown_text_and_identity_pauli_maps_to_plain_qubit() {
         let error = "not-a-target".parse::<GateTarget>().unwrap_err();
         assert!(error.message().contains("unrecognized target"));
@@ -979,55 +916,6 @@ impl FromStr for GateTarget {
     fn from_str(s: &str) -> Result<Self> {
         Self::parse_text(s)
     }
-}
-
-/// Creates a measurement-record target like `rec[-k]`.
-/// Builds a combined Pauli product target list suitable for `MPP`.
-///
-/// # Examples
-///
-/// ```
-/// let targets = stim::target_combined_paulis(
-///     &[
-///         stim::GateTarget::x(1u32, false).unwrap(),
-///         stim::GateTarget::z(2u32, false).unwrap(),
-///     ],
-///     false,
-/// )
-/// .unwrap();
-/// assert_eq!(
-///     targets
-///         .iter()
-///         .map(ToString::to_string)
-///         .collect::<Vec<_>>(),
-///     vec!["X1".to_string(), "*".to_string(), "Z2".to_string()]
-/// );
-/// ```
-pub fn target_combined_paulis(paulis: &[GateTarget], invert: bool) -> Result<Vec<GateTarget>> {
-    let mut result = Vec::new();
-    let mut invert = invert;
-    for target in paulis.iter().copied() {
-        if target.pauli_type() == 'I' {
-            return Err(StimError::new(format!(
-                "expected pauli targets but got '{target}'"
-            )));
-        }
-        let mut target = target;
-        if target.is_inverted_result_target() {
-            invert ^= true;
-            target = target.inverted()?;
-        }
-        result.push(target);
-        result.push(GateTarget::combiner());
-    }
-    if result.is_empty() {
-        return Err(StimError::new("identity pauli product is not allowed"));
-    }
-    result.pop();
-    if invert {
-        result[0] = result[0].inverted()?;
-    }
-    Ok(result)
 }
 
 fn ensure_target_value_range(value: u32) -> Result<()> {
