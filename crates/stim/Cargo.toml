@@ -1,6 +1,6 @@
 [package]
 name = "stim"
-version = "0.4.0"
+version = "0.4.1"
 authors.workspace = true
 repository.workspace = true
 edition.workspace = true
@@ -22,4 +22,4 @@ targets = []
 cxx = "1.0"
 ndarray = "0.17.2"
 num-complex = "0.4.6"
-stim-cxx = { path = "../stim-cxx", version = "0.4.0" }
+stim-cxx = { path = "../stim-cxx", version = "0.4.1" }
