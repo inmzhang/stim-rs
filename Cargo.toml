@@ -12,6 +12,6 @@ publish = false
 
 [workspace.metadata.stim]
 upstream_url = "https://github.com/quantumlib/Stim.git"
-pinned_commit = "75d9cb12626a9dccca3e9917a5020aa1d3f3dc46"
+pinned_commit = "e9cc7dee0a67bb4dbea2733f0170d03dcecd3cd0"
 doc_path = "vendor/stim/doc/python_api_reference_vDev.md"
 doc_sha256 = "7fa2899fb9658a638d35c5d70ef7339ed45647664be7e7f6314d014acb74a0a2"

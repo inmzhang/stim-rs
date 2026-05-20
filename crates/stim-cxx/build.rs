@@ -46,7 +46,7 @@ fn main() {
     let vendor_sources = collect_vendor_sources(&vendor_dir);
 
     println!("cargo:rustc-env=STIM_RS_CXX_STANDARD=c++20");
-    println!("cargo:rustc-env=STIM_RS_PINNED_STIM_COMMIT=bdaecd7748bf4e85d88cbe4d2c2e01dc56562d6f");
+    println!("cargo:rustc-env=STIM_RS_PINNED_STIM_COMMIT=e9cc7dee0a67bb4dbea2733f0170d03dcecd3cd0");
     println!(
         "cargo:rustc-env=STIM_RS_TARGET={}",
         env::var("TARGET").expect("missing TARGET")
@@ -67,15 +67,6 @@ fn main() {
         .include("include")
         .include(&vendor_dir)
         .include(&vendor_src_dir);
-    // The pinned Stim snapshot uses fixed-width integer types from <cstdint>
-    // in some headers without including it directly. Newer libstdc++ versions
-    // no longer expose those names transitively, so inject the standard header
-    // for every vendored Stim translation unit without editing vendor sources.
-    if build.get_compiler().is_like_msvc() {
-        build.flag("/FIcstdint");
-    } else {
-        build.flag("-include").flag("cstdint");
-    }
     build.define("STIM_RS_VENDOR_STIM_PRESENT", Some("1"));
 
     build.compile("stim-cxx-bridge");
