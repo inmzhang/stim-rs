@@ -322,12 +322,74 @@ fn parse_flow_text(text: &str) -> (crate::PauliString, crate::PauliString, Vec<i
 }
 
 fn parse_flow_pauli(text: &str) -> crate::PauliString {
-    if text == "1" {
-        crate::PauliString::new(0)
-    } else {
-        text.parse::<crate::PauliString>()
-            .expect("canonical flow pauli term should be parseable as a PauliString")
+    if text == "1" || text == "+1" {
+        return crate::PauliString::new(0);
     }
+    if text == "-1" {
+        return crate::PauliString::from_real_sign_and_body(-1, "");
+    }
+    normalize_flow_pauli_text(text)
+        .parse::<crate::PauliString>()
+        .expect("canonical flow pauli term should be parseable as a PauliString")
+}
+
+fn normalize_flow_pauli_text(text: &str) -> String {
+    let (sign, body) = text
+        .strip_prefix('-')
+        .map_or(("", text), |body| ("-", body));
+    if body == "1" {
+        return sign.to_string();
+    }
+    if is_sparse_flow_pauli_body(body) {
+        return normalize_sparse_flow_pauli_body(sign, body);
+    }
+    if body.bytes().any(|c| c == b'1') {
+        return format!("{sign}{}", body.replace('1', "_"));
+    }
+    format!("{sign}{body}")
+}
+
+fn is_sparse_flow_pauli_body(body: &str) -> bool {
+    body.split('*').all(|term| {
+        let mut chars = term.chars();
+        matches!(chars.next(), Some('I' | 'X' | 'Y' | 'Z' | 'x' | 'y' | 'z')) && {
+            let mut has_index = false;
+            for c in chars {
+                if !c.is_ascii_digit() {
+                    return false;
+                }
+                has_index = true;
+            }
+            has_index
+        }
+    })
+}
+
+fn normalize_sparse_flow_pauli_body(sign: &str, body: &str) -> String {
+    let mut result = Vec::<u8>::new();
+    for term in body.split('*') {
+        if term.len() < 2 {
+            panic!("canonical sparse flow pauli term should include a Pauli and a qubit index");
+        }
+        let (pauli_text, index_text) = term.split_at(1);
+        let pauli = pauli_text.as_bytes()[0].to_ascii_uppercase();
+        let index = index_text
+            .parse::<usize>()
+            .expect("canonical sparse flow pauli term should contain a usize qubit index");
+        if !matches!(pauli, b'I' | b'X' | b'Y' | b'Z') {
+            panic!("canonical sparse flow pauli term should start with I, X, Y, or Z");
+        }
+        if result.len() <= index {
+            result.resize(index + 1, b'_');
+        }
+        if pauli != b'I' {
+            result[index] = pauli;
+        }
+    }
+    format!(
+        "{sign}{}",
+        String::from_utf8(result).expect("normalized sparse Pauli body should be ASCII")
+    )
 }
 
 #[cfg(test)]
@@ -358,6 +420,51 @@ mod tests {
                 .to_string(),
             "X -> Y xor obs[3]"
         );
+    }
+
+    #[test]
+    fn flow_new_accepts_measurement_only_rhs_with_wide_input() {
+        let flow = Flow::new("_______________X_____X -> rec[-1]").unwrap();
+        assert_eq!(flow.to_string(), "X15*X21 -> rec[-1]");
+        assert_eq!(flow.output(), &crate::PauliString::new(0));
+        assert_eq!(flow.measurements(), &[-1]);
+    }
+
+    #[test]
+    fn flow_new_accepts_measurement_only_rhs_with_short_input() {
+        let flow = Flow::new("X_ -> rec[-1]").unwrap();
+        assert_eq!(flow.to_string(), "X_ -> rec[-1]");
+        assert_eq!(flow.output(), &crate::PauliString::new(0));
+        assert_eq!(flow.measurements(), &[-1]);
+    }
+
+    #[test]
+    fn flow_from_canonical_text_accepts_flow_pauli_identity_markers() {
+        let flow = Flow::from_canonical_text("X_ -> 1_ xor rec[-1]".to_string());
+        assert_eq!(flow.output(), &"__".parse::<crate::PauliString>().unwrap());
+        assert_eq!(flow.measurements(), &[-1]);
+
+        let flow = Flow::from_canonical_text("X_ -> 1_X xor rec[-1]".to_string());
+        assert_eq!(flow.output(), &"__X".parse::<crate::PauliString>().unwrap());
+        assert_eq!(flow.measurements(), &[-1]);
+    }
+
+    #[test]
+    fn flow_from_canonical_text_accepts_sparse_flow_pauli_terms() {
+        let flow = Flow::from_canonical_text("X15*X21 -> Z20 xor rec[-1]".to_string());
+        assert_eq!(
+            flow.input(),
+            &"_______________X_____X"
+                .parse::<crate::PauliString>()
+                .unwrap()
+        );
+        assert_eq!(
+            flow.output(),
+            &"____________________Z"
+                .parse::<crate::PauliString>()
+                .unwrap()
+        );
+        assert_eq!(flow.measurements(), &[-1]);
     }
 
     #[test]
