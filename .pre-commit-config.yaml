@@ -1,28 +1,45 @@
 repos:
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.47.2
+    hooks:
+      - id: typos
+        args: [--force-exclude]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
   - repo: local
     hooks:
       - id: cargo-fmt
-        name: cargo fmt --all --check
+        name: cargo fmt
         entry: cargo fmt --all --check
         language: system
         pass_filenames: false
       - id: cargo-clippy
-        name: cargo clippy --workspace --all-targets -- -D warnings
+        name: cargo clippy
         entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         pass_filenames: false
-      - id: cargo-test-workspace
-        name: cargo test --workspace
+      - id: cargo-test
+        name: cargo test
         entry: cargo test --workspace
         language: system
         pass_filenames: false
       - id: cargo-test-doc
-        name: cargo test --doc -p stim
+        name: cargo test doc
         entry: cargo test --doc -p stim
         language: system
         pass_filenames: false
-      - id: cargo-doc-stim
-        name: cargo doc -p stim --no-deps with rustdoc warnings denied
+      - id: cargo-doc
+        name: cargo doc
         entry: env RUSTDOCFLAGS=-Dwarnings cargo doc -p stim --no-deps
+        language: system
+        pass_filenames: false
+      - id: actionlint
+        name: actionlint
+        entry: actionlint
         language: system
         pass_filenames: false

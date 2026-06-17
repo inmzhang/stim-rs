@@ -1,0 +1,46 @@
+[workspace]
+dependencies_update = false
+git_release_enable = true
+git_release_name = "v{{ version }}"
+git_tag_name = "v{{ version }}"
+publish_allow_dirty = true
+release_always = false
+repo_url = "https://github.com/inmzhang/stim-rs"
+
+[[package]]
+name = "stim"
+changelog_include = ["stim-cxx"]
+version_group = "stim-rs"
+
+[[package]]
+name = "stim-cxx"
+git_release_enable = false
+git_tag_enable = false
+version_group = "stim-rs"
+
+[changelog]
+header = "# Changelog\n\n"
+body = """
+{% if version %}## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+commit_parsers = [
+  { message = "^feat", group = "added" },
+  { message = "^fix", group = "fixed" },
+  { message = "^perf", group = "performance" },
+  { message = "^docs", group = "documentation" },
+  { message = "^refactor", group = "changed" },
+  { message = "^test", group = "testing" },
+  { message = "^ci", group = "ci" },
+  { message = "^build", group = "build" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", group = "misc" },
+]

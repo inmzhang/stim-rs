@@ -45,7 +45,7 @@ This repo ships a committed [pre-commit](https://pre-commit.com/) configuration.
 Install it locally with:
 
 ```bash
-pre-commit install
+just pre-commit-install
 ```
 
 Run the full hook suite manually with:
@@ -61,7 +61,8 @@ just verify
 just pre-commit-run
 ```
 
-The configured hooks run:
+The configured hooks check Conventional Commit messages, spelling, GitHub
+workflows, and:
 
 ```bash
 cargo fmt --all --check
@@ -70,6 +71,22 @@ cargo test --workspace
 cargo test --doc -p stim
 env RUSTDOCFLAGS=-Dwarnings cargo doc -p stim --no-deps
 ```
+
+### Release workflow
+
+Releases are managed by `release-plz` from commits merged to `main`.
+Use Conventional Commits so the release PR can infer the next version and
+changelog entry.
+
+The `Release` workflow:
+
+* opens or updates a release PR with `release-plz`
+* builds prebuilt Stim static libraries for Linux x86_64, Linux aarch64, macOS
+  aarch64, and Windows x86_64 MSVC
+* writes `crates/stim-cxx/prebuilt-sha256.txt` for the crate package
+* smoke-tests the Linux prebuilt asset
+* publishes the crates, creates the `vX.Y.Z` GitHub release, and uploads the
+  prebuilt assets from CI
 
 ## License
 

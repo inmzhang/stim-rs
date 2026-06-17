@@ -25,6 +25,7 @@ verify: fmt-check clippy test test-doc doc-check
 
 pre-commit-install:
     pre-commit install
+    pre-commit install --hook-type commit-msg
 
 pre-commit-run:
     pre-commit run --all-files
