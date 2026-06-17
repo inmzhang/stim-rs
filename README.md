@@ -83,7 +83,7 @@ The `Release` workflow:
 * opens or updates a release PR with `release-plz`
 * builds prebuilt Stim static libraries for Linux x86_64, Linux aarch64, macOS
   aarch64, and Windows x86_64 MSVC
-* writes `crates/stim-cxx/prebuilt-sha256.txt` for the crate package
+* writes `stim-cxx/prebuilt-sha256.txt` for the crate package
 * smoke-tests the Linux prebuilt asset
 * publishes the crates, creates the `vX.Y.Z` GitHub release, and uploads the
   prebuilt assets from CI
@@ -91,17 +91,17 @@ The `Release` workflow:
 ## License
 
 Licensed under Apache-2.0. The vendored upstream Stim sources under
-`crates/stim-cxx/vendor/stim` are also distributed under Apache-2.0.
+`stim-cxx/vendor/stim` are also distributed under Apache-2.0.
 
 ### Updating the vendored Stim C++ source
 
 The upstream Stim C++ library is vendored as a git submodule at
-`crates/stim-cxx/vendor/stim`. To update it:
+`stim-cxx/vendor/stim`. To update it:
 
 ```bash
-git -C crates/stim-cxx/vendor/stim fetch origin
-git -C crates/stim-cxx/vendor/stim checkout <commit-or-tag>
-# Update STIM_RS_PINNED_STIM_COMMIT in crates/stim-cxx/build.rs to match.
+git -C stim-cxx/vendor/stim fetch origin
+git -C stim-cxx/vendor/stim checkout <commit-or-tag>
+# Update STIM_RS_PINNED_STIM_COMMIT in stim-cxx/build.rs to match.
 cargo nextest run -p stim && cargo test --doc -p stim
-git add crates/stim-cxx/vendor/stim crates/stim-cxx/build.rs
+git add stim-cxx/vendor/stim stim-cxx/build.rs
 ```

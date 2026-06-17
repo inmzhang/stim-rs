@@ -68,7 +68,7 @@ jobs:
       - name: Build static Stim library
         shell: bash
         run: |
-          cmake -S crates/stim-cxx/vendor/stim -B build/stim -DCMAKE_BUILD_TYPE=Release -DSIMD_WIDTH=${{ matrix.simd_width }}
+          cmake -S stim-cxx/vendor/stim -B build/stim -DCMAKE_BUILD_TYPE=Release -DSIMD_WIDTH=${{ matrix.simd_width }}
           cmake --build build/stim --config Release --target libstim --parallel
           mkdir -p dist
           cp "${{ matrix.lib_path }}" "dist/${{ matrix.asset }}"
@@ -102,8 +102,8 @@ jobs:
         run: |
           mkdir -p dist
           find release-assets -type f -name 'stim-cxx-libstim-*' ! -name '*.sha256' -exec cp {} dist/ \;
-          find release-assets -type f -name '*.sha256' -exec cat {} \; | sort -k2 > crates/stim-cxx/prebuilt-sha256.txt
-          cp crates/stim-cxx/prebuilt-sha256.txt dist/stim-cxx-prebuilt-sha256.txt
+          find release-assets -type f -name '*.sha256' -exec cat {} \; | sort -k2 > stim-cxx/prebuilt-sha256.txt
+          cp stim-cxx/prebuilt-sha256.txt dist/stim-cxx-prebuilt-sha256.txt
       - name: Smoke test Linux prebuilt asset
         env:
           STIM_RS_PREBUILT_DIR: ${{ github.workspace }}/dist
