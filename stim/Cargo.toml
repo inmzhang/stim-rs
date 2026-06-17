@@ -19,7 +19,7 @@ default-target = "x86_64-unknown-linux-gnu"
 targets = []
 
 [dependencies]
-cxx = "1.0"
+cxx = "1.0.194"
 ndarray = "0.17.2"
 num-complex = "0.4.6"
 stim-cxx = { path = "../stim-cxx", version = "0.4.4" }
