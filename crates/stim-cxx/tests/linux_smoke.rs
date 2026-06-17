@@ -9,7 +9,7 @@ fn linux_smoke_reports_bridge_state_and_handles_batched_input() {
     assert_eq!(metadata.cxx_standard, "c++20");
     assert!(matches!(
         metadata.vendor_stim_mode,
-        "override" | "packaged" | "workspace"
+        "override" | "packaged" | "prebuilt" | "prebuilt-dir" | "workspace"
     ));
 
     let probe = SmokeProbe::new();
