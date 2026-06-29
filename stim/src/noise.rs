@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Circuit, CircuitInstruction, Gate, GateTarget, Result, StimError};
+use crate::{Circuit, CircuitInstruction, CircuitItem, Gate, GateTarget, Result, StimError};
 
 /// A single noise-channel operation to insert before or after a circuit instruction.
 #[derive(Clone, Debug, PartialEq)]
@@ -81,6 +81,31 @@ impl NoiseRule {
 pub trait NoiseModel {
     /// Produces a noisy circuit derived from `circuit` according to the model.
     fn noisy_circuit(&self, circuit: &Circuit) -> Result<Circuit>;
+
+    /// Adds noise to the circuit except for leading and trailing MPP/annotation boundaries.
+    fn noisy_circuit_skipping_mpp_boundaries(&self, circuit: &Circuit) -> Result<Circuit> {
+        let mut start = 0;
+        let mut end = circuit.len();
+        while start < circuit.len() && is_mpp_boundary_item(&circuit[start]) {
+            start += 1;
+        }
+        while end > 0 && is_mpp_boundary_item(&circuit[end - 1]) {
+            end -= 1;
+        }
+        while end < circuit.len() && circuit_item_name(&circuit[end]) != "MPP" {
+            end += 1;
+        }
+        while end > 0 && circuit_item_name(&circuit[end - 1]) == "TICK" {
+            end -= 1;
+        }
+        if end <= start {
+            return Err(StimError::new("end <= start"));
+        }
+
+        Ok(circuit.slice(None, Some(start as isize), 1)?
+            + self.noisy_circuit(&circuit.slice(Some(start as isize), Some(end as isize), 1)?)?
+            + circuit.slice(Some(end as isize), None, 1)?)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -773,6 +798,20 @@ fn measurement_basis_for_instruction(instruction: &CircuitInstruction) -> Option
     }
 }
 
+fn circuit_item_name(item: &CircuitItem) -> &str {
+    match item {
+        CircuitItem::Instruction(instruction) => instruction.name(),
+        CircuitItem::RepeatBlock(block) => block.name(),
+    }
+}
+
+fn is_mpp_boundary_item(item: &CircuitItem) -> bool {
+    matches!(
+        circuit_item_name(item),
+        "TICK" | "OBSERVABLE_INCLUDE" | "DETECTOR" | "MPP" | "QUBIT_COORDS" | "SHIFT_COORDS"
+    )
+}
+
 fn annotation_line_name(line: &str) -> Option<&str> {
     line.split_once([' ', '[', '('])
         .map(|(name, _)| name)
@@ -888,6 +927,40 @@ mod tests {
             noisy.to_string(),
             "MPP(0.25) Z0*Z1\nMPP(0.375) X2*X3\nMPP(0.25) X4*X5*X6\nDEPOLARIZE1(0.125) 0 1 4 5 6"
         );
+    }
+
+    #[test]
+    fn skipping_mpp_boundaries_only_noises_middle_circuit() {
+        let circuit: Circuit = "\
+QUBIT_COORDS(0, 0) 0
+MPP Z0
+TICK
+H 0
+TICK
+MPP X0
+DETECTOR rec[-1]"
+            .parse()
+            .unwrap();
+
+        let noisy = UniformDepolarizing::new(0.001)
+            .unwrap()
+            .noisy_circuit_skipping_mpp_boundaries(&circuit)
+            .unwrap();
+
+        assert_eq!(
+            noisy.to_string(),
+            "QUBIT_COORDS(0, 0) 0\nMPP Z0\nTICK\nH 0\nDEPOLARIZE1(0.001) 0\nTICK\nMPP X0\nDETECTOR rec[-1]"
+        );
+    }
+
+    #[test]
+    fn skipping_mpp_boundaries_rejects_circuit_without_body() {
+        let circuit: Circuit = "MPP Z0\nTICK\nDETECTOR rec[-1]".parse().unwrap();
+        let error = UniformDepolarizing::new(0.001)
+            .unwrap()
+            .noisy_circuit_skipping_mpp_boundaries(&circuit)
+            .unwrap_err();
+        assert_eq!(error.to_string(), "end <= start");
     }
 
     #[test]
