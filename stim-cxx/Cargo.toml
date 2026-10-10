@@ -32,9 +32,9 @@ targets = []
 path = "src/lib.rs"
 
 [dependencies]
-cxx = "1.0.199"
+cxx = "1.0.204"
 
 [build-dependencies]
-cxx-build = "1.0.199"
+cxx-build = "1.0.204"
 
 [dev-dependencies]
